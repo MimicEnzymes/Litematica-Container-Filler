@@ -47,12 +47,12 @@ public class Callbacks implements IHotkeyCallback {
         } else if (key == Hotkeys.TOGGLE_CONTINUOUS.getKeybind()) {
             boolean state = !Configs.CONTINUOUS_FILL.getBooleanValue();
             Configs.CONTINUOUS_FILL.setBooleanValue(state);
-            mc.player.displayClientMessage(Component.translatable(state ? "litematica_container_filler.message.continuous_on" : "litematica_container_filler.message.continuous_off"), true);
+            mc.player.sendOverlayMessage(Component.translatable(state ? "litematica_container_filler.message.continuous_on" : "litematica_container_filler.message.continuous_off"));
             return true;
         } else if (key == Hotkeys.TOGGLE_MODE.getKeybind()) {
             boolean state = !Configs.AREA_MODE.getBooleanValue();
             Configs.AREA_MODE.setBooleanValue(state);
-            mc.player.displayClientMessage(Component.translatable(state ? "litematica_container_filler.message.mode_area" : "litematica_container_filler.message.mode_single"), true);
+            mc.player.sendOverlayMessage(Component.translatable(state ? "litematica_container_filler.message.mode_area" : "litematica_container_filler.message.mode_single"));
             return true;
         }
 
@@ -69,7 +69,7 @@ public class Callbacks implements IHotkeyCallback {
 
                 var schWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
                 if (schWorld == null || !schWorld.getBlockState(pos).hasBlockEntity()) {
-                    mc.player.displayClientMessage(Component.translatable("litematica_container_filler.message.no_requirements"), true);
+                    mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.no_requirements"));
                     return;
                 }
 
@@ -82,14 +82,14 @@ public class Callbacks implements IHotkeyCallback {
                     Map<Integer, ItemStack> taskReq = required == null ? new HashMap<>() : required;
 
                     if (RealContainerCache.isSatisfied(pos, taskReq) && !needsLocking) {
-                        mc.player.displayClientMessage(Component.translatable("litematica_container_filler.message.already_satisfied"), true);
+                        mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.already_satisfied"));
                         return;
                     }
 
                     AutoFillerStateMachine.getInstance().addTask(pos, taskReq);
                 }
             } else {
-                mc.player.displayClientMessage(Component.translatable("litematica_container_filler.message.target_invalid"), true);
+                mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.target_invalid"));
             }
         }
     }

@@ -17,7 +17,7 @@ public class ConfigHandler implements IConfigHandler {
     public void load() {
         File file = new File(FabricLoader.getInstance().getConfigDir().toFile(), CONFIG_FILE_NAME);
         if (file.exists() && file.canRead()) {
-            JsonElement element = JsonUtils.parseJsonFile(file);
+            JsonElement element = JsonUtils.parseJsonFile(file.toPath());
             if (element != null && element.isJsonObject()) {
                 JsonObject root = element.getAsJsonObject();
                 ConfigUtils.readConfigBase(root, "Features", Configs.OPTIONS);
@@ -33,7 +33,7 @@ public class ConfigHandler implements IConfigHandler {
             JsonObject root = new JsonObject();
             ConfigUtils.writeConfigBase(root, "Features", Configs.OPTIONS);
             ConfigUtils.writeConfigBase(root, "Hotkeys", Hotkeys.HOTKEY_LIST);
-            JsonUtils.writeJsonToFile(root, new File(dir, CONFIG_FILE_NAME));
+            JsonUtils.writeJsonToFile(root, new File(dir, CONFIG_FILE_NAME).toPath());
         }
 
         InputHandler.getInstance().addKeysToMap(InputEventHandler.getKeybindManager());

@@ -18,7 +18,7 @@ public class AreaScanner {
 
         var schematicWorld = SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld == null) {
-            if (!isSilentPrinter) mc.player.displayClientMessage(Component.translatable("litematica_container_filler.message.no_schematic_world"), true);
+            if (!isSilentPrinter) mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.no_schematic_world"));
             return;
         }
 
@@ -65,9 +65,9 @@ public class AreaScanner {
 
         if (!isSilentPrinter) {
             if (count > 0) {
-                mc.player.displayClientMessage(Component.translatable("litematica_container_filler.message.scan_start", count), true);
+                mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.scan_start", count));
             } else {
-                mc.player.displayClientMessage(Component.translatable("litematica_container_filler.message.no_requirements"), true);
+                mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.no_requirements"));
             }
         }
     }

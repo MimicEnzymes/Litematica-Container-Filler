@@ -86,7 +86,7 @@ public class HighlightRenderer {
             Minecraft client = Minecraft.getInstance();
             if (client != null && client.player != null && client.level != null) {
                 if (client.level.getGameTime() % 60 == 0) {
-                    client.player.displayClientMessage(net.minecraft.network.chat.Component.literal("§c[容器填充机] 渲染错误: " + e.getMessage()), false);
+                    client.player.sendOverlayMessage(net.minecraft.network.chat.Component.literal("§c[容器填充机] 渲染错误: " + e.getMessage()));
                 }
             }
             e.printStackTrace();

@@ -18,7 +18,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.CrafterMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.BlockItem;
@@ -354,7 +354,7 @@ public class AutoFillerStateMachine {
             int count = 0;
             for (Item item : missingTypes) {
                 if (count > 0) sb.append(", ");
-                sb.append(item.getName().getString());
+                sb.append(item.getDescriptionId());
                 count++;
                 if (count >= 3 && missingTypes.size() > 3) {
                     sb.append(Component.translatable("litematica_container_filler.message.etc").getString());
@@ -400,7 +400,7 @@ public class AutoFillerStateMachine {
             ItemStack s = client.player.getInventory().getItem(i);
             if (s.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) {
                 ItemContainerContents c = s.get(DataComponents.CONTAINER);
-                long size = c == null ? 0 : c.stream().filter(stack -> !stack.isEmpty()).count();
+                long size = c == null ? 0 : c.allItemsCopyStream().filter(stack -> !stack.isEmpty()).count();
                 if (size < 27) {
                     targetShulker = i;
                     break;
@@ -780,7 +780,7 @@ public class AutoFillerStateMachine {
             stashedItemCounts.put(stashedItem, stashedItemCounts.getOrDefault(stashedItem, 0) + stackToStash.getCount());
         }
 
-        client.gameMode.handleInventoryMouseClick(h.containerId, uiSlot, 0, ClickType.QUICK_MOVE, client.player);
+        client.gameMode.handleContainerInput(h.containerId, uiSlot, 0, ContainerInput.QUICK_MOVE, client.player);
         sendFeedback(client, Component.translatable("litematica_container_filler.message.stashing_items").getString(), true);
 
         actionQueue.add(() -> {
@@ -808,7 +808,7 @@ public class AutoFillerStateMachine {
                 if (s.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) {
                     ItemContainerContents c = s.get(DataComponents.CONTAINER);
                     if (c != null) {
-                        for (ItemStack inner : c.stream().toList()) {
+                        for (ItemStack inner : c.allItemsCopyStream().toList()) {
                             if (ItemMatcher.isSameItem(inner, req)) {
                                 slots.add(i);
                                 amountToFind -= inner.getCount();
@@ -899,7 +899,7 @@ public class AutoFillerStateMachine {
                 if (amountToTake <= 0) continue;
 
                 if (amountToTake == amountAvailable) {
-                    client.gameMode.handleInventoryMouseClick(h.containerId, i, 0, ClickType.QUICK_MOVE, client.player);
+                    client.gameMode.handleContainerInput(h.containerId, i, 0, ContainerInput.QUICK_MOVE, client.player);
                 } else {
                     int emptySlot = -1;
                     for (int j = h.slots.size() - 36; j < h.slots.size(); j++) {
@@ -909,13 +909,13 @@ public class AutoFillerStateMachine {
                     }
                     if (emptySlot != -1) {
                         usedEmptySlots.add(emptySlot);
-                        client.gameMode.handleInventoryMouseClick(h.containerId, i, 0, ClickType.PICKUP, client.player);
+                        client.gameMode.handleContainerInput(h.containerId, i, 0, ContainerInput.PICKUP, client.player);
                         for (int k = 0; k < amountToTake; k++) {
-                            client.gameMode.handleInventoryMouseClick(h.containerId, emptySlot, 1, ClickType.PICKUP, client.player);
+                            client.gameMode.handleContainerInput(h.containerId, emptySlot, 1, ContainerInput.PICKUP, client.player);
                         }
-                        client.gameMode.handleInventoryMouseClick(h.containerId, i, 0, ClickType.PICKUP, client.player);
+                        client.gameMode.handleContainerInput(h.containerId, i, 0, ContainerInput.PICKUP, client.player);
                     } else {
-                        client.gameMode.handleInventoryMouseClick(h.containerId, i, 0, ClickType.QUICK_MOVE, client.player);
+                        client.gameMode.handleContainerInput(h.containerId, i, 0, ContainerInput.QUICK_MOVE, client.player);
                     }
                 }
 
@@ -998,8 +998,8 @@ public class AutoFillerStateMachine {
             for (int i = 0; i < 9; i++) {
                 boolean shouldBeDisabled = targetDisabled != null && targetDisabled.contains(i);
                 if (shouldBeDisabled != crafterHandler.isSlotDisabled(i)) {
-                    if (crafterHandler.getSlot(i).hasItem()) simulateSlotClick(handledScreen, crafterHandler.getSlot(i), i, 0, ClickType.QUICK_MOVE);
-                    else simulateSlotClick(handledScreen, crafterHandler.getSlot(i), i, 0, ClickType.PICKUP);
+                    if (crafterHandler.getSlot(i).hasItem()) simulateSlotClick(handledScreen, crafterHandler.getSlot(i), i, 0, ContainerInput.QUICK_MOVE);
+                    else simulateSlotClick(handledScreen, crafterHandler.getSlot(i), i, 0, ContainerInput.PICKUP);
                     toggledInThisTick = true;
                     if (delay > 0) break;
                 }
@@ -1032,7 +1032,7 @@ public class AutoFillerStateMachine {
                     triggerStashOrAbort(client);
                     return;
                 }
-                client.gameMode.handleInventoryMouseClick(syncId, uiSlot, 0, ClickType.QUICK_MOVE, client.player);
+                client.gameMode.handleContainerInput(syncId, uiSlot, 0, ContainerInput.QUICK_MOVE, client.player);
                 movedAny = true;
                 if (delay > 0) break;
                 continue;
@@ -1112,7 +1112,7 @@ public class AutoFillerStateMachine {
         for (int i = h.slots.size() - 36; i < h.slots.size(); i++) {
             ItemStack s = h.slots.get(i).getItem();
             if (!s.isEmpty() && borrowedItems.contains(s.getItem())) {
-                client.gameMode.handleInventoryMouseClick(h.containerId, i, 0, ClickType.QUICK_MOVE, client.player);
+                client.gameMode.handleContainerInput(h.containerId, i, 0, ContainerInput.QUICK_MOVE, client.player);
                 movedAny = true;
             }
         }
@@ -1125,7 +1125,7 @@ public class AutoFillerStateMachine {
 
                 int amountInSlot = s.getCount();
                 if (amountInSlot <= neededToRetrieve) {
-                    client.gameMode.handleInventoryMouseClick(h.containerId, i, 0, ClickType.QUICK_MOVE, client.player);
+                    client.gameMode.handleContainerInput(h.containerId, i, 0, ContainerInput.QUICK_MOVE, client.player);
                     stashedItemCounts.put(s.getItem(), neededToRetrieve - amountInSlot);
                 } else {
                     int emptySlot = -1;
@@ -1135,14 +1135,14 @@ public class AutoFillerStateMachine {
                         }
                     }
                     if (emptySlot != -1) {
-                        client.gameMode.handleInventoryMouseClick(h.containerId, i, 0, ClickType.PICKUP, client.player);
+                        client.gameMode.handleContainerInput(h.containerId, i, 0, ContainerInput.PICKUP, client.player);
                         for (int k = 0; k < neededToRetrieve; k++) {
-                            client.gameMode.handleInventoryMouseClick(h.containerId, emptySlot, 1, ClickType.PICKUP, client.player);
+                            client.gameMode.handleContainerInput(h.containerId, emptySlot, 1, ContainerInput.PICKUP, client.player);
                         }
-                        client.gameMode.handleInventoryMouseClick(h.containerId, i, 0, ClickType.PICKUP, client.player);
+                        client.gameMode.handleContainerInput(h.containerId, i, 0, ContainerInput.PICKUP, client.player);
                         stashedItemCounts.put(s.getItem(), 0);
                     } else {
-                        client.gameMode.handleInventoryMouseClick(h.containerId, i, 0, ClickType.QUICK_MOVE, client.player);
+                        client.gameMode.handleContainerInput(h.containerId, i, 0, ContainerInput.QUICK_MOVE, client.player);
                         stashedItemCounts.put(s.getItem(), neededToRetrieve - amountInSlot);
                     }
                 }
@@ -1200,7 +1200,7 @@ public class AutoFillerStateMachine {
     }
 
     private void sendFeedback(Minecraft client, String text, boolean isActionBar) {
-        if (client.player != null) client.player.displayClientMessage(Component.literal(text), isActionBar);
+        if (client.player != null) client.player.sendOverlayMessage(Component.literal(text));
     }
 
     private boolean hasItemAnywhere(Minecraft client, ItemStack target) {
@@ -1210,7 +1210,7 @@ public class AutoFillerStateMachine {
             if (s.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) {
                 ItemContainerContents c = s.get(DataComponents.CONTAINER);
                 if (c != null) {
-                    for (ItemStack inner : c.stream().toList()) {
+                    for (ItemStack inner : c.allItemsCopyStream().toList()) {
                         if (ItemMatcher.isSameItem(inner, target)) return true;
                     }
                 }
@@ -1236,7 +1236,7 @@ public class AutoFillerStateMachine {
     private boolean tryPlaceCursorItem(Minecraft client, AbstractContainerMenu handler) {
         int empty = findEmptyPlayerSlot(client);
         if (empty != -1) {
-            client.gameMode.handleInventoryMouseClick(handler.containerId, currentMapper.getUiSlotForPlayer(empty), 0, ClickType.PICKUP, client.player);
+            client.gameMode.handleContainerInput(handler.containerId, currentMapper.getUiSlotForPlayer(empty), 0, ContainerInput.PICKUP, client.player);
             return true;
         }
         return false;
@@ -1255,29 +1255,29 @@ public class AutoFillerStateMachine {
         int amountToMove = Math.min(needed, countInSlot);
 
         if (amountToMove == countInSlot) {
-            client.gameMode.handleInventoryMouseClick(syncId, uiPlayerSlot, 0, ClickType.PICKUP, client.player);
-            client.gameMode.handleInventoryMouseClick(syncId, containerSlot, 0, ClickType.PICKUP, client.player);
-            client.gameMode.handleInventoryMouseClick(syncId, uiPlayerSlot, 0, ClickType.PICKUP, client.player);
+            client.gameMode.handleContainerInput(syncId, uiPlayerSlot, 0, ContainerInput.PICKUP, client.player);
+            client.gameMode.handleContainerInput(syncId, containerSlot, 0, ContainerInput.PICKUP, client.player);
+            client.gameMode.handleContainerInput(syncId, uiPlayerSlot, 0, ContainerInput.PICKUP, client.player);
         } else {
-            client.gameMode.handleInventoryMouseClick(syncId, uiPlayerSlot, 0, ClickType.PICKUP, client.player);
+            client.gameMode.handleContainerInput(syncId, uiPlayerSlot, 0, ContainerInput.PICKUP, client.player);
             for (int i = 0; i < amountToMove; i++) {
-                client.gameMode.handleInventoryMouseClick(syncId, containerSlot, 1, ClickType.PICKUP, client.player);
+                client.gameMode.handleContainerInput(syncId, containerSlot, 1, ContainerInput.PICKUP, client.player);
             }
-            client.gameMode.handleInventoryMouseClick(syncId, uiPlayerSlot, 0, ClickType.PICKUP, client.player);
+            client.gameMode.handleContainerInput(syncId, uiPlayerSlot, 0, ContainerInput.PICKUP, client.player);
         }
     }
 
     public BlockPos getCurrentTaskPos() { return currentTask != null ? currentTask.targetPos : null; }
     public boolean isIdle() { return this.currentTask == null && this.actionQueue.isEmpty(); }
 
-    private void simulateSlotClick(AbstractContainerScreen<?> screen, Slot slot, int slotId, int button, ClickType actionType) {
+    private void simulateSlotClick(AbstractContainerScreen<?> screen, Slot slot, int slotId, int button, ContainerInput actionType) {
         try {
             java.lang.reflect.Method targetMethod = null;
             Class<?> currClass = screen.getClass();
             while (currClass != null && targetMethod == null) {
                 for (java.lang.reflect.Method m : currClass.getDeclaredMethods()) {
                     Class<?>[] params = m.getParameterTypes();
-                    if (params.length == 4 && params[0] == Slot.class && params[1] == int.class && params[2] == int.class && params[3] == ClickType.class) {
+                    if (params.length == 4 && params[0] == Slot.class && params[1] == int.class && params[2] == int.class && params[3] == ContainerInput.class) {
                         targetMethod = m; break;
                     }
                 }
@@ -1287,7 +1287,7 @@ public class AutoFillerStateMachine {
                 targetMethod.setAccessible(true);
                 targetMethod.invoke(screen, slot, slotId, button, actionType);
             } else {
-                Minecraft.getInstance().gameMode.handleInventoryMouseClick(screen.getMenu().containerId, slotId, button, actionType, Minecraft.getInstance().player);
+                Minecraft.getInstance().gameMode.handleContainerInput(screen.getMenu().containerId, slotId, button, actionType, Minecraft.getInstance().player);
             }
         } catch (Exception e) { e.printStackTrace(); }
     }

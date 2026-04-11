@@ -19,8 +19,8 @@ public class ServuxSyncHandler {
     public static void registerPayloads() {
         if (payloadsRegistered) return;
         try {
-            PayloadTypeRegistry.playC2S().register(ServuxRequestPayload.ID, ServuxRequestPayload.CODEC);
-            PayloadTypeRegistry.playS2C().register(ServuxResponsePayload.ID, ServuxResponsePayload.CODEC);
+            PayloadTypeRegistry.serverboundPlay().register(ServuxRequestPayload.ID, ServuxRequestPayload.CODEC);
+            PayloadTypeRegistry.clientboundPlay().register(ServuxResponsePayload.ID, ServuxResponsePayload.CODEC);
 
             ClientPlayNetworking.registerGlobalReceiver(ServuxResponsePayload.ID, (payload, context) -> {
                 context.client().execute(() -> {

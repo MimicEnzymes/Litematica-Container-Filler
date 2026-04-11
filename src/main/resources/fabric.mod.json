@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "litematica_container_filler",
-  "version": "0.7",
+  "version": "0.9",
   "name": "投影容器填充机",
   "description": "自动投影容器填充模组",
   "authors": ["MimicEnzymes"],
@@ -22,7 +22,7 @@
   ],
   "depends": {
     "fabricloader": ">=0.15.11",
-    "minecraft": "~1.21.11",
+    "minecraft": ">=26.1 <=26.1.2",
     "java": ">=21",
     "malilib": "*",
     "litematica": "*"
