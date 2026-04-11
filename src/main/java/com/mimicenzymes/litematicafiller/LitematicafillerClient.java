@@ -15,11 +15,10 @@ import fi.dy.masa.malilib.interfaces.IInitializationHandler;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -37,7 +36,7 @@ public class LitematicafillerClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (!isGuiAutoRegistered) {
-                boolean isTitleScreen = client.currentScreen != null && client.currentScreen.getClass().getSimpleName().equals("TitleScreen");
+                boolean isTitleScreen = client.screen != null && client.screen.getClass().getSimpleName().equals("TitleScreen");
                 boolean isInWorld = client.player != null;
                 if (isTitleScreen || isInWorld) {
                     try { new GuiConfigs(null); } catch (Exception e) {}
@@ -49,7 +48,7 @@ public class LitematicafillerClient implements ClientModInitializer {
                 return;
             }
 
-            if (client.world != null) {
+            if (client.level != null) {
                 AutoFillerStateMachine.getInstance().tick(client);
                 LitematicaChangeListener.tick(client);
                 RealContainerCache.tick(client);
@@ -64,8 +63,8 @@ public class LitematicafillerClient implements ClientModInitializer {
                         if (Configs.AREA_MODE.getBooleanValue()) {
                             AreaScanner.executeScan(client, true);
                         } else {
-                            if (client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.BLOCK) {
-                                BlockHitResult bhr = (BlockHitResult) client.crosshairTarget;
+                            if (client.hitResult != null && client.hitResult.getType() == HitResult.Type.BLOCK) {
+                                BlockHitResult bhr = (BlockHitResult) client.hitResult;
                                 BlockPos pos = bhr.getBlockPos();
                                 long now = System.currentTimeMillis();
 
@@ -73,10 +72,10 @@ public class LitematicafillerClient implements ClientModInitializer {
                                     var schWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
 
                                     if (schWorld != null && schWorld.getBlockState(pos).hasBlockEntity()) {
-                                        Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(pos, client.world.getRegistryManager());
+                                        Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(pos, client.level.registryAccess());
 
                                         boolean isSatisfied = RealContainerCache.isSatisfied(pos, required);
-                                        boolean isCrafter = client.world.getBlockState(pos).getBlock() instanceof net.minecraft.block.CrafterBlock;
+                                        boolean isCrafter = client.level.getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.CrafterBlock;
                                         boolean needsLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, client);
 
                                         if (!isSatisfied || needsLocking) {

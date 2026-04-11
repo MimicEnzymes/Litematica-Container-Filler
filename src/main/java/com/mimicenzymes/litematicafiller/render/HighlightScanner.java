@@ -4,13 +4,12 @@ import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.core.ItemMatcher;
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
 
 public class HighlightScanner {
     private static final Map<BlockPos, HighlightState> HIGHLIGHT_MAP = new ConcurrentHashMap<>();
@@ -25,7 +24,7 @@ public class HighlightScanner {
         return HIGHLIGHT_MAP;
     }
 
-    public static void tick(MinecraftClient client) {
+    public static void tick(Minecraft client) {
         if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
             if (!HIGHLIGHT_MAP.isEmpty()) HIGHLIGHT_MAP.clear();
             return;
@@ -52,8 +51,8 @@ public class HighlightScanner {
             BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(schematicWorld, pos, state);
             if (halves != null) checkPos = halves[0];
 
-            Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(checkPos, client.world.getRegistryManager());
-            boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
+            Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(checkPos, client.level.registryAccess());
+            boolean isCrafter = state.getBlock() instanceof net.minecraft.world.level.block.CrafterBlock;
             boolean hasJob = (required != null && !required.isEmpty()) || isCrafter;
 
             if (!hasJob) {
@@ -80,7 +79,7 @@ public class HighlightScanner {
             }
             NEXT_HIGHLIGHT_MAP.clear();
 
-            currentCenter = client.player.getBlockPos();
+            currentCenter = client.player.blockPosition();
             currentRadius = Configs.RENDER_RADIUS.getIntegerValue();
             scanIndex = 0;
             side = 2 * currentRadius + 1;
@@ -103,7 +102,7 @@ public class HighlightScanner {
                 break;
             }
 
-            BlockPos pos = currentCenter.add(x, y, z);
+            BlockPos pos = currentCenter.offset(x, y, z);
 
             if (syncLayer && !fi.dy.masa.litematica.data.DataManager.getRenderLayerRange().isPositionWithinRange(pos)) continue;
 
@@ -114,8 +113,8 @@ public class HighlightScanner {
             BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(schematicWorld, pos, state);
             if (halves != null) checkPos = halves[0];
 
-            Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(checkPos, client.world.getRegistryManager());
-            boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
+            Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(checkPos, client.level.registryAccess());
+            boolean isCrafter = state.getBlock() instanceof net.minecraft.world.level.block.CrafterBlock;
             boolean hasJob = (required != null && !required.isEmpty()) || isCrafter;
 
             if (!hasJob) continue;
@@ -130,15 +129,15 @@ public class HighlightScanner {
                 type = evaluateState(cached, required, isCrafter, checkPos, client);
             }
 
-            NEXT_HIGHLIGHT_MAP.put(pos.toImmutable(), type);
+            NEXT_HIGHLIGHT_MAP.put(pos.immutable(), type);
 
             if (!(hideCompleted && type == HighlightState.SATISFIED)) {
-                HIGHLIGHT_MAP.put(pos.toImmutable(), type);
+                HIGHLIGHT_MAP.put(pos.immutable(), type);
             }
         }
     }
 
-    private static HighlightState evaluateState(Map<Integer, ItemStack> realItems, Map<Integer, ItemStack> required, boolean isCrafter, BlockPos pos, MinecraftClient client) {
+    private static HighlightState evaluateState(Map<Integer, ItemStack> realItems, Map<Integer, ItemStack> required, boolean isCrafter, BlockPos pos, Minecraft client) {
         if (realItems == null) return HighlightState.UNKNOWN;
 
         int maxSlot = isCrafter ? 9 : 54;

@@ -5,10 +5,9 @@ import fi.dy.masa.malilib.render.MaLiLibPipelines;
 import fi.dy.masa.malilib.render.RenderContext;
 import fi.dy.masa.malilib.render.RenderUtils;
 import fi.dy.masa.malilib.util.data.Color4f;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Map;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 
 public class HighlightRenderer {
     private static final HighlightRenderer INSTANCE = new HighlightRenderer();
@@ -31,8 +30,8 @@ public class HighlightRenderer {
             var buffer = ctx.getBuilder();
             if (buffer == null) return;
 
-            MinecraftClient client = MinecraftClient.getInstance();
-            float lineWidth = client != null ? Math.max(2.5F, (float)client.getWindow().getFramebufferWidth() / 1920.0F * 2.5F) : 2.0f;
+            Minecraft client = Minecraft.getInstance();
+            float lineWidth = client != null ? Math.max(2.5F, (float)client.getWindow().getWidth() / 1920.0F * 2.5F) : 2.0f;
 
             for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
                 Color4f c = getColor(entry.getValue());
@@ -84,10 +83,10 @@ public class HighlightRenderer {
             ctx.reset();
 
         } catch (Throwable e) {
-            MinecraftClient client = MinecraftClient.getInstance();
-            if (client != null && client.player != null && client.world != null) {
-                if (client.world.getTime() % 60 == 0) {
-                    client.player.sendMessage(net.minecraft.text.Text.literal("§c[容器填充机] 渲染错误: " + e.getMessage()), false);
+            Minecraft client = Minecraft.getInstance();
+            if (client != null && client.player != null && client.level != null) {
+                if (client.level.getGameTime() % 60 == 0) {
+                    client.player.displayClientMessage(net.minecraft.network.chat.Component.literal("§c[容器填充机] 渲染错误: " + e.getMessage()), false);
                 }
             }
             e.printStackTrace();

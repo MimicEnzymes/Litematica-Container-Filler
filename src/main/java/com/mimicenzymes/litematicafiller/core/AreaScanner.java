@@ -2,27 +2,27 @@ package com.mimicenzymes.litematicafiller.core;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.text.Text;
 import java.util.HashMap;
 import java.util.Map;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
 
 public class AreaScanner {
     private static final Map<BlockPos, Long> ATTEMPT_COOLDOWNS = new HashMap<>();
 
-    public static void executeScan(MinecraftClient mc, boolean isSilentPrinter) {
-        if (mc.player == null || mc.world == null) return;
+    public static void executeScan(Minecraft mc, boolean isSilentPrinter) {
+        if (mc.player == null || mc.level == null) return;
 
         var schematicWorld = SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld == null) {
-            if (!isSilentPrinter) mc.player.sendMessage(Text.translatable("litematica_container_filler.message.no_schematic_world"), true);
+            if (!isSilentPrinter) mc.player.displayClientMessage(Component.translatable("litematica_container_filler.message.no_schematic_world"), true);
             return;
         }
 
-        BlockPos center = mc.player.getBlockPos();
+        BlockPos center = mc.player.blockPosition();
         int r = Configs.FILL_RADIUS.getIntegerValue();
         boolean syncLayer = Configs.SYNC_LITE_LAYER.getBooleanValue();
         int count = 0;
@@ -31,7 +31,7 @@ public class AreaScanner {
         for (int x = -r; x <= r; x++) {
             for (int y = -r; y <= r; y++) {
                 for (int z = -r; z <= r; z++) {
-                    BlockPos pos = center.add(x, y, z);
+                    BlockPos pos = center.offset(x, y, z);
 
                     if (syncLayer && !fi.dy.masa.litematica.data.DataManager.getRenderLayerRange().isPositionWithinRange(pos)) continue;
 
@@ -48,9 +48,9 @@ public class AreaScanner {
                         continue;
                     }
 
-                    Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(pos, mc.world.getRegistryManager());
+                    Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(pos, mc.level.registryAccess());
 
-                    boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
+                    boolean isCrafter = state.getBlock() instanceof net.minecraft.world.level.block.CrafterBlock;
                     boolean needsLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, mc);
                     boolean hasItems = required != null && !required.isEmpty() && !RealContainerCache.isSatisfied(pos, required);
 
@@ -65,9 +65,9 @@ public class AreaScanner {
 
         if (!isSilentPrinter) {
             if (count > 0) {
-                mc.player.sendMessage(Text.translatable("litematica_container_filler.message.scan_start", count), true);
+                mc.player.displayClientMessage(Component.translatable("litematica_container_filler.message.scan_start", count), true);
             } else {
-                mc.player.sendMessage(Text.translatable("litematica_container_filler.message.no_requirements"), true);
+                mc.player.displayClientMessage(Component.translatable("litematica_container_filler.message.no_requirements"), true);
             }
         }
     }

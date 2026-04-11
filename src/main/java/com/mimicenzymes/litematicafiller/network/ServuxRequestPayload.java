@@ -1,16 +1,16 @@
 package com.mimicenzymes.litematicafiller.network;
 
-import net.minecraft.network.PacketByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
-public record ServuxRequestPayload(int action, BlockPos pos) implements CustomPayload {
+public record ServuxRequestPayload(int action, BlockPos pos) implements CustomPacketPayload {
 
-    public static final CustomPayload.Id<ServuxRequestPayload> ID = new CustomPayload.Id<>(Identifier.of("servux", "hud_data_request"));
+    public static final CustomPacketPayload.Type<ServuxRequestPayload> ID = new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("servux", "hud_data_request"));
 
-    public static final PacketCodec<PacketByteBuf, ServuxRequestPayload> CODEC = PacketCodec.of(
+    public static final StreamCodec<FriendlyByteBuf, ServuxRequestPayload> CODEC = StreamCodec.ofMember(
             (value, buf) -> {
                 buf.writeVarInt(value.action());
                 buf.writeBlockPos(value.pos());
@@ -19,7 +19,7 @@ public record ServuxRequestPayload(int action, BlockPos pos) implements CustomPa
     );
 
     @Override
-    public CustomPayload.Id<? extends CustomPayload> getId() {
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 }

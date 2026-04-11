@@ -1,10 +1,9 @@
 package com.mimicenzymes.litematicafiller.core;
 
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.HashMap;
 import java.util.Map;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.ItemStack;
 
 public class LitematicaCache
 {

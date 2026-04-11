@@ -4,9 +4,9 @@ import com.mimicenzymes.litematicafiller.LitematicafillerClient;
 import fi.dy.masa.malilib.gui.GuiConfigsBase;
 import fi.dy.masa.malilib.gui.button.ButtonGeneric;
 import fi.dy.masa.malilib.hotkeys.IHotkey;
-import net.minecraft.client.gui.screen.Screen;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.client.gui.screens.Screen;
 
 public class GuiConfigs extends GuiConfigsBase {
     private ConfigGuiTab tab = ConfigGuiTab.FEATURE;

@@ -2,9 +2,8 @@ package com.mimicenzymes.litematicafiller.network;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.ItemStack;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,7 +25,7 @@ public class ServuxSyncHandler {
             ClientPlayNetworking.registerGlobalReceiver(ServuxResponsePayload.ID, (payload, context) -> {
                 context.client().execute(() -> {
                     if (payload.pos() != null && payload.items() != null) {
-                        INDEPENDENT_CACHE.put(payload.pos().toImmutable(), payload.items());
+                        INDEPENDENT_CACHE.put(payload.pos().immutable(), payload.items());
                     }
                 });
             });

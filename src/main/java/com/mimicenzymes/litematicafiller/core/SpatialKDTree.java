@@ -1,9 +1,8 @@
 package com.mimicenzymes.litematicafiller.core;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.core.BlockPos;
 
 public class SpatialKDTree
 {

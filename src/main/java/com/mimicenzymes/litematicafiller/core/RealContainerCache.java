@@ -2,20 +2,19 @@ package com.mimicenzymes.litematicafiller.core;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.network.ServuxSyncHandler;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtList;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtOps;
-import net.minecraft.registry.RegistryWrapper;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.nbt.Tag;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -32,25 +31,25 @@ public class RealContainerCache {
     private static final Map<BlockPos, Long> LAST_REQUEST_TIME = new ConcurrentHashMap<>();
     private static int transactionCounter = 10000;
 
-    public static void tick(MinecraftClient client) {
-        if (client.world == null || client.player == null) return;
+    public static void tick(Minecraft client) {
+        if (client.level == null || client.player == null) return;
 
-        if (client.currentScreen == null && client.crosshairTarget instanceof BlockHitResult bhr) {
+        if (client.screen == null && client.hitResult instanceof BlockHitResult bhr) {
             lastLookedPos = bhr.getBlockPos();
         }
 
-        if (client.currentScreen instanceof HandledScreen<?> screen) {
-            updateFromHandler(client, screen.getScreenHandler());
+        if (client.screen instanceof AbstractContainerScreen<?> screen) {
+            updateFromHandler(client, screen.getMenu());
         }
     }
 
-    public static void updateFromScreen(MinecraftClient client, HandledScreen<?> screen) {
+    public static void updateFromScreen(Minecraft client, AbstractContainerScreen<?> screen) {
         if (screen != null) {
-            updateFromHandler(client, screen.getScreenHandler());
+            updateFromHandler(client, screen.getMenu());
         }
     }
 
-    public static void updateFromHandler(MinecraftClient client, ScreenHandler handler) {
+    public static void updateFromHandler(Minecraft client, AbstractContainerMenu handler) {
         BlockPos pos = AutoFillerStateMachine.getInstance().getCurrentTaskPos();
         if (pos == null) pos = lastLookedPos;
         if (pos == null || handler == null) return;
@@ -58,30 +57,30 @@ public class RealContainerCache {
         Map<Integer, ItemStack> items = new HashMap<>();
 
         for (Slot slot : handler.slots) {
-            if (slot.inventory != null && slot.inventory != client.player.getInventory()) {
-                if (handler instanceof net.minecraft.screen.CrafterScreenHandler && slot.getIndex() == 9) {
+            if (slot.container != null && slot.container != client.player.getInventory()) {
+                if (handler instanceof net.minecraft.world.inventory.CrafterMenu && slot.getContainerSlot() == 9) {
                     continue;
                 }
-                if (!slot.getStack().isEmpty()) items.put(slot.getIndex(), slot.getStack().copy());
+                if (!slot.getItem().isEmpty()) items.put(slot.getContainerSlot(), slot.getItem().copy());
             }
         }
 
-        BlockState state = client.world.getBlockState(pos);
-        BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.world, pos, state);
+        BlockState state = client.level.getBlockState(pos);
+        BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.level, pos, state);
 
         if (halves != null) {
-            CACHE.put(halves[0].toImmutable(), items);
-            CACHE.put(halves[1].toImmutable(), items);
+            CACHE.put(halves[0].immutable(), items);
+            CACHE.put(halves[1].immutable(), items);
         } else {
-            CACHE.put(pos.toImmutable(), items);
+            CACHE.put(pos.immutable(), items);
         }
 
-        if (handler instanceof net.minecraft.screen.CrafterScreenHandler crafterHandler) {
+        if (handler instanceof net.minecraft.world.inventory.CrafterMenu crafterHandler) {
             Set<Integer> locks = new HashSet<>();
             for (int i = 0; i < 9; i++) {
                 if (crafterHandler.isSlotDisabled(i)) locks.add(i);
             }
-            LOCK_CACHE.put(pos.toImmutable(), locks);
+            LOCK_CACHE.put(pos.immutable(), locks);
         }
     }
 
@@ -143,38 +142,38 @@ public class RealContainerCache {
         }
 
         if (!Configs.ENABLE_OP_NBT_QUERY.getBooleanValue()) return;
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player == null || client.getNetworkHandler() == null) return;
+        Minecraft client = Minecraft.getInstance();
+        if (client.player == null || client.getConnection() == null) return;
 
         if (isDouble) {
             int id1 = transactionCounter++;
             PENDING_NBT_REQUESTS.put(id1, halves[0]);
-            client.getNetworkHandler().sendPacket(new net.minecraft.network.packet.c2s.play.QueryBlockNbtC2SPacket(id1, halves[0]));
+            client.getConnection().send(new net.minecraft.network.protocol.game.ServerboundBlockEntityTagQueryPacket(id1, halves[0]));
 
             int id2 = transactionCounter++;
             PENDING_NBT_REQUESTS.put(id2, halves[1]);
-            client.getNetworkHandler().sendPacket(new net.minecraft.network.packet.c2s.play.QueryBlockNbtC2SPacket(id2, halves[1]));
+            client.getConnection().send(new net.minecraft.network.protocol.game.ServerboundBlockEntityTagQueryPacket(id2, halves[1]));
             return;
         }
 
         int id = transactionCounter++;
         PENDING_NBT_REQUESTS.put(id, pos);
-        client.getNetworkHandler().sendPacket(new net.minecraft.network.packet.c2s.play.QueryBlockNbtC2SPacket(id, pos));
+        client.getConnection().send(new net.minecraft.network.protocol.game.ServerboundBlockEntityTagQueryPacket(id, pos));
     }
 
-    public static void handleNbtResponse(int transactionId, NbtCompound nbt) {
+    public static void handleNbtResponse(int transactionId, CompoundTag nbt) {
         BlockPos pos = PENDING_NBT_REQUESTS.remove(transactionId);
         if (pos != null && nbt != null) {
-            MinecraftClient client = MinecraftClient.getInstance();
-            if (client.world != null) {
+            Minecraft client = Minecraft.getInstance();
+            if (client.level != null) {
                 Map<Integer, ItemStack> items = new HashMap<>();
                 if (nbt.contains("Items")) {
-                    items = parseNbtInventory(nbt, client.world.getRegistryManager());
+                    items = parseNbtInventory(nbt, client.level.registryAccess());
                 }
-                NBT_QUERY_CACHE.put(pos.toImmutable(), items);
+                NBT_QUERY_CACHE.put(pos.immutable(), items);
 
                 if (nbt.contains("disabled_slots")) {
-                    LOCK_CACHE.put(pos.toImmutable(), parseDisabledSlots(nbt));
+                    LOCK_CACHE.put(pos.immutable(), parseDisabledSlots(nbt));
                 }
             }
         }
@@ -184,15 +183,15 @@ public class RealContainerCache {
 
     public static void putLock(BlockPos pos, Set<Integer> locks) {
         if (pos == null || locks == null) return;
-        LOCK_CACHE.put(pos.toImmutable(), locks);
+        LOCK_CACHE.put(pos.immutable(), locks);
     }
 
     public static boolean isSatisfied(BlockPos pos, Map<Integer, ItemStack> required) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.world == null) return false;
+        Minecraft client = Minecraft.getInstance();
+        if (client.level == null) return false;
 
-        BlockState state = client.world.getBlockState(pos);
-        boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
+        BlockState state = client.level.getBlockState(pos);
+        boolean isCrafter = state.getBlock() instanceof net.minecraft.world.level.block.CrafterBlock;
         if (isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, client)) {
             return false;
         }
@@ -219,13 +218,13 @@ public class RealContainerCache {
         return true;
     }
 
-    public static Map<Integer, ItemStack> parseNbtInventory(NbtCompound nbt, RegistryWrapper.WrapperLookup registries) {
+    public static Map<Integer, ItemStack> parseNbtInventory(CompoundTag nbt, HolderLookup.Provider registries) {
         Map<Integer, ItemStack> items = new HashMap<>();
-        NbtElement itemsElem = nbt.get("Items");
-        if (itemsElem instanceof NbtList list) {
+        Tag itemsElem = nbt.get("Items");
+        if (itemsElem instanceof ListTag list) {
             for (int i = 0; i < list.size(); i++) {
-                NbtElement itemElem = list.get(i);
-                if (itemElem instanceof NbtCompound itemTag) {
+                Tag itemElem = list.get(i);
+                if (itemElem instanceof CompoundTag itemTag) {
                     int slot = 0;
                     if (itemTag.contains("Slot")) {
                         try { slot = Integer.parseInt(itemTag.get("Slot").toString().replaceAll("[^0-9]", "")) & 255; } catch (Exception ignored) {}
@@ -233,15 +232,15 @@ public class RealContainerCache {
 
                     ItemStack stack = ItemStack.EMPTY;
                     try {
-                        stack = ItemStack.OPTIONAL_CODEC.parse(registries.getOps(NbtOps.INSTANCE), itemTag).resultOrPartial().orElse(ItemStack.EMPTY);
+                        stack = ItemStack.OPTIONAL_CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE), itemTag).resultOrPartial().orElse(ItemStack.EMPTY);
                     } catch (Exception ignored) {}
 
                     if (stack.isEmpty() && itemTag.contains("id")) {
                         String idStr = itemTag.get("id").toString().replace("\"", "");
-                        net.minecraft.util.Identifier id = net.minecraft.util.Identifier.tryParse(idStr);
+                        net.minecraft.resources.Identifier id = net.minecraft.resources.Identifier.tryParse(idStr);
                         if (id != null) {
-                            net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
-                            if (item != null && item != net.minecraft.item.Items.AIR) {
+                            net.minecraft.world.item.Item item = net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(id);
+                            if (item != null && item != net.minecraft.world.item.Items.AIR) {
                                 int count = 1;
                                 try {
                                     if (itemTag.contains("Count")) count = Integer.parseInt(itemTag.get("Count").toString().replaceAll("[^0-9]", ""));
@@ -259,19 +258,19 @@ public class RealContainerCache {
         return items;
     }
 
-    public static Set<Integer> parseDisabledSlots(NbtCompound nbt) {
+    public static Set<Integer> parseDisabledSlots(CompoundTag nbt) {
         Set<Integer> disabledSlots = new HashSet<>();
         if (nbt != null && nbt.contains("disabled_slots")) {
-            NbtElement elem = nbt.get("disabled_slots");
-            if (elem instanceof NbtList list) {
+            Tag elem = nbt.get("disabled_slots");
+            if (elem instanceof ListTag list) {
                 for (int i = 0; i < list.size(); i++) {
-                    if (list.get(i) instanceof net.minecraft.nbt.AbstractNbtNumber num) {
+                    if (list.get(i) instanceof net.minecraft.nbt.NumericTag num) {
                         disabledSlots.add(num.intValue());
                     }
                 }
             }
-            else if (elem instanceof net.minecraft.nbt.NbtIntArray intArray) {
-                for (int val : intArray.getIntArray()) {
+            else if (elem instanceof net.minecraft.nbt.IntArrayTag intArray) {
+                for (int val : intArray.getAsIntArray()) {
                     disabledSlots.add(val);
                 }
             }
@@ -290,6 +289,6 @@ public class RealContainerCache {
 
     public static void put(BlockPos pos, Map<Integer, ItemStack> items) {
         if (pos == null || items == null) return;
-        CACHE.put(pos.toImmutable(), items);
+        CACHE.put(pos.immutable(), items);
     }
 }
