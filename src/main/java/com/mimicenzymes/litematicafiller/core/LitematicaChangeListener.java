@@ -13,7 +13,6 @@ public class LitematicaChangeListener {
             lastSchematic = current;
             LitematicaContainerIndex.rebuildIndex(mc);
             RealContainerCache.clear();
-            LitematicaCache.clear();
         }
     }
 }

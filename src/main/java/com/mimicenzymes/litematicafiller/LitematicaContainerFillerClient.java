@@ -21,6 +21,7 @@ import java.util.Map;
 public class LitematicaContainerFillerClient implements ClientModInitializer {
     private static boolean isGuiAutoRegistered = false;
     private static int printerTickTimer = 0;
+    private static final long CROSSHAIR_COOLDOWN_MS = 5000L;
     private static final Map<BlockPos, Long> CROSSHAIR_COOLDOWNS = new HashMap<>();
 
     @Override
@@ -61,7 +62,7 @@ public class LitematicaContainerFillerClient implements ClientModInitializer {
                                 BlockPos pos = bhr.getBlockPos();
                                 long now = System.currentTimeMillis();
 
-                                if (!CROSSHAIR_COOLDOWNS.containsKey(pos) || now - CROSSHAIR_COOLDOWNS.get(pos) >= 5000) {
+                                if (!CROSSHAIR_COOLDOWNS.containsKey(pos) || now - CROSSHAIR_COOLDOWNS.get(pos) >= CROSSHAIR_COOLDOWN_MS) {
                                     var schWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
 
                                     if (schWorld != null && schWorld.getBlockState(pos).hasBlockEntity()) {
@@ -73,6 +74,8 @@ public class LitematicaContainerFillerClient implements ClientModInitializer {
 
                                         if (!isSatisfied || needsLocking) {
                                             AutoFillerStateMachine.getInstance().addTask(pos, required == null ? new java.util.HashMap<>() : required);
+                                            // 清理过期条目后再插入，避免长时间运行时 Map 无上限增长
+                                            CROSSHAIR_COOLDOWNS.entrySet().removeIf(e -> now - e.getValue() >= CROSSHAIR_COOLDOWN_MS);
                                             CROSSHAIR_COOLDOWNS.put(pos, now);
                                         }
                                     }

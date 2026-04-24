@@ -15,7 +15,6 @@ public class LitematicaContainerIndex {
 
     public static void rebuildIndex(MinecraftClient mc) {
         CONTAINERS.clear();
-        LitematicaCache.clear();
         var schematicWorld = SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld == null) return;
 

@@ -15,6 +15,7 @@ logs/
 bin/
 
 # 系统杂物
+TODO.md
 .DS_Store
 /MixinGuiMaterialList_old.java
 /FillMaterialCalculator_old.java
