@@ -119,17 +119,6 @@ public class AutoFillerStateMachine {
 
     private final IShulkerExtractor shulkerExtractor;
 
-    private static java.lang.reflect.Field CACHE_FIELD = null;
-    private static java.lang.reflect.Field NBT_QUERY_CACHE_FIELD = null;
-    static {
-        try {
-            CACHE_FIELD = RealContainerCache.class.getDeclaredField("CACHE");
-            CACHE_FIELD.setAccessible(true);
-            NBT_QUERY_CACHE_FIELD = RealContainerCache.class.getDeclaredField("NBT_QUERY_CACHE");
-            NBT_QUERY_CACHE_FIELD.setAccessible(true);
-        } catch (Exception ignored) {}
-    }
-
     private AutoFillerStateMachine() {
         this.shulkerExtractor = DependencyChecker.HAS_QUICK_SHULKER ? new QuickShulkerWrapper() : new DummyExtractor();
     }
@@ -146,19 +135,8 @@ public class AutoFillerStateMachine {
         return baseTicks + Configs.FILL_DELAY.getIntegerValue();
     }
 
-    @SuppressWarnings("unchecked")
     private Map<Integer, ItemStack> getReliableCache(BlockPos pos) {
-        try {
-            if (CACHE_FIELD != null) {
-                Map<BlockPos, Map<Integer, ItemStack>> cache = (Map<BlockPos, Map<Integer, ItemStack>>) CACHE_FIELD.get(null);
-                if (cache.containsKey(pos)) return cache.get(pos);
-            }
-            if (NBT_QUERY_CACHE_FIELD != null) {
-                Map<BlockPos, Map<Integer, ItemStack>> nbtCache = (Map<BlockPos, Map<Integer, ItemStack>>) NBT_QUERY_CACHE_FIELD.get(null);
-                if (nbtCache.containsKey(pos)) return nbtCache.get(pos);
-            }
-        } catch (Exception ignored) {}
-        return null;
+        return RealContainerCache.getReliableCached(pos);
     }
 
     private Map<Integer, ItemStack> getTrueContainerData(MinecraftClient client, BlockPos pos) {

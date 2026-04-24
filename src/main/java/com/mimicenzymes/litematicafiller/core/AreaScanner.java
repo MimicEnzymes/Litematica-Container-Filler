@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 
 public class AreaScanner {
+    private static final long ATTEMPT_COOLDOWN_MS = 5000L;
     private static final Map<BlockPos, Long> ATTEMPT_COOLDOWNS = new HashMap<>();
 
     private static class PendingTask {
@@ -46,6 +47,9 @@ public class AreaScanner {
         boolean syncLayer = Configs.SYNC_LITE_LAYER.getBooleanValue();
         long now = System.currentTimeMillis();
 
+        // 清理过期 cooldown 条目，避免长时间运行时 Map 无上限增长
+        ATTEMPT_COOLDOWNS.entrySet().removeIf(e -> now - e.getValue() >= ATTEMPT_COOLDOWN_MS);
+
         int maxTasks = isSilentPrinter ? 15 : 40;
 
         List<PendingTask> pendingTasks = new ArrayList<>();
@@ -67,7 +71,7 @@ public class AreaScanner {
 
                 if (eyePos.squaredDistanceTo(Vec3d.ofCenter(taskPos)) > reachSq) continue;
 
-                if (isSilentPrinter && ATTEMPT_COOLDOWNS.containsKey(taskPos) && now - ATTEMPT_COOLDOWNS.get(taskPos) < 5000) {
+                if (isSilentPrinter && ATTEMPT_COOLDOWNS.containsKey(taskPos) && now - ATTEMPT_COOLDOWNS.get(taskPos) < ATTEMPT_COOLDOWN_MS) {
                     continue;
                 }
 
@@ -98,7 +102,7 @@ public class AreaScanner {
 
                         if (eyePos.squaredDistanceTo(Vec3d.ofCenter(taskPos)) > reachSq) continue;
 
-                        if (isSilentPrinter && ATTEMPT_COOLDOWNS.containsKey(taskPos) && now - ATTEMPT_COOLDOWNS.get(taskPos) < 5000) {
+                        if (isSilentPrinter && ATTEMPT_COOLDOWNS.containsKey(taskPos) && now - ATTEMPT_COOLDOWNS.get(taskPos) < ATTEMPT_COOLDOWN_MS) {
                             continue;
                         }
 

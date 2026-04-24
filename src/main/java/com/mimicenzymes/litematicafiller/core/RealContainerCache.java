@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class RealContainerCache {
@@ -36,10 +37,22 @@ public class RealContainerCache {
     private static final Map<BlockPos, Long> LAST_REQUEST_TIME = new ConcurrentHashMap<>();
     private static int transactionCounter = 10000;
 
-    private static int cacheVersion = 0;
+    private static final AtomicInteger cacheVersion = new AtomicInteger();
 
     public static int getCacheVersion() {
-        return cacheVersion;
+        return cacheVersion.get();
+    }
+
+    /**
+     * 直接返回已缓存的真实容器内容（若存在），优先走 {@link #CACHE}，再退回 {@link #NBT_QUERY_CACHE}。
+     * 找不到返回 null。本方法仅暴露内部缓存，不会触发网络请求或回退到 sync snapshot。
+     * 之所以提供该 getter 是为了让同包里的状态机避免通过反射读私有字段。
+     */
+    public static Map<Integer, ItemStack> getReliableCached(BlockPos pos) {
+        if (pos == null) return null;
+        Map<Integer, ItemStack> items = CACHE.get(pos);
+        if (items != null) return items;
+        return NBT_QUERY_CACHE.get(pos);
     }
 
     public static void tick(MinecraftClient client) {
@@ -109,7 +122,7 @@ public class RealContainerCache {
             LOCK_CACHE.put(pos.toImmutable(), locks);
         }
 
-        cacheVersion++;
+        cacheVersion.incrementAndGet();
     }
 
     public static Map<Integer, ItemStack> getCachedItems(BlockPos pos) {
@@ -240,7 +253,7 @@ public class RealContainerCache {
                     LOCK_CACHE.put(pos.toImmutable(), parseDisabledSlots(nbt));
                 }
 
-                cacheVersion++;
+                cacheVersion.incrementAndGet();
             }
         }
     }
@@ -266,7 +279,7 @@ public class RealContainerCache {
     public static void putLock(BlockPos pos, Set<Integer> locks) {
         if (pos == null || locks == null) return;
         LOCK_CACHE.put(pos.toImmutable(), locks);
-        cacheVersion++;
+        cacheVersion.incrementAndGet();
     }
 
     public static boolean isSatisfied(BlockPos pos, Map<Integer, ItemStack> required) {
@@ -371,13 +384,13 @@ public class RealContainerCache {
         PENDING_NBT_REQUESTS.clear();
         LAST_REQUEST_TIME.clear();
         ServuxSyncHandler.INDEPENDENT_CACHE.clear();
-        cacheVersion++;
+        cacheVersion.incrementAndGet();
     }
 
     public static void put(BlockPos pos, Map<Integer, ItemStack> items) {
         if (pos == null || items == null) return;
         CACHE.put(pos.toImmutable(), items);
-        cacheVersion++;
+        cacheVersion.incrementAndGet();
     }
 
     public static void remove(BlockPos pos) {
@@ -409,7 +422,7 @@ public class RealContainerCache {
         NBT_QUERY_CACHE.remove(pos);
         ServuxSyncHandler.INDEPENDENT_CACHE.remove(pos);
         LAST_REQUEST_TIME.remove(pos);
-        cacheVersion++;
+        cacheVersion.incrementAndGet();
     }
 
     private static Map<Integer, ItemStack> getLitematicaSyncedItems(BlockPos pos) {
