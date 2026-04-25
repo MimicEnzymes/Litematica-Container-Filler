@@ -1,5 +1,9 @@
 package com.mimicenzymes.litematicafiller.render;
 
+import com.mimicenzymes.litematicafiller.config.Configs;
+import com.mimicenzymes.litematicafiller.core.ItemMatcher;
+import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
+import com.mimicenzymes.litematicafiller.core.RealContainerCache;
 import net.minecraft.network.chat.Component;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
@@ -13,26 +17,20 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.nbt.NumericTag;
 
-
-import com.mimicenzymes.litematicafiller.config.Configs;
-import com.mimicenzymes.litematicafiller.core.ItemMatcher;
-import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
-import com.mimicenzymes.litematicafiller.core.RealContainerCache;
-
-
-
-
-
-
-
-
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class HighlightScanner {
     private static final Map<BlockPos, HighlightState> HIGHLIGHT_MAP = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Map<Integer, ItemStack>> SCHEMATIC_REQ_CACHE = new ConcurrentHashMap<>();
+    private static final ExecutorService INDEX_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "LitematicaFiller-HighlightScanner");
+        thread.setDaemon(true);
+        return thread;
+    });
     private static volatile Set<BlockPos> SCHEMATIC_CONTAINERS = Collections.emptySet();
     private static long lastIndexTime = 0;
     private static boolean isIndexing = false;
@@ -82,7 +80,7 @@ public class HighlightScanner {
             return;
         }
 
-        if (tickCounter % 100 == 0) SCHEMATIC_REQ_CACHE.clear();
+        if (tickCounter % 200 == 0) SCHEMATIC_REQ_CACHE.clear();
 
         long now = System.currentTimeMillis();
         if (!isIndexing && (now - lastIndexTime > 5000 || SCHEMATIC_CONTAINERS.isEmpty())) {
@@ -95,7 +93,7 @@ public class HighlightScanner {
                     lastIndexTime = System.currentTimeMillis();
                     isIndexing = false;
                 }
-            });
+            }, INDEX_EXECUTOR);
         }
 
         boolean hideCompleted = Configs.HIDE_COMPLETED_CONTAINERS.getBooleanValue();
@@ -262,7 +260,7 @@ public class HighlightScanner {
             if (c.contains("x") && c.contains("y") && c.contains("z") && (c.contains("Items") || c.contains("id"))) {
                 results.add(c);
             }
-            for (String key : c.keySet()) {
+            for (String key : c.getAllKeys()) {
                 Tag el = c.get(key);
                 if (el instanceof CompoundTag child) extractNbts(child, results, visited, depth + 1);
                 else if (el instanceof ListTag list) {

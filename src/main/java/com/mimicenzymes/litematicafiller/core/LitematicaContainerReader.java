@@ -1,5 +1,6 @@
 package com.mimicenzymes.litematicafiller.core;
 
+import com.mojang.logging.LogUtils;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import net.minecraft.world.level.block.BarrelBlock;
 import net.minecraft.world.level.block.Blocks;
@@ -13,6 +14,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import org.slf4j.Logger;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -20,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 
 public class LitematicaContainerReader {
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     public static BlockPos[] getDoubleContainerHalves(net.minecraft.world.level.Level world, BlockPos pos, BlockState state) {
         if (state.getBlock() instanceof ChestBlock) {
@@ -41,7 +44,7 @@ public class LitematicaContainerReader {
             BlockPos pos2 = pos.relative(bottomDir);
             BlockState state2 = world.getBlockState(pos2);
 
-            if (state2.is(net.minecraft.world.level.block.Blocks.BARREL) && state2.getValue(net.minecraft.world.level.block.BarrelBlock.FACING) == facing.getOpposite()) {
+            if (state2.is(Blocks.BARREL) && state2.getValue(BarrelBlock.FACING) == facing.getOpposite()) {
                 if (pos.compareTo(pos2) < 0) {
                     return new BlockPos[]{pos, pos2};
                 } else {
@@ -65,12 +68,14 @@ public class LitematicaContainerReader {
             Map<Integer, ItemStack> leftHalf = getSingleContainerItems(schematicWorld, halves[1], registries);
 
             items.putAll(rightHalf);
-            leftHalf.forEach((slot, stack) -> items.put(slot + 27, stack));
+
+            for (Map.Entry<Integer, ItemStack> entry : leftHalf.entrySet()) {
+                items.put(entry.getKey() + 27, entry.getValue());
+            }
         } else {
             items.putAll(getSingleContainerItems(schematicWorld, worldPos, registries));
         }
 
-        // 全局材料洗牌：确保读取出来的物品已经被你的规则替换过
         MaterialReplacer.replaceInMap(items);
 
         return items;
@@ -165,9 +170,12 @@ public class LitematicaContainerReader {
                     }
                 });
             } catch (Exception e) {
-                e.printStackTrace();
+                LOGGER.warn("Failed to read required item stack from schematic NBT", e);
             }
         }
+
+        MaterialReplacer.replaceInMap(items);
+
         return items;
     }
 }

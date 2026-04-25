@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ServuxSyncHandler {
+    private static final int MAX_INDEPENDENT_CACHE_SIZE = 1024;
 
     public static final Map<BlockPos, Map<Integer, ItemStack>> INDEPENDENT_CACHE = new ConcurrentHashMap<>();
 
@@ -27,7 +28,7 @@ public class ServuxSyncHandler {
             ClientPlayNetworking.registerGlobalReceiver(ServuxResponsePayload.ID, (payload, context) -> {
                 context.client().execute(() -> {
                     if (payload.pos() != null && payload.items() != null) {
-                        INDEPENDENT_CACHE.put(payload.pos().immutable(), payload.items());
+                        putIndependentCache(payload.pos().immutable(), payload.items());
                     }
                 });
             });
@@ -172,5 +173,16 @@ public class ServuxSyncHandler {
         }
 
         return false;
+    }
+
+    private static void putIndependentCache(BlockPos pos, Map<Integer, ItemStack> items) {
+        if (INDEPENDENT_CACHE.size() >= MAX_INDEPENDENT_CACHE_SIZE) {
+            var iterator = INDEPENDENT_CACHE.keySet().iterator();
+            if (iterator.hasNext()) {
+                iterator.next();
+                iterator.remove();
+            }
+        }
+        INDEPENDENT_CACHE.put(pos, items);
     }
 }

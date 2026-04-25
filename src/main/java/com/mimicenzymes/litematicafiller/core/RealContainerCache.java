@@ -27,10 +27,13 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class RealContainerCache {
+    private static final long CACHE_TTL_MS = 300000L;
+    private static final int MAX_CACHE_ENTRIES = 2048;
     private static final Map<BlockPos, Map<Integer, ItemStack>> CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Set<Integer>> LOCK_CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Map<Integer, ItemStack>> SYNC_SNAPSHOT_CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Long> SYNC_SNAPSHOT_TIME = new ConcurrentHashMap<>();
+    private static final Map<BlockPos, Long> CACHE_TIME = new ConcurrentHashMap<>();
     private static BlockPos lastLookedPos = null;
     private static final long SYNC_SNAPSHOT_TTL_MS = 15000L;
 
@@ -45,11 +48,30 @@ public class RealContainerCache {
         return cacheVersion;
     }
 
+    private static void cleanupExpiredCache() {
+        long now = System.currentTimeMillis();
+        CACHE_TIME.entrySet().removeIf(entry -> now - entry.getValue() > CACHE_TTL_MS);
+        CACHE.entrySet().removeIf(entry -> !CACHE_TIME.containsKey(entry.getKey()));
+        if (CACHE.size() > MAX_CACHE_ENTRIES) {
+            CACHE_TIME.entrySet().stream()
+                .sorted(Map.Entry.comparingByValue())
+                .limit(CACHE.size() - MAX_CACHE_ENTRIES)
+                .forEach(entry -> {
+                    CACHE.remove(entry.getKey());
+                    CACHE_TIME.remove(entry.getKey());
+                });
+        }
+    }
+
     public static void tick(Minecraft client) {
         if (client.level == null || client.player == null) return;
 
         if (client.level.getGameTime() % 100 == 0) {
             PENDING_NBT_REQUESTS.clear();
+        }
+
+        if (client.level.getGameTime() % 200 == 0) {
+            cleanupExpiredCache();
         }
 
         if (client.screen == null && client.hitResult instanceof BlockHitResult bhr) {
@@ -100,8 +122,11 @@ public class RealContainerCache {
         if (halves != null) {
             CACHE.put(halves[0].immutable(), items);
             CACHE.put(halves[1].immutable(), items);
+            CACHE_TIME.put(halves[0].immutable(), System.currentTimeMillis());
+            CACHE_TIME.put(halves[1].immutable(), System.currentTimeMillis());
         } else {
             CACHE.put(pos.immutable(), items);
+            CACHE_TIME.put(pos.immutable(), System.currentTimeMillis());
         }
 
         if (handler instanceof net.minecraft.world.inventory.CrafterMenu crafterHandler) {
@@ -116,6 +141,12 @@ public class RealContainerCache {
     }
 
     public static Map<Integer, ItemStack> getCachedItems(BlockPos pos) {
+        Long seenAt = CACHE_TIME.get(pos);
+        if (seenAt != null && System.currentTimeMillis() - seenAt > CACHE_TTL_MS) {
+            CACHE.remove(pos);
+            CACHE_TIME.remove(pos);
+            return null;
+        }
         if (CACHE.containsKey(pos)) return CACHE.get(pos);
 
         var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
