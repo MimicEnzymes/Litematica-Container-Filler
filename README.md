@@ -56,6 +56,6 @@
 
 -   Minecraft
 -   Fabric API, MaLiLib, Litematica
-“快捷潜影盒提取” 功能需要 QuickShulker 模组支持
+- “快捷潜影盒提取” 功能需要 QuickShulker 模组支持
 ---
 <div align="center">Made by MimicEnzymes</div>
