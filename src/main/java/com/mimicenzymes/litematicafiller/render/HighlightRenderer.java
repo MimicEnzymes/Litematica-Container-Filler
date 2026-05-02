@@ -1,5 +1,6 @@
 package com.mimicenzymes.litematicafiller.render;
 
+import com.mojang.logging.LogUtils;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import fi.dy.masa.malilib.util.Color4f;
 import net.minecraft.client.MinecraftClient;
@@ -12,11 +13,14 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import com.mojang.blaze3d.systems.RenderSystem;
 import org.lwjgl.opengl.GL11;
+import org.slf4j.Logger;
 
 import java.util.Map;
 
 public class HighlightRenderer {
     private static final HighlightRenderer INSTANCE = new HighlightRenderer();
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     public static HighlightRenderer getInstance() { return INSTANCE; }
 
     public void render() {
@@ -131,8 +135,8 @@ public class HighlightRenderer {
             RenderSystem.enableCull();
             RenderSystem.disableBlend();
 
-        } catch (Throwable e) {
-            System.err.println("[容器填充] 渲染致命错误: " + e.getMessage());
+        } catch (Exception e) {
+            LOGGER.warn("[容器填充] 渲染致命错误: " + e.getMessage());
         }
     }
 
