@@ -98,7 +98,10 @@ jobs:
 
           resolve_game_versions() {
             case "$1" in
-              1.21|1.21.1)
+              1.21)
+                printf '1.21'
+                ;;
+              1.21.1)
                 printf '1.21.1'
                 ;;
               1.21.4)
