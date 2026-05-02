@@ -22,7 +22,7 @@
   ],
   "depends": {
     "fabricloader": ">=0.15.11",
-    "minecraft": ">=26.1 <=26.2",
+    "minecraft": ">=26.1 <26.2",
     "java": ">=21",
     "malilib": "*",
     "litematica": "*"
