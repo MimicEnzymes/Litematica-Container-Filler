@@ -15,10 +15,17 @@ import net.minecraft.util.math.BlockPos;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class HighlightScanner {
     private static final Map<BlockPos, HighlightState> HIGHLIGHT_MAP = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Map<Integer, ItemStack>> SCHEMATIC_REQ_CACHE = new ConcurrentHashMap<>();
+    private static final ExecutorService INDEX_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "LitematicaFiller-HighlightScanner");
+        thread.setDaemon(true);
+        return thread;
+    });
     private static volatile Set<BlockPos> SCHEMATIC_CONTAINERS = Collections.emptySet();
     private static long lastIndexTime = 0;
     private static boolean isIndexing = false;
@@ -68,7 +75,7 @@ public class HighlightScanner {
             return;
         }
 
-        if (tickCounter % 100 == 0) SCHEMATIC_REQ_CACHE.clear();
+        if (tickCounter % 200 == 0) SCHEMATIC_REQ_CACHE.clear();
 
         long now = System.currentTimeMillis();
         if (!isIndexing && (now - lastIndexTime > 5000 || SCHEMATIC_CONTAINERS.isEmpty())) {
@@ -81,7 +88,7 @@ public class HighlightScanner {
                     lastIndexTime = System.currentTimeMillis();
                     isIndexing = false;
                 }
-            });
+            }, INDEX_EXECUTOR);
         }
 
         boolean hideCompleted = Configs.HIDE_COMPLETED_CONTAINERS.getBooleanValue();
