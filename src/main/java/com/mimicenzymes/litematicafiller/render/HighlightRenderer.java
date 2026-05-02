@@ -1,5 +1,6 @@
 package com.mimicenzymes.litematicafiller.render;
 
+import com.mojang.logging.LogUtils;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import fi.dy.masa.malilib.util.Color4f;
 import net.minecraft.client.MinecraftClient;
@@ -13,11 +14,14 @@ import net.minecraft.client.render.BuiltBuffer;
 import net.minecraft.util.math.BlockPos;
 import com.mojang.blaze3d.systems.RenderSystem;
 import org.lwjgl.opengl.GL11;
+import org.slf4j.Logger;
 
 import java.util.Map;
 
 public class HighlightRenderer {
     private static final HighlightRenderer INSTANCE = new HighlightRenderer();
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     public static HighlightRenderer getInstance() { return INSTANCE; }
 
     public void render() {
@@ -66,12 +70,18 @@ public class HighlightRenderer {
             );
         }
 
+        BuiltBuffer meshData = null;
+
         try {
-            BuiltBuffer meshData = buffer.end();
+            meshData = buffer.end();
             BufferRenderer.drawWithGlobalProgram(meshData);
             meshData.close();
         } catch (Exception e) {
-            System.err.println("[容器填充] 渲染致命错误: " + e.getLocalizedMessage());
+            LOGGER.warn("[容器填充] 渲染致命错误: " + e.getLocalizedMessage());
+        } finally {
+            if (meshData != null) {
+                meshData.close();
+            }
         }
 
         RenderSystem.polygonOffset(0f, 0f);
