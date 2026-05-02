@@ -4,25 +4,24 @@ on:
   workflow_dispatch:
     inputs:
       isRelease:
-        description: '是否创建 Release'
+        description: 'Create a GitHub release'
         type: boolean
         default: false
       releaseTag:
-        description: 'Release Tag（当勾选“是否创建 Release”时必填）'
+        description: 'Release tag, required when creating a release'
         type: string
         required: false
       build_branches:
-        description: '指定要构建的分支（逗号分隔，例如 "1.21.4,26.0"）。留空则自动匹配 1.21.* 和 26.* 分支'
+        description: 'Branches to build, comma-separated, e.g. "1.21.4,26.1". Leave empty to auto-match 1.21, 1.21.*, and 26.*'
         type: string
         required: false
         default: ''
       ignore_branches:
-        description: '排除不构建的分支（逗号分隔，例如 "1.21.3"）。在白名单或自动匹配结果基础上排除'
+        description: 'Branches to skip, comma-separated, e.g. "1.21.3". Applied after the build list or auto-match result'
         type: string
         required: false
         default: ''
 
-# 基础权限（只读）
 permissions:
   contents: read
 
@@ -37,25 +36,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate branch-Java version matrix
+      - name: Generate branch publishing matrix
         id: set-matrix
+        shell: bash
         run: |
-          # 获取所有远程分支（去掉 origin/），排除 HEAD 和 gh-pages
           all_branches=$(git branch -r | grep -v HEAD | grep -v gh-pages | sed 's/origin\///' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sort -u)
-          
-          # 读取用户输入
+
           build_list="${{ github.event.inputs.build_branches }}"
           ignore_list="${{ github.event.inputs.ignore_branches }}"
-          
-          # 辅助函数：将逗号分隔字符串转为数组（已 trim）
+
           to_array() {
             echo "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$'
           }
-          
-          # 确定候选分支列表
+
           if [ -n "$build_list" ]; then
             echo "Using user-specified build branches: $build_list"
-            candidate_branches=$(to_array "$build_list" | while read b; do
+            candidate_branches=$(to_array "$build_list" | while read -r b; do
               if echo "$all_branches" | grep -Fxq "$b"; then
                 echo "$b"
               else
@@ -63,12 +59,10 @@ jobs:
               fi
             done | sort -u)
           else
-            # 默认匹配：1.21（精确）或 1.21.* 或 26.*
             echo "Using default pattern: branches matching 1.21, 1.21.*, or 26.*"
             candidate_branches=$(echo "$all_branches" | grep -E '1\.21($|\.)|26\.' || true)
           fi
-          
-          # 应用黑名单
+
           if [ -n "$ignore_list" ]; then
             echo "Ignoring branches: $ignore_list"
             ignore_array=$(to_array "$ignore_list")
@@ -89,20 +83,75 @@ jobs:
           else
             final_branches="$candidate_branches"
           fi
-          
-          # 生成 matrix JSON
-          # Java 版本判断：分支名包含 "1.21"（无论是 "1.21" 还是 "1.21.xxx"）则用 JDK 21，否则用 JDK 25
-          matrix_json=$(echo "$final_branches" | jq -R -s '
-            split("\n") | map(select(. != "")) | 
-            map({
-              branch: .,
-              java_version: (if contains("1.21") then "21" else "25" end)
-            }) | {include: .}
-          ')
-          
+
+          resolve_java_version() {
+            if [[ "$1" == 1.21* ]]; then
+              echo "21"
+            else
+              echo "25"
+            fi
+          }
+
+          resolve_mod_version() {
+            git show "origin/$1:gradle.properties" | sed -n 's/^mod_version=//p' | head -n 1
+          }
+
+          resolve_game_versions() {
+            case "$1" in
+              1.21|1.21.1)
+                printf '1.21.1'
+                ;;
+              1.21.4)
+                printf '1.21.3\n1.21.4'
+                ;;
+              1.21.6)
+                printf '1.21.5\n1.21.6'
+                ;;
+              1.21.8)
+                printf '1.21.7\n1.21.8'
+                ;;
+              1.21.10)
+                printf '1.21.10'
+                ;;
+              1.21.11)
+                printf '1.21.11'
+                ;;
+              26.1)
+                printf '26.1\n26.1.1\n26.1.2'
+                ;;
+              *)
+                printf '%s' "$1"
+                ;;
+            esac
+          }
+
+          matrix_json='{"include":[]}'
+          for branch in $final_branches; do
+            java_version=$(resolve_java_version "$branch")
+            mod_version=$(resolve_mod_version "$branch")
+            game_versions=$(resolve_game_versions "$branch")
+
+            if [ -z "$mod_version" ]; then
+              echo "Warning: mod_version not found for branch '$branch', using branch name instead." >&2
+              mod_version="$branch"
+            fi
+
+            matrix_json=$(jq -c \
+              --arg branch "$branch" \
+              --arg java_version "$java_version" \
+              --arg mod_version "$mod_version" \
+              --arg game_versions "$game_versions" \
+              '.include += [{
+                branch: $branch,
+                java_version: $java_version,
+                mod_version: $mod_version,
+                game_versions: $game_versions
+              }]' <<< "$matrix_json")
+          done
+
           echo "matrix=$(echo "$matrix_json" | jq -c .)" >> $GITHUB_OUTPUT
           echo "Generated matrix: $(echo "$matrix_json" | jq -c .)"
-          
+
           if [ "$(echo "$matrix_json" | jq '.include | length')" -eq 0 ]; then
             echo "Warning: No branches selected for build." >&2
           fi
@@ -140,13 +189,12 @@ jobs:
           if-no-files-found: warn
 
   release:
-    needs: build
+    needs: [matrix_prepare, build]
     runs-on: ubuntu-latest
-    # 仅当用户勾选“创建 Release”且提供了 Release Tag，并且 prepare 生成的矩阵非空时执行
     if: |
       github.event.inputs.isRelease == 'true' &&
       github.event.inputs.releaseTag != '' &&
-      needs.prepare.outputs.matrix != '{"include":[]}'
+      needs.matrix_prepare.outputs.matrix != '{"include":[]}'
     permissions:
       contents: write
     steps:
@@ -157,16 +205,56 @@ jobs:
           merge-multiple: true
           path: all-jars
 
-      - name: List downloaded files (debug)
+      - name: List downloaded files
         run: ls -R all-jars
 
-      - name: Create Release and upload assets
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.releaseTag }}
-          name: ${{ github.event.inputs.releaseTag }}
-          generate_release_notes: true
-          files: all-jars/*.jar
-          fail_on_unmatched_files: true
+      - name: Publish GitHub release
+        uses: Kira-NT/mc-publish@v3.3.0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+        with:
+          github-tag: ${{ github.event.inputs.releaseTag }}
+          github-name: ${{ github.event.inputs.releaseTag }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-generate-changelog: true
+          files: all-jars/*.jar
+
+  publish_modrinth:
+    needs: [matrix_prepare, build]
+    runs-on: ubuntu-latest
+    if: |
+      github.event.inputs.isRelease == 'true' &&
+      github.event.inputs.releaseTag != '' &&
+      needs.matrix_prepare.outputs.matrix != '{"include":[]}'
+    strategy:
+      matrix: ${{ fromJson(needs.matrix_prepare.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - name: Download ${{ matrix.branch }} artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.branch }}-build
+          path: branch-jars
+
+      - name: Publish ${{ matrix.mod_version }} to Modrinth
+        uses: Kira-NT/mc-publish@v3.3.0
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+        with:
+          modrinth-id: oxOV4WLc
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          name: ${{ matrix.mod_version }}
+          version: ${{ matrix.mod_version }}
+          version-type: beta
+          loaders: fabric
+          game-versions: ${{ matrix.game_versions }}
+          game-version-filter: none
+          java: ${{ matrix.java_version }}
+          modrinth-featured: false
+          modrinth-dependencies: |
+            bEpr0Arc(required)
+            GcWjdA9I(required)
+          files: branch-jars/!(*-@(dev|sources|javadoc)).jar
+          changelog: |
+            Published from branch `${{ matrix.branch }}`.
+            Full release notes: https://github.com/${{ github.repository }}/releases/tag/${{ github.event.inputs.releaseTag }}
