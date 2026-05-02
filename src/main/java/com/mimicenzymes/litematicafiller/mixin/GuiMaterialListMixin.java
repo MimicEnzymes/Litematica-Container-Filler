@@ -112,7 +112,7 @@ public abstract class GuiMaterialListMixin extends GuiBase {
             }
         } catch (Exception ignored) {}
 
-        ButtonGeneric toggleBtn = new ButtonGeneric(maxX + 1, targetY, 120, 20, text);
+        ButtonGeneric toggleBtn = new ButtonGeneric(maxX + 1, targetY, 80, 20, text);
 
         this.addButton(toggleBtn, (button, mouseButton) -> {
             FillMaterialCalculator.listMode = (FillMaterialCalculator.listMode + 1) % 3;
