@@ -123,6 +123,10 @@ public class FillMaterialCalculator {
     private static final Map<ItemStackKey, ItemStats> itemStatsCache = new HashMap<>();
 
     public static void calculate(Object input, boolean silent) {
+        calculate(input, silent, null);
+    }
+
+    public static void calculate(Object input, boolean silent, List<MaterialListEntry> fallbackEntries) {
         itemStatsCache.clear();
 
         if (!silent) {
@@ -136,6 +140,8 @@ public class FillMaterialCalculator {
 
         List<SchematicPlacement> placementsToScan = new ArrayList<>();
 
+        MaterialListBase sourceMaterialList = null;
+
         if (input instanceof SchematicPlacement sp) {
             placementsToScan.add(sp);
         } else if (input instanceof Collection<?> coll) {
@@ -144,6 +150,7 @@ public class FillMaterialCalculator {
             }
         } else {
             MaterialListBase matList = extractMaterialList(input);
+            sourceMaterialList = matList;
 
             if (matList != null) {
                 if (matList instanceof MaterialListPlacement mlp) {
@@ -164,7 +171,12 @@ public class FillMaterialCalculator {
             }
         }
 
-        if (placementsToScan.isEmpty()) return;
+        if (placementsToScan.isEmpty()) {
+            if (calculateFromMaterialListContainers(sourceMaterialList, fallbackEntries)) {
+                hasMissingData = false;
+            }
+            return;
+        }
 
         Map<BlockPos, NbtContext> nbtMap = new HashMap<>();
         var schematicWorld = SchematicWorldHandler.getSchematicWorld();
@@ -233,6 +245,13 @@ public class FillMaterialCalculator {
             for (NbtContext ctx : cachedCtx) {
                 nbtMap.put(ctx.worldPos, ctx);
             }
+        }
+
+        if (nbtMap.isEmpty()) {
+            if (calculateFromMaterialListContainers(sourceMaterialList, fallbackEntries)) {
+                hasMissingData = false;
+            }
+            return;
         }
 
         Set<BlockPos> globalVisited = new java.util.HashSet<>();
@@ -421,6 +440,88 @@ public class FillMaterialCalculator {
 
     private static int getItemsCount(Map<Integer, ItemStack> parsedMap) {
         return parsedMap != null ? parsedMap.size() : 0;
+    }
+
+    private static boolean calculateFromMaterialListContainers(MaterialListBase materialList, List<MaterialListEntry> fallbackEntries) {
+        List<MaterialListEntry> entries = fallbackEntries != null ? fallbackEntries : readMaterialListEntries(materialList);
+        if (entries.isEmpty()) return false;
+
+        boolean foundContainers = false;
+
+        for (MaterialListEntry entry : entries) {
+            if (entry == null || entry.getStack().isEmpty()) continue;
+
+            ItemContainerContents container = entry.getStack().get(DataComponents.CONTAINER);
+            if (container == null) continue;
+
+            foundContainers = true;
+
+            int totalMultiplier = Math.max(0, entry.getCountTotal());
+            int missingMultiplier = Math.max(0, entry.getCountMissing());
+            int availableMultiplier = Math.max(0, entry.getCountAvailable());
+            int mismatchMultiplier = Math.max(0, entry.getCountMismatched());
+
+            List<ItemStack> containedItems = StreamSupport.stream(container.nonEmptyItems().spliterator(), false)
+                    .map(template -> new ItemStack(template.item(), template.count()))
+                    .toList();
+
+            for (ItemStack contained : containedItems) {
+                if (contained.isEmpty()) continue;
+
+                ItemStack stack = MaterialReplacer.replaceSingleStack(contained.copy());
+                if (stack.isEmpty()) continue;
+
+                int count = stack.getCount();
+                addMaterialListContainerItem(
+                        stack,
+                        count * totalMultiplier,
+                        count * missingMultiplier,
+                        count * availableMultiplier,
+                        count * mismatchMultiplier
+                );
+            }
+        }
+
+        return foundContainers;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<MaterialListEntry> readMaterialListEntries(MaterialListBase materialList) {
+        if (materialList == null) return Collections.emptyList();
+
+        for (String fieldName : List.of("materialListAll", "materialListPreFiltered")) {
+            try {
+                java.lang.reflect.Field field = MaterialListBase.class.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                Object value = field.get(materialList);
+                if (value instanceof List<?> list) {
+                    return (List<MaterialListEntry>) list;
+                }
+            } catch (Exception ignored) {}
+        }
+
+        return Collections.emptyList();
+    }
+
+    private static void addMaterialListContainerItem(ItemStack stack, int total, int missing, int available, int mismatch) {
+        if (total == 0 && missing == 0 && available == 0 && mismatch == 0) return;
+
+        ItemStackKey key = new ItemStackKey(stack);
+        ItemStats stats = itemStatsCache.computeIfAbsent(key, k -> new ItemStats());
+        if (stats.representative.isEmpty()) {
+            stats.representative = stack.copy();
+            stats.representative.setCount(1);
+        }
+
+        stats.totalAll += total;
+        stats.missingAll += missing;
+        stats.availableAll += available;
+        stats.mismatchAll += mismatch;
+
+        stats.totalLayer += total;
+        stats.missingLayer += missing;
+        stats.availableLayer += available;
+        stats.mismatchLayer += mismatch;
     }
 
     private static boolean isItemIgnored(MaterialListBase materialList, Item item) {

@@ -176,7 +176,7 @@ public abstract class GuiMaterialListMixin extends GuiBase {
             if (mimic_cachedVanillaList == null) return;
 
             if (mimic_needsCalculation) {
-                FillMaterialCalculator.calculate(this, true);
+                FillMaterialCalculator.calculate(this, true, mimic_cachedVanillaList);
                 mimic_needsCalculation = false;
             } else if (!FillMaterialCalculator.hasMissingData) {
                 return;
