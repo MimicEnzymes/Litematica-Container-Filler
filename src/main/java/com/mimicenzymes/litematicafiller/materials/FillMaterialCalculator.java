@@ -35,6 +35,9 @@ import net.minecraft.util.Identifier;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 public class FillMaterialCalculator {
@@ -111,6 +114,16 @@ public class FillMaterialCalculator {
         }
     }
 
+    private static class SchematicSource {
+        final LitematicaSchematic schematic;
+        final Set<String> regions;
+
+        SchematicSource(LitematicaSchematic schematic, Set<String> regions) {
+            this.schematic = schematic;
+            this.regions = regions;
+        }
+    }
+
     private static final Map<ItemStackKey, ItemStats> itemStatsCache = new HashMap<>();
 
     public static void calculate(Object input, boolean silent) {
@@ -130,6 +143,7 @@ public class FillMaterialCalculator {
         MinecraftClient client = MinecraftClient.getInstance();
 
         List<SchematicPlacement> placementsToScan = new ArrayList<>();
+        List<SchematicSource> schematicSourcesToScan = new ArrayList<>();
 
         MaterialListBase sourceMaterialList = null;
 
@@ -148,7 +162,11 @@ public class FillMaterialCalculator {
                     SchematicPlacement sp = ((MaterialListPlacementAccessor) mlp).getPlacement();
                     if (sp != null) {
                         placementsToScan.add(sp);
+                        schematicSourcesToScan.add(new SchematicSource(sp.getSchematic(), null));
                     }
+                } else {
+                    SchematicSource source = extractSchematicSource(matList);
+                    if (source != null) schematicSourcesToScan.add(source);
                 }
             }
         }
@@ -163,7 +181,9 @@ public class FillMaterialCalculator {
         }
 
         if (placementsToScan.isEmpty()) {
-            if (calculateFromMaterialListContainers(sourceMaterialList, fallbackEntries)) {
+            if (calculateFromSchematicContainers(schematicSourcesToScan)) {
+                hasMissingData = false;
+            } else if (calculateFromMaterialListContainers(sourceMaterialList, fallbackEntries)) {
                 hasMissingData = false;
             }
             return;
@@ -239,7 +259,9 @@ public class FillMaterialCalculator {
         }
 
         if (nbtMap.isEmpty()) {
-            if (calculateFromMaterialListContainers(sourceMaterialList, fallbackEntries)) {
+            if (calculateFromSchematicContainers(schematicSourcesToScan)) {
+                hasMissingData = false;
+            } else if (calculateFromMaterialListContainers(sourceMaterialList, fallbackEntries)) {
                 hasMissingData = false;
             }
             return;
@@ -427,6 +449,157 @@ public class FillMaterialCalculator {
 
     private static int getItemsCount(Map<Integer, ItemStack> parsedMap) {
         return parsedMap != null ? parsedMap.size() : 0;
+    }
+
+    private static SchematicSource extractSchematicSource(Object input) {
+        if (input == null) return null;
+
+        LitematicaSchematic schematic = null;
+        Set<String> regions = null;
+        Class<?> current = input.getClass();
+
+        while (current != null) {
+            for (java.lang.reflect.Field field : current.getDeclaredFields()) {
+                try {
+                    field.setAccessible(true);
+                    Object value = field.get(input);
+
+                    if (schematic == null && value instanceof LitematicaSchematic litematic) {
+                        schematic = litematic;
+                    }
+
+                    if (regions == null && "regions".equals(field.getName()) && value instanceof Collection<?> collection) {
+                        Set<String> readRegions = new LinkedHashSet<>();
+                        for (Object region : collection) {
+                            if (region instanceof String name) readRegions.add(name);
+                        }
+                        if (!readRegions.isEmpty()) regions = readRegions;
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            current = current.getSuperclass();
+        }
+
+        return schematic != null ? new SchematicSource(schematic, regions) : null;
+    }
+
+    private static boolean calculateFromSchematicContainers(Collection<SchematicSource> sources) {
+        if (sources == null || sources.isEmpty()) return false;
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.world == null) return false;
+
+        boolean foundContainers = false;
+
+        for (SchematicSource source : sources) {
+            if (source == null || source.schematic == null) continue;
+
+            LitematicaSchematic schematic = getSchematicWithBlockEntities(source);
+            if (schematic == null) continue;
+
+            for (String regionName : getSchematicRegions(schematic, source.regions)) {
+                Map<BlockPos, NbtCompound> teMap = schematic.getBlockEntityMapForRegion(regionName);
+                if (teMap == null || teMap.isEmpty()) continue;
+
+                for (NbtCompound nbt : teMap.values()) {
+                    if (nbt == null || !nbt.contains("Items")) continue;
+
+                    Map<Integer, ItemStack> parsed = RealContainerCache.parseNbtInventory(nbt, client.world.getRegistryManager());
+                    if (parsed.isEmpty()) continue;
+
+                    MaterialReplacer.replaceInMap(parsed);
+                    addSchematicContainerItems(parsed);
+                    foundContainers = true;
+                }
+            }
+        }
+
+        return foundContainers;
+    }
+
+    private static LitematicaSchematic getSchematicWithBlockEntities(SchematicSource source) {
+        LitematicaSchematic schematic = source.schematic;
+        if (hasBlockEntityData(schematic, source.regions)) return schematic;
+
+        try {
+            LitematicaSchematic loaded = reloadSchematicFromFile(schematic.getFile());
+            if (loaded != null && hasBlockEntityData(loaded, source.regions)) return loaded;
+        } catch (Throwable ignored) {}
+
+        return schematic;
+    }
+
+    private static LitematicaSchematic reloadSchematicFromFile(Object fileObject) {
+        try {
+            if (fileObject instanceof Path file) {
+                if (!Files.isRegularFile(file)) return null;
+
+                Path parent = file.getParent();
+                Path fileName = file.getFileName();
+                if (parent == null || fileName == null) return null;
+
+                return invokeCreateFromFile(Path.class, parent, fileName.toString());
+            }
+
+            if (fileObject instanceof File file) {
+                if (!file.isFile()) return null;
+
+                File parent = file.getParentFile();
+                if (parent == null) return null;
+
+                return invokeCreateFromFile(File.class, parent, file.getName());
+            }
+        } catch (Throwable ignored) {}
+
+        return null;
+    }
+
+    private static LitematicaSchematic invokeCreateFromFile(Class<?> directoryType, Object directory, String fileName) throws Exception {
+        java.lang.reflect.Method method = LitematicaSchematic.class.getMethod("createFromFile", directoryType, String.class);
+        Object result = method.invoke(null, directory, fileName);
+        return result instanceof LitematicaSchematic schematic ? schematic : null;
+    }
+
+    private static boolean hasBlockEntityData(LitematicaSchematic schematic, Set<String> selectedRegions) {
+        if (schematic == null) return false;
+
+        for (String regionName : getSchematicRegions(schematic, selectedRegions)) {
+            Map<BlockPos, NbtCompound> teMap = schematic.getBlockEntityMapForRegion(regionName);
+            if (teMap != null && !teMap.isEmpty()) return true;
+        }
+
+        return false;
+    }
+
+    private static Collection<String> getSchematicRegions(LitematicaSchematic schematic, Set<String> selectedRegions) {
+        if (schematic == null) return Collections.emptyList();
+
+        Set<String> allRegions = schematic.getAreaPositions().keySet();
+        if (selectedRegions == null || selectedRegions.isEmpty()) return allRegions;
+
+        List<String> regions = new ArrayList<>();
+        for (String regionName : selectedRegions) {
+            if (allRegions.contains(regionName)) regions.add(regionName);
+        }
+
+        return regions;
+    }
+
+    private static void addSchematicContainerItems(Map<Integer, ItemStack> required) {
+        for (ItemStack s : required.values()) {
+            if (s == null || s.isEmpty()) continue;
+
+            ItemStackKey key = new ItemStackKey(s);
+            ItemStats stats = itemStatsCache.computeIfAbsent(key, k -> new ItemStats());
+            if (stats.representative.isEmpty()) stats.representative = s.copy();
+
+            int count = s.getCount();
+            stats.totalAll += count;
+            stats.missingAll += count;
+            stats.totalLayer += count;
+            stats.missingLayer += count;
+        }
     }
 
     private static boolean calculateFromMaterialListContainers(MaterialListBase materialList, List<MaterialListEntry> fallbackEntries) {
