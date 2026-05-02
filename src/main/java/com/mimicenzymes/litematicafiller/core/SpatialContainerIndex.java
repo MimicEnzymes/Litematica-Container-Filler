@@ -1,11 +1,14 @@
 package com.mimicenzymes.litematicafiller.core;
 
 import net.minecraft.util.math.BlockPos;
+
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class SpatialContainerIndex {
     private static final List<BlockPos> POSITIONS = new ArrayList<>();
+    private static final List<BlockPos> VIEW = Collections.unmodifiableList(POSITIONS);
 
     public static void rebuild(List<BlockPos> containers) {
         POSITIONS.clear();
@@ -26,5 +29,9 @@ public class SpatialContainerIndex {
             }
         }
         return result;
+    }
+
+    public static List<BlockPos> getPositions() {
+        return VIEW;
     }
 }

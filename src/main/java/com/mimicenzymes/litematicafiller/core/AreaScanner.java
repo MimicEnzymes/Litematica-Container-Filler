@@ -18,6 +18,8 @@ import java.util.Map;
 import java.util.Set;
 
 public class AreaScanner {
+    private static final long ATTEMPT_COOLDOWN_MS = 5000L;
+    private static final long ATTEMPT_RETENTION_MS = 60000L;
     private static final Map<BlockPos, Long> ATTEMPT_COOLDOWNS = new HashMap<>();
 
     private static class PendingTask {
@@ -45,6 +47,7 @@ public class AreaScanner {
         int r = Configs.FILL_RADIUS.getIntegerValue();
         boolean syncLayer = Configs.SYNC_LITE_LAYER.getBooleanValue();
         long now = System.currentTimeMillis();
+        ATTEMPT_COOLDOWNS.entrySet().removeIf(entry -> now - entry.getValue() > ATTEMPT_RETENTION_MS);
 
         int maxTasks = isSilentPrinter ? 15 : 40;
 
@@ -57,28 +60,7 @@ public class AreaScanner {
 
         if (r == 0) {
             for (BlockPos rawPos : com.mimicenzymes.litematicafiller.render.HighlightScanner.getHighlights().keySet()) {
-                BlockState state = schematicWorld.getBlockState(rawPos);
-                if (state == null || state.isAir() || !state.hasBlockEntity()) continue;
-
-                BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(schematicWorld, rawPos, state);
-                BlockPos taskPos = halves != null ? halves[0] : rawPos;
-
-                if (!processedPositions.add(taskPos)) continue;
-
-                if (eyePos.squaredDistanceTo(Vec3d.ofCenter(taskPos)) > reachSq) continue;
-
-                if (isSilentPrinter && ATTEMPT_COOLDOWNS.containsKey(taskPos) && now - ATTEMPT_COOLDOWNS.get(taskPos) < 5000) {
-                    continue;
-                }
-
-                Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(taskPos, mc.world.getRegistryManager());
-                boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
-                boolean needsLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(taskPos, mc);
-                boolean hasItems = required != null && !required.isEmpty() && !RealContainerCache.isSatisfied(taskPos, required);
-
-                if (!hasItems && !needsLocking) continue;
-
-                pendingTasks.add(new PendingTask(taskPos, required == null ? new HashMap<>() : required, taskPos.getSquaredDistance(center)));
+                collectPendingTask(mc, schematicWorld, center, eyePos, reachSq, now, isSilentPrinter, processedPositions, pendingTasks, rawPos);
             }
         } else {
             for (int x = -r; x <= r; x++) {
@@ -88,29 +70,7 @@ public class AreaScanner {
 
                         if (syncLayer && !fi.dy.masa.litematica.data.DataManager.getRenderLayerRange().isPositionWithinRange(rawPos)) continue;
 
-                        BlockState state = schematicWorld.getBlockState(rawPos);
-                        if (state.isAir() || !state.hasBlockEntity()) continue;
-
-                        BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(schematicWorld, rawPos, state);
-                        BlockPos taskPos = halves != null ? halves[0] : rawPos;
-
-                        if (!processedPositions.add(taskPos)) continue;
-
-                        if (eyePos.squaredDistanceTo(Vec3d.ofCenter(taskPos)) > reachSq) continue;
-
-                        if (isSilentPrinter && ATTEMPT_COOLDOWNS.containsKey(taskPos) && now - ATTEMPT_COOLDOWNS.get(taskPos) < 5000) {
-                            continue;
-                        }
-
-                        Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(taskPos, mc.world.getRegistryManager());
-
-                        boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
-                        boolean needsLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(taskPos, mc);
-                        boolean hasItems = required != null && !required.isEmpty() && !RealContainerCache.isSatisfied(taskPos, required);
-
-                        if (!hasItems && !needsLocking) continue;
-
-                        pendingTasks.add(new PendingTask(taskPos, required == null ? new HashMap<>() : required, taskPos.getSquaredDistance(center)));
+                        collectPendingTask(mc, schematicWorld, center, eyePos, reachSq, now, isSilentPrinter, processedPositions, pendingTasks, rawPos);
                     }
                 }
             }
@@ -134,5 +94,39 @@ public class AreaScanner {
                 mc.player.sendMessage(Text.translatable("litematica_container_filler.message.no_requirements"), true);
             }
         }
+    }
+
+    private static void collectPendingTask(MinecraftClient mc,
+                                           net.minecraft.world.World schematicWorld,
+                                           BlockPos center,
+                                           Vec3d eyePos,
+                                           double reachSq,
+                                           long now,
+                                           boolean isSilentPrinter,
+                                           Set<BlockPos> processedPositions,
+                                           List<PendingTask> pendingTasks,
+                                           BlockPos rawPos) {
+        BlockState state = schematicWorld.getBlockState(rawPos);
+        if (state == null || state.isAir() || !state.hasBlockEntity()) return;
+
+        BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(schematicWorld, rawPos, state);
+        BlockPos taskPos = halves != null ? halves[0] : rawPos;
+
+        if (!processedPositions.add(taskPos)) return;
+        if (eyePos.squaredDistanceTo(Vec3d.ofCenter(taskPos)) > reachSq) return;
+
+        Long lastAttempt = ATTEMPT_COOLDOWNS.get(taskPos);
+        if (isSilentPrinter && lastAttempt != null && now - lastAttempt < ATTEMPT_COOLDOWN_MS) {
+            return;
+        }
+
+        Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(taskPos, mc.world.getRegistryManager());
+        boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
+        boolean needsLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(taskPos, mc);
+        boolean hasItems = required != null && !required.isEmpty() && !RealContainerCache.isSatisfied(taskPos, required);
+
+        if (!hasItems && !needsLocking) return;
+
+        pendingTasks.add(new PendingTask(taskPos, required == null ? new HashMap<>() : required, taskPos.getSquaredDistance(center)));
     }
 }
