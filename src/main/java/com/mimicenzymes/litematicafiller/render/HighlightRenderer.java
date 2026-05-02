@@ -1,26 +1,30 @@
 package com.mimicenzymes.litematicafiller.render;
 
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.logging.LogUtils;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import fi.dy.masa.malilib.util.Color4f;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.VertexConsumerProvider;
-import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.client.render.BufferBuilder;
+import net.minecraft.client.render.GameRenderer;
+import net.minecraft.client.render.Tessellator;
+import net.minecraft.client.render.VertexFormat;
+import net.minecraft.client.render.VertexFormats;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
-import org.joml.Matrix4f;
-import com.mojang.blaze3d.systems.RenderSystem;
 import org.lwjgl.opengl.GL11;
+import org.slf4j.Logger;
 
 import java.util.Map;
 
 public class HighlightRenderer {
     private static final HighlightRenderer INSTANCE = new HighlightRenderer();
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     public static HighlightRenderer getInstance() { return INSTANCE; }
 
     public void render() {
-        render(new MatrixStack());
+        render(null);
     }
 
     public void render(Object context) {
@@ -29,100 +33,147 @@ public class HighlightRenderer {
         Map<BlockPos, HighlightState> highlights = HighlightScanner.getHighlights();
         if (highlights.isEmpty()) return;
 
-        MatrixStack matrices = null;
-        if (context instanceof MatrixStack) {
-            matrices = (MatrixStack) context;
-        } else if (context != null) {
-            try {
-                for (java.lang.reflect.Method m : context.getClass().getMethods()) {
-                    if (m.getReturnType() == MatrixStack.class) {
-                        matrices = (MatrixStack) m.invoke(context);
-                        break;
-                    }
-                }
-            } catch (Exception ignored) {}
-        }
-
-        if (matrices == null) {
-            matrices = new MatrixStack();
-        }
-
         try {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null) return;
 
-            Vec3d cam = client.gameRenderer.getCamera().getPos();
             boolean xray = Configs.HIGHLIGHT_XRAY.getBooleanValue();
 
-            VertexConsumerProvider.Immediate immediate = client.getBufferBuilders().getEntityVertexConsumers();
-            RenderLayer lineLayer = RenderLayer.getLines();
-            VertexConsumer buffer = immediate.getBuffer(lineLayer);
+            RenderSystem.enableBlend();
+            RenderSystem.defaultBlendFunc();
+            RenderSystem.disableCull();
 
-            for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
-                Color4f c = getColor(entry.getValue());
-                drawBox(matrices, buffer, entry.getKey(), cam, c);
+            if (xray) {
+                RenderSystem.disableDepthTest();
+                RenderSystem.depthMask(false);
+                GL11.glDepthRange(0.0, 0.0);
+            } else {
+                RenderSystem.enableDepthTest();
+                RenderSystem.depthMask(true);
             }
 
-            float lineWidth = Math.max(2.5F, (float)client.getWindow().getFramebufferWidth() / 1920.0F * 2.5F);
+            float lineWidth = Math.max(2.5F, (float) client.getWindow().getFramebufferWidth() / 1920.0F * 2.5F);
             RenderSystem.lineWidth(lineWidth);
 
-            if (xray) {
-                GL11.glDepthRange(0.0, 0.0);
+            Tessellator tessellator = Tessellator.getInstance();
+            BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+
+            try {
+                java.util.function.Supplier<Object> shaderSupplier = () -> {
+                    try {
+                        return GameRenderer.class.getMethod("getPositionColorProgram").invoke(null);
+                    } catch (Exception ignored) {
+                        try {
+                            return GameRenderer.class.getMethod("getPositionColorShader").invoke(null);
+                        } catch (Exception ignoredAgain) {
+                            return null;
+                        }
+                    }
+                };
+                RenderSystem.class.getMethod("setShader", java.util.function.Supplier.class).invoke(null, shaderSupplier);
+            } catch (Exception ignored) {}
+
+            try {
+                java.lang.reflect.Method applyMatrix = RenderSystem.class.getMethod("applyModelViewMatrix");
+                applyMatrix.invoke(null);
+            } catch (Exception e1) {
+                try {
+                    java.lang.reflect.Method applyMatrix = RenderSystem.class.getMethod("method_31988");
+                    applyMatrix.invoke(null);
+                } catch (Exception ignored) {}
             }
 
-            immediate.draw(lineLayer);
+            for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
+                Color4f color = getColor(entry.getValue());
+                drawBoxBatched(entry.getKey(), color, 0.015, buffer, client);
+            }
 
+            Object meshData = null;
+            for (java.lang.reflect.Method method : buffer.getClass().getMethods()) {
+                if (method.getParameterCount() == 0 && method.getReturnType() != void.class) {
+                    String name = method.getName();
+                    String retName = method.getReturnType().getSimpleName();
+                    if (name.equals("end") || name.equals("endNullable") || name.equals("build") || name.equals("buildOrThrow")
+                            || name.equals("method_43428") || name.equals("method_60800")
+                            || retName.contains("Mesh") || retName.contains("Built")) {
+                        try {
+                            method.setAccessible(true);
+                            Object result = method.invoke(buffer);
+                            if (result != null) {
+                                meshData = result;
+                                break;
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+
+            if (meshData != null) {
+                java.lang.reflect.Method drawMethod = null;
+                try {
+                    drawMethod = net.minecraft.client.render.BufferRenderer.class.getMethod("drawWithGlobalProgram", meshData.getClass());
+                } catch (Exception ignored) {}
+                if (drawMethod == null) {
+                    try {
+                        drawMethod = net.minecraft.client.render.BufferRenderer.class.getMethod("method_43433", meshData.getClass());
+                    } catch (Exception ignored) {}
+                }
+                if (drawMethod == null) {
+                    for (java.lang.reflect.Method method : net.minecraft.client.render.BufferRenderer.class.getDeclaredMethods()) {
+                        if (java.lang.reflect.Modifier.isStatic(method.getModifiers()) && method.getParameterCount() == 1
+                                && method.getParameterTypes()[0].isAssignableFrom(meshData.getClass())
+                                && !method.getName().equals("draw") && !method.getName().equals("method_43438")) {
+                            drawMethod = method;
+                            break;
+                        }
+                    }
+                }
+                if (drawMethod != null) {
+                    try {
+                        drawMethod.setAccessible(true);
+                        drawMethod.invoke(null, meshData);
+                    } catch (Exception ignored) {}
+                }
+
+                for (java.lang.reflect.Method method : meshData.getClass().getMethods()) {
+                    if ((method.getName().equals("close") || method.getName().equals("method_43429")) && method.getParameterCount() == 0) {
+                        try {
+                            method.invoke(meshData);
+                        } catch (Exception ignored) {}
+                        break;
+                    }
+                }
+            }
+
+            RenderSystem.lineWidth(1.0F);
+            RenderSystem.depthMask(true);
             if (xray) {
+                RenderSystem.enableDepthTest();
+                RenderSystem.depthFunc(GL11.GL_LEQUAL);
                 GL11.glDepthRange(0.0, 1.0);
             }
-            RenderSystem.lineWidth(1.0F);
+            RenderSystem.enableCull();
+            RenderSystem.disableBlend();
 
-        } catch (Throwable e) {
-            e.printStackTrace();
+        } catch (Exception e) {
+            LOGGER.warn("Failed to render container highlights", e);
         }
     }
 
-    private void drawBox(MatrixStack matrices, VertexConsumer buffer, BlockPos pos, Vec3d cam, Color4f c) {
-        matrices.push();
-        matrices.translate(pos.getX() - cam.x, pos.getY() - cam.y, pos.getZ() - cam.z);
-        Matrix4f model = matrices.peek().getPositionMatrix();
+    private void drawBoxBatched(BlockPos pos, Color4f color, double expand, BufferBuilder buffer, MinecraftClient mc) {
+        Vec3d cameraPos = mc.gameRenderer.getCamera().getPos();
+        double dx = cameraPos.x;
+        double dy = cameraPos.y;
+        double dz = cameraPos.z;
 
-        float s = -0.015f;
-        float e = 1.015f;
+        float minX = (float) (pos.getX() - dx - expand);
+        float minY = (float) (pos.getY() - dy - expand);
+        float minZ = (float) (pos.getZ() - dz - expand);
+        float maxX = (float) (pos.getX() - dx + expand + 1);
+        float maxY = (float) (pos.getY() - dy + expand + 1);
+        float maxZ = (float) (pos.getZ() - dz + expand + 1);
 
-        int r = Math.max(0, Math.min(255, (int) (c.r * 255.0f)));
-        int g = Math.max(0, Math.min(255, (int) (c.g * 255.0f)));
-        int b = Math.max(0, Math.min(255, (int) (c.b * 255.0f)));
-        int a = Math.max(0, Math.min(255, (int) (c.a * 255.0f)));
-
-        line(buffer, model, s, s, s, e, s, s, r, g, b, a);
-        line(buffer, model, e, s, s, e, s, e, r, g, b, a);
-        line(buffer, model, e, s, e, s, s, e, r, g, b, a);
-        line(buffer, model, s, s, e, s, s, s, r, g, b, a);
-
-        line(buffer, model, s, e, s, e, e, s, r, g, b, a);
-        line(buffer, model, e, e, s, e, e, e, r, g, b, a);
-        line(buffer, model, e, e, e, s, e, e, r, g, b, a);
-        line(buffer, model, s, e, e, s, e, s, r, g, b, a);
-
-        line(buffer, model, s, s, s, s, e, s, r, g, b, a);
-        line(buffer, model, e, s, s, e, e, s, r, g, b, a);
-        line(buffer, model, e, s, e, e, e, e, r, g, b, a);
-        line(buffer, model, s, s, e, s, e, e, r, g, b, a);
-
-        matrices.pop();
-    }
-
-    private void line(VertexConsumer buffer, Matrix4f model, float x1, float y1, float z1, float x2, float y2, float z2, int r, int g, int b, int a) {
-        try {
-            buffer.vertex(model, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0);
-            buffer.vertex(model, x2, y2, z2).color(r, g, b, a).normal(0, 1, 0);
-        } catch (Throwable t) {
-            try {
-                buffer.vertex(model, x1, y1, z1).color(r, g, b, a);
-                buffer.vertex(model, x2, y2, z2).color(r, g, b, a);
-            } catch (Throwable t2) {}
-        }
+        fi.dy.masa.malilib.render.RenderUtils.drawBoxAllEdgesBatchedLines(minX, minY, minZ, maxX, maxY, maxZ, color, buffer);
     }
 
     private Color4f getColor(HighlightState type) {

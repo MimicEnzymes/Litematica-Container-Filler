@@ -58,7 +58,7 @@ public class MaterialReplacer {
             REPLACEMENTS.clear();
             for (String rule : strings) {
                 if (rule == null || !rule.contains("->")) continue;
-                String[] parts = rule.split("->");
+                String[] parts = rule.split("->", 2);
                 if (parts.length != 2) continue;
 
                 ItemRule source = parseRule(parts[0].trim());

@@ -1,7 +1,7 @@
 {
     "schemaVersion":  1,
     "id":  "litematica_container_filler",
-    "version": "0.9.2",
+    "version": "0.9.3",
     "name":  "Litematica Container Filler",
     "description":  "Litematica mod for auto-filling containers",
     "authors":  [
