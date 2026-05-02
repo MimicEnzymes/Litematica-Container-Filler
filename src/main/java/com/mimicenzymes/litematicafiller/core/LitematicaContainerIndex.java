@@ -8,10 +8,12 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Position;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class LitematicaContainerIndex {
     private static final List<BlockPos> CONTAINERS = new ArrayList<>();
+    private static final List<BlockPos> VIEW = Collections.unmodifiableList(CONTAINERS);
 
     public static void rebuildIndex(Minecraft mc) {
         CONTAINERS.clear();
@@ -51,5 +53,5 @@ public class LitematicaContainerIndex {
         SpatialContainerIndex.rebuild(CONTAINERS);
     }
 
-    public static List<BlockPos> getContainers() { return CONTAINERS; }
+    public static List<BlockPos> getContainers() { return VIEW; }
 }

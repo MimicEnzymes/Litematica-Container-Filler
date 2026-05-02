@@ -25,31 +25,31 @@ public class SpatialKDTree
 
     public void build(List<BlockPos> points)
     {
-        root = buildRecursive(points, 0);
+        root = buildRecursive(new ArrayList<>(points), 0, 0, points.size());
     }
 
-    private Node buildRecursive(List<BlockPos> points, int depth)
+    private Node buildRecursive(List<BlockPos> points, int depth, int start, int end)
     {
-        if (points.isEmpty())
+        if (start >= end)
         {
             return null;
         }
 
         int axis = depth % 3;
 
-        points.sort((a, b) ->
+        points.subList(start, end).sort((a, b) ->
         {
             if (axis == 0) return Integer.compare(a.getX(), b.getX());
             if (axis == 1) return Integer.compare(a.getY(), b.getY());
             return Integer.compare(a.getZ(), b.getZ());
         });
 
-        int mid = points.size() / 2;
+        int mid = start + (end - start) / 2;
 
         Node node = new Node(points.get(mid), axis);
 
-        node.left = buildRecursive(new ArrayList<>(points.subList(0, mid)), depth + 1);
-        node.right = buildRecursive(points.subList(mid + 1, points.size()), depth + 1);
+        node.left = buildRecursive(points, depth + 1, start, mid);
+        node.right = buildRecursive(points, depth + 1, mid + 1, end);
 
         return node;
     }

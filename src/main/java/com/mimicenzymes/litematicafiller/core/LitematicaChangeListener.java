@@ -9,6 +9,8 @@ public class LitematicaChangeListener {
     public static void tick(Minecraft mc) {
         Object current = SchematicWorldHandler.getSchematicWorld();
 
+        LitematicaCache.cleanupExpired();
+
         if (current != lastSchematic) {
             lastSchematic = current;
             LitematicaContainerIndex.rebuildIndex(mc);

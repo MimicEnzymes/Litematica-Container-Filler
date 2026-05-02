@@ -27,10 +27,13 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class RealContainerCache {
+    private static final long CACHE_TTL_MS = 300000L;
+    private static final int MAX_CACHE_ENTRIES = 2048;
     private static final Map<BlockPos, Map<Integer, ItemStack>> CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Set<Integer>> LOCK_CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Map<Integer, ItemStack>> SYNC_SNAPSHOT_CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Long> SYNC_SNAPSHOT_TIME = new ConcurrentHashMap<>();
+    private static final Map<BlockPos, Long> CACHE_TIME = new ConcurrentHashMap<>();
     private static BlockPos lastLookedPos = null;
     private static final long SYNC_SNAPSHOT_TTL_MS = 15000L;
 
@@ -50,6 +53,10 @@ public class RealContainerCache {
 
         if (client.level.getGameTime() % 100 == 0) {
             PENDING_NBT_REQUESTS.clear();
+        }
+
+        if (client.level.getGameTime() % 200 == 0) {
+            cleanupExpiredCache();
         }
 
         if (client.screen == null && client.hitResult instanceof BlockHitResult bhr) {
@@ -98,10 +105,10 @@ public class RealContainerCache {
         BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.level, pos, state);
 
         if (halves != null) {
-            CACHE.put(halves[0].immutable(), items);
-            CACHE.put(halves[1].immutable(), items);
+            putCachedItems(halves[0].immutable(), items);
+            putCachedItems(halves[1].immutable(), items);
         } else {
-            CACHE.put(pos.immutable(), items);
+            putCachedItems(pos.immutable(), items);
         }
 
         if (handler instanceof net.minecraft.world.inventory.CrafterMenu crafterHandler) {
@@ -238,6 +245,7 @@ public class RealContainerCache {
                     items = parseNbtInventory(nbt, client.level.registryAccess());
                 }
                 NBT_QUERY_CACHE.put(pos.immutable(), items);
+                CACHE_TIME.put(pos.immutable(), System.currentTimeMillis());
 
                 if (nbt.contains("disabled_slots")) {
                     LOCK_CACHE.put(pos.immutable(), parseDisabledSlots(nbt));
@@ -370,6 +378,7 @@ public class RealContainerCache {
         LOCK_CACHE.clear();
         SYNC_SNAPSHOT_CACHE.clear();
         SYNC_SNAPSHOT_TIME.clear();
+        CACHE_TIME.clear();
         NBT_QUERY_CACHE.clear();
         PENDING_NBT_REQUESTS.clear();
         LAST_REQUEST_TIME.clear();
@@ -379,7 +388,7 @@ public class RealContainerCache {
 
     public static void put(BlockPos pos, Map<Integer, ItemStack> items) {
         if (pos == null || items == null) return;
-        CACHE.put(pos.immutable(), items);
+        putCachedItems(pos.immutable(), items);
         cacheVersion++;
     }
 
@@ -399,6 +408,8 @@ public class RealContainerCache {
                 SYNC_SNAPSHOT_TIME.remove(halves[1]);
                 NBT_QUERY_CACHE.remove(halves[0]);
                 NBT_QUERY_CACHE.remove(halves[1]);
+                CACHE_TIME.remove(halves[0]);
+                CACHE_TIME.remove(halves[1]);
                 ServuxSyncHandler.INDEPENDENT_CACHE.remove(halves[0]);
                 ServuxSyncHandler.INDEPENDENT_CACHE.remove(halves[1]);
                 LAST_REQUEST_TIME.remove(halves[0]);
@@ -410,6 +421,7 @@ public class RealContainerCache {
         SYNC_SNAPSHOT_CACHE.remove(pos);
         SYNC_SNAPSHOT_TIME.remove(pos);
         NBT_QUERY_CACHE.remove(pos);
+        CACHE_TIME.remove(pos);
         ServuxSyncHandler.INDEPENDENT_CACHE.remove(pos);
         LAST_REQUEST_TIME.remove(pos);
         cacheVersion++;
@@ -523,6 +535,44 @@ public class RealContainerCache {
                     fi.dy.masa.litematica.config.Configs.Generic.ENTITY_DATA_SYNC_BACKUP.getBooleanValue();
         } catch (Throwable ignored) {
             return false;
+        }
+    }
+
+    private static void putCachedItems(BlockPos pos, Map<Integer, ItemStack> items) {
+        evictIfNeeded();
+        CACHE.put(pos, items);
+        CACHE_TIME.put(pos, System.currentTimeMillis());
+    }
+
+    private static void cleanupExpiredCache() {
+        long now = System.currentTimeMillis();
+        CACHE_TIME.entrySet().removeIf(entry -> now - entry.getValue() > CACHE_TTL_MS);
+        CACHE.keySet().removeIf(pos -> !CACHE_TIME.containsKey(pos));
+        LOCK_CACHE.keySet().removeIf(pos -> !CACHE_TIME.containsKey(pos));
+        NBT_QUERY_CACHE.keySet().removeIf(pos -> !CACHE_TIME.containsKey(pos));
+        LAST_REQUEST_TIME.keySet().removeIf(pos -> !CACHE_TIME.containsKey(pos));
+    }
+
+    private static void evictIfNeeded() {
+        if (CACHE.size() < MAX_CACHE_ENTRIES) {
+            return;
+        }
+
+        BlockPos oldest = null;
+        long oldestTime = Long.MAX_VALUE;
+        for (Map.Entry<BlockPos, Long> entry : CACHE_TIME.entrySet()) {
+            if (entry.getValue() < oldestTime) {
+                oldestTime = entry.getValue();
+                oldest = entry.getKey();
+            }
+        }
+
+        if (oldest != null) {
+            CACHE.remove(oldest);
+            LOCK_CACHE.remove(oldest);
+            NBT_QUERY_CACHE.remove(oldest);
+            LAST_REQUEST_TIME.remove(oldest);
+            CACHE_TIME.remove(oldest);
         }
     }
 }

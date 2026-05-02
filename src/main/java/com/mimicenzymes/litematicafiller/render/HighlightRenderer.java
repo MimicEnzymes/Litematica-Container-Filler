@@ -1,5 +1,6 @@
 package com.mimicenzymes.litematicafiller.render;
 
+import com.mojang.logging.LogUtils;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import fi.dy.masa.malilib.render.MaLiLibPipelines;
 import fi.dy.masa.malilib.render.RenderContext;
@@ -8,11 +9,14 @@ import fi.dy.masa.malilib.util.data.Color4f;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import com.mojang.blaze3d.vertex.MeshData;
+import org.slf4j.Logger;
 
 import java.util.Map;
 
 public class HighlightRenderer {
     private static final HighlightRenderer INSTANCE = new HighlightRenderer();
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     public static HighlightRenderer getInstance() { return INSTANCE; }
 
     public void render() {
@@ -24,10 +28,13 @@ public class HighlightRenderer {
         Minecraft client = Minecraft.getInstance();
         if (client.level == null || client.player == null) return;
 
+        RenderContext ctx = null;
+        MeshData meshData = null;
+
         try {
             boolean xray = Configs.HIGHLIGHT_XRAY.getBooleanValue();
 
-            RenderContext ctx = new RenderContext(
+            ctx = new RenderContext(
                     () -> "litematica_filler_lines",
                     xray ? MaLiLibPipelines.DEBUG_LINES_MASA_SIMPLE_NO_DEPTH_NO_CULL : MaLiLibPipelines.DEBUG_LINES_MASA_SIMPLE_OFFSET_2
             );
@@ -41,15 +48,19 @@ public class HighlightRenderer {
                 RenderUtils.drawBlockBoundingBoxOutlinesBatchedLinesSimple(entry.getKey(), c, 0.015, lineWidth, buffer);
             }
 
-            MeshData meshData = buffer.build();
+            meshData = buffer.build();
             if (meshData != null) {
                 ctx.draw(meshData, false, true);
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to render container highlights", e);
+        } finally {
+            if (meshData != null) {
                 meshData.close();
             }
-
-            ctx.reset();
-
-        } catch (Throwable e) {
+            if (ctx != null) {
+                ctx.reset();
+            }
         }
     }
     private Color4f getColor(HighlightState type) {
