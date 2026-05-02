@@ -5,11 +5,14 @@ import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ServuxSyncHandler {
+    private static final int MAX_INDEPENDENT_CACHE_SIZE = 1024;
 
     public static final Map<BlockPos, Map<Integer, ItemStack>> INDEPENDENT_CACHE = new ConcurrentHashMap<>();
 
@@ -27,7 +30,7 @@ public class ServuxSyncHandler {
             ClientPlayNetworking.registerGlobalReceiver(ServuxResponsePayload.ID, (payload, context) -> {
                 context.client().execute(() -> {
                     if (payload.pos() != null && payload.items() != null) {
-                        INDEPENDENT_CACHE.put(payload.pos().toImmutable(), payload.items());
+                        putIndependentCache(payload.pos().toImmutable(), payload.items());
                     }
                 });
             });
@@ -79,7 +82,7 @@ public class ServuxSyncHandler {
         }
 
         try {
-            for (java.lang.reflect.Field f : obj.getClass().getDeclaredFields()) {
+            for (Field f : obj.getClass().getDeclaredFields()) {
                 f.setAccessible(true);
                 Object val = f.get(obj);
 
@@ -108,7 +111,7 @@ public class ServuxSyncHandler {
 
         if (minihudCacheClass != null) {
             try {
-                for (java.lang.reflect.Field f : minihudCacheClass.getDeclaredFields()) {
+                for (Field f : minihudCacheClass.getDeclaredFields()) {
                     if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) && Map.class.isAssignableFrom(f.getType())) {
                         f.setAccessible(true);
                         Map<?, ?> map = (Map<?, ?>) f.get(null);
@@ -123,13 +126,13 @@ public class ServuxSyncHandler {
                 }
 
                 Object cacheInstance = null;
-                for (java.lang.reflect.Method m : minihudCacheClass.getDeclaredMethods()) {
+                for (Method m : minihudCacheClass.getDeclaredMethods()) {
                     if (m.getName().equals("getInstance") && m.getParameterCount() == 0 && java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
                         cacheInstance = m.invoke(null); break;
                     }
                 }
 
-                for (java.lang.reflect.Method m : minihudCacheClass.getDeclaredMethods()) {
+                for (Method m : minihudCacheClass.getDeclaredMethods()) {
                     if (m.getParameterCount() == 1 && m.getParameterTypes()[0] == BlockPos.class) {
                         m.setAccessible(true);
                         boolean isStatic = java.lang.reflect.Modifier.isStatic(m.getModifiers());
@@ -153,7 +156,7 @@ public class ServuxSyncHandler {
 
         if (minihudSenderClass != null) {
             try {
-                for (java.lang.reflect.Method m : minihudSenderClass.getDeclaredMethods()) {
+                for (Method m : minihudSenderClass.getDeclaredMethods()) {
                     if (m.getParameterCount() == 1 && m.getParameterTypes()[0] == BlockPos.class) {
                         String name = m.getName().toLowerCase();
                         if (name.contains("container") || name.contains("inventory") || name.contains("request") || name.contains("data") || name.contains("sync")) {
@@ -172,5 +175,16 @@ public class ServuxSyncHandler {
         }
 
         return false;
+    }
+
+    private static void putIndependentCache(BlockPos pos, Map<Integer, ItemStack> items) {
+        if (INDEPENDENT_CACHE.size() >= MAX_INDEPENDENT_CACHE_SIZE) {
+            var iterator = INDEPENDENT_CACHE.keySet().iterator();
+            if (iterator.hasNext()) {
+                iterator.next();
+                iterator.remove();
+            }
+        }
+        INDEPENDENT_CACHE.put(pos, items);
     }
 }

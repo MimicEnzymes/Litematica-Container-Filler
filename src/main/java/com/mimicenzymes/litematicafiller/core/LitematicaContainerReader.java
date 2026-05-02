@@ -1,5 +1,6 @@
 package com.mimicenzymes.litematicafiller.core;
 
+import com.mojang.logging.LogUtils;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ChestBlock;
@@ -11,6 +12,7 @@ import net.minecraft.nbt.NbtCompound;
 import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import org.slf4j.Logger;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -18,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 
 public class LitematicaContainerReader {
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     public static BlockPos[] getDoubleContainerHalves(net.minecraft.world.World world, BlockPos pos, BlockState state) {
         if (state.getBlock() instanceof ChestBlock) {
@@ -165,7 +168,7 @@ public class LitematicaContainerReader {
                     }
                 });
             } catch (Exception e) {
-                e.printStackTrace();
+                LOGGER.warn("Failed to read required item stack from schematic NBT", e);
             }
         }
 

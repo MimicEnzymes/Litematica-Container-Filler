@@ -1,34 +1,39 @@
 {
-  "schemaVersion": 1,
-  "id": "litematica_container_filler",
-  "version": "0.9.2",
-  "name": "Litematica Container Filler",
-  "description": "Litematica mod for auto-filling containers",
-  "authors": ["MimicEnzymes"],
-  "contact": {},
-  "license": "MIT",
-  "icon": "assets/litematica_container_filler/icon.png",
-  "environment": "client",
-  "entrypoints": {
-    "client": [
-      "com.mimicenzymes.litematicafiller.LitematicaContainerFillerClient"
-    ],
-    "modmenu": [
-      "com.mimicenzymes.litematicafiller.config.ModMenuIntegration"
-    ]
-  },
-  "mixins": [
-    "litematica_container_filler.mixins.json"
-  ],
-  "depends": {
-    "fabricloader": ">=0.15.11",
-    "minecraft": "~1.21.11",
-    "java": ">=21",
-    "malilib": "*",
-    "litematica": "*"
-  },
-  "suggests": {
-    "quickshulker": "*",
-    "modmenu": "*"
-  }
+    "schemaVersion":  1,
+    "id":  "litematica_container_filler",
+    "version": "0.9.3",
+    "name":  "Litematica Container Filler",
+    "description":  "Litematica mod for auto-filling containers",
+    "authors":  [
+                    "MimicEnzymes"
+                ],
+    "contact":  {
+
+                },
+    "license":  "MIT",
+    "icon":  "assets/litematica_container_filler/icon.png",
+    "environment":  "client",
+    "entrypoints":  {
+                        "client":  [
+                                       "com.mimicenzymes.litematicafiller.LitematicaContainerFillerClient"
+                                   ],
+                        "modmenu":  [
+                                        "com.mimicenzymes.litematicafiller.config.ModMenuIntegration"
+                                    ]
+                    },
+    "mixins":  [
+                   "litematica_container_filler.mixins.json"
+               ],
+    "depends":  {
+                    "fabricloader":  "\u003e=0.15.11",
+                    "minecraft":  "~1.21.4",
+                    "java":  "\u003e=21",
+                    "malilib":  "*",
+                    "litematica":  "*"
+                },
+    "suggests":  {
+                     "quickshulker":  "*",
+                     "modmenu":  "*"
+                 }
 }
+
