@@ -26,6 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class RealContainerCache {
     private static final long CACHE_TTL_MS = 300000L;
     private static final int MAX_CACHE_ENTRIES = 2048;
+    private static final int MAX_PENDING_NBT_REQUESTS = 2048;
     private static final Map<BlockPos, Map<Integer, ItemStack>> CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Set<Integer>> LOCK_CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Map<Integer, ItemStack>> SYNC_SNAPSHOT_CACHE = new ConcurrentHashMap<>();
@@ -134,8 +135,10 @@ public class RealContainerCache {
                     return combined;
                 }
 
-                combined = combineHalves(ServuxSyncHandler.getCachedData(halves[0]), ServuxSyncHandler.getCachedData(halves[1]));
-                if (combined != null) {
+                Map<Integer, ItemStack> rightServux = ServuxSyncHandler.getCachedData(halves[0]);
+                Map<Integer, ItemStack> leftServux = ServuxSyncHandler.getCachedData(halves[1]);
+                combined = combineHalves(rightServux, leftServux);
+                if (combined != null && (!rightServux.isEmpty() || !leftServux.isEmpty())) {
                     rememberSyncedData(halves, combined);
                     return combined;
                 }
@@ -160,7 +163,7 @@ public class RealContainerCache {
         }
 
         Map<Integer, ItemStack> servuxData = ServuxSyncHandler.getCachedData(pos);
-        if (servuxData != null) {
+        if (servuxData != null && !servuxData.isEmpty()) {
             rememberSyncedData(pos, servuxData);
             return servuxData;
         }
@@ -175,8 +178,16 @@ public class RealContainerCache {
     }
 
     public static void requestContainerData(BlockPos pos) {
+        requestContainerData(pos, 2000L);
+    }
+
+    public static void requestContainerData(BlockPos pos, long minIntervalMs) {
+        requestContainerData(pos, minIntervalMs, false);
+    }
+
+    public static void requestContainerData(BlockPos pos, long minIntervalMs, boolean preferOpQuery) {
         long now = System.currentTimeMillis();
-        if (now - LAST_REQUEST_TIME.getOrDefault(pos, 0L) < 2000) return;
+        if (now - LAST_REQUEST_TIME.getOrDefault(pos, 0L) < minIntervalMs) return;
 
         boolean isDouble = false;
         BlockPos[] halves = null;
@@ -187,35 +198,42 @@ public class RealContainerCache {
             if (halves != null) isDouble = true;
         }
 
-        if (Configs.ENABLE_DATA_SYNC.getBooleanValue()) {
-            if (requestLitematicaData(pos, halves, isDouble)) {
-                LAST_REQUEST_TIME.put(pos, now);
-                return;
-            }
+        if (preferOpQuery && requestOpNbtData(pos, halves, isDouble, now)) {
+            return;
+        }
 
+        boolean requested = false;
+
+        if (Configs.ENABLE_DATA_SYNC.getBooleanValue()) {
+            requested |= requestLitematicaData(pos, halves, isDouble);
             if (isDouble) {
                 boolean s1 = ServuxSyncHandler.requestData(halves[0]);
                 boolean s2 = ServuxSyncHandler.requestData(halves[1]);
-                if (s1 || s2) {
-                    LAST_REQUEST_TIME.put(pos, now);
-                    return;
-                }
+                requested |= s1 || s2;
             } else {
-                if (ServuxSyncHandler.requestData(pos)) {
-                    LAST_REQUEST_TIME.put(pos, now);
-                    return;
-                }
+                requested |= ServuxSyncHandler.requestData(pos);
             }
         }
 
-        if (!Configs.ENABLE_OP_NBT_QUERY.getBooleanValue()) return;
+        if (requested) {
+            LAST_REQUEST_TIME.put(pos, now);
+        }
 
-        if (PENDING_NBT_REQUESTS.size() > 60) return;
+        if (requestOpNbtData(pos, halves, isDouble, now)) {
+            return;
+        }
+    }
+
+    private static boolean requestOpNbtData(BlockPos pos, BlockPos[] halves, boolean isDouble, long now) {
+        if (!Configs.ENABLE_OP_NBT_QUERY.getBooleanValue()) return false;
+
+        int requestCount = isDouble ? 2 : 1;
+        if (PENDING_NBT_REQUESTS.size() + requestCount > MAX_PENDING_NBT_REQUESTS) return false;
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player == null || client.getNetworkHandler() == null) return false;
 
         LAST_REQUEST_TIME.put(pos, now);
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player == null || client.getNetworkHandler() == null) return;
-
         if (isDouble) {
             int id1 = transactionCounter++;
             PENDING_NBT_REQUESTS.put(id1, halves[0]);
@@ -224,12 +242,13 @@ public class RealContainerCache {
             int id2 = transactionCounter++;
             PENDING_NBT_REQUESTS.put(id2, halves[1]);
             client.getNetworkHandler().sendPacket(new net.minecraft.network.packet.c2s.play.QueryBlockNbtC2SPacket(id2, halves[1]));
-            return;
+            return true;
         }
 
         int id = transactionCounter++;
         PENDING_NBT_REQUESTS.put(id, pos);
         client.getNetworkHandler().sendPacket(new net.minecraft.network.packet.c2s.play.QueryBlockNbtC2SPacket(id, pos));
+        return true;
     }
 
     public static void handleNbtResponse(int transactionId, NbtCompound nbt) {
@@ -237,18 +256,23 @@ public class RealContainerCache {
         if (pos != null && nbt != null) {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.world != null) {
-                Map<Integer, ItemStack> items = new HashMap<>();
+                boolean changed = false;
+
                 if (nbt.contains("Items")) {
-                    items = parseNbtInventory(nbt, client.world.getRegistryManager());
+                    Map<Integer, ItemStack> items = parseNbtInventory(nbt, client.world.getRegistryManager());
+                    NBT_QUERY_CACHE.put(pos.toImmutable(), items);
+                    CACHE_TIME.put(pos.toImmutable(), System.currentTimeMillis());
+                    changed = true;
                 }
-                NBT_QUERY_CACHE.put(pos.toImmutable(), items);
-                CACHE_TIME.put(pos.toImmutable(), System.currentTimeMillis());
 
                 if (nbt.contains("disabled_slots")) {
                     LOCK_CACHE.put(pos.toImmutable(), parseDisabledSlots(nbt));
+                    changed = true;
                 }
 
-                cacheVersion++;
+                if (changed) {
+                    cacheVersion++;
+                }
             }
         }
     }
@@ -431,10 +455,13 @@ public class RealContainerCache {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.world == null) return null;
 
+        boolean hasItems = nbt.contains("Items");
         if (nbt.contains("disabled_slots") ||
                 client.world.getBlockState(pos).getBlock() instanceof net.minecraft.block.CrafterBlock) {
             LOCK_CACHE.put(pos.toImmutable(), parseDisabledSlots(nbt));
         }
+
+        if (!hasItems) return null;
 
         return parseNbtInventory(nbt, client.world.getRegistryManager());
     }
@@ -461,10 +488,14 @@ public class RealContainerCache {
     }
 
     private static Map<Integer, ItemStack> parseInventoryAndLocks(BlockPos pos, NbtCompound nbt, MinecraftClient client) {
+        boolean hasItems = nbt.contains("Items");
+
         if (nbt.contains("disabled_slots") ||
                 client.world.getBlockState(pos).getBlock() instanceof net.minecraft.block.CrafterBlock) {
             LOCK_CACHE.put(pos.toImmutable(), parseDisabledSlots(nbt));
         }
+
+        if (!hasItems) return null;
 
         return parseNbtInventory(nbt, client.world.getRegistryManager());
     }
