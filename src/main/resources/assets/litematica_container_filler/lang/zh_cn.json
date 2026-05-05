@@ -55,12 +55,12 @@
   "litematica_container_filler.config.comment.creativeFill": "开启后，在创造模式下将无视背包材料限制凭空填充所需的物品。",
   "litematica_container_filler.config.comment.hideFillerGui": "护眼模式：在填充时隐藏物品栏界面",
 
-  "litematica_container_filler.config.comment.highlightColorUnfilled": "容器完全为空，但投影要求有物品时的高亮颜色。请使用十六进制 ARGB 格式",
-  "litematica_container_filler.config.comment.highlightColorPartial": "容器内有所需物品但数量不足，或放入了错误格子的颜色。请使用十六进制 ARGB 格式",
-  "litematica_container_filler.config.comment.highlightColorOverfilled": "物品和格子正确，但数量超标，或存在多余杂物的颜色。请使用十六进制 ARGB 格式",
-  "litematica_container_filler.config.comment.highlightColorWrong": "容器内放入了与投影要求完全不同种类的错误物品的颜色。请使用十六进制 ARGB 格式",
-  "litematica_container_filler.config.comment.highlightColorSatisfied": "容器内的物品与投影要求完美一致时的高亮颜色。请使用十六进制 ARGB 格式",
-  "litematica_container_filler.config.comment.highlightColorUnknown": "尚未获取到服务器容器真实数据（正在等待同步发包）时的颜色。请使用十六进制 ARGB 格式",
+  "litematica_container_filler.config.comment.highlightColorUnfilled": "容器完全为空，但投影要求有物品时的高亮颜色。默认：蓝色。请使用十六进制 ARGB 格式",
+  "litematica_container_filler.config.comment.highlightColorPartial": "容器内有所需物品但数量不足，或放入了错误格子的颜色。默认：黄色。请使用十六进制 ARGB 格式",
+  "litematica_container_filler.config.comment.highlightColorOverfilled": "物品和格子正确，但数量超标，或存在多余杂物的颜色。默认：粉色。请使用十六进制 ARGB 格式",
+  "litematica_container_filler.config.comment.highlightColorWrong": "容器内放入了与投影要求完全不同种类的错误物品的颜色。默认：红色。请使用十六进制 ARGB 格式",
+  "litematica_container_filler.config.comment.highlightColorSatisfied": "容器内的物品与投影要求完美一致时的高亮颜色。默认：绿色。请使用十六进制 ARGB 格式",
+  "litematica_container_filler.config.comment.highlightColorUnknown": "尚未获取到服务器容器真实数据（正在等待同步发包）时的颜色。默认：橙色。请使用十六进制 ARGB 格式",
 
   "litematica_container_filler.hotkey.name.fillContainer": "手动填充快捷键",
   "litematica_container_filler.hotkey.name.toggleContinuous": "切换持续填充开关",

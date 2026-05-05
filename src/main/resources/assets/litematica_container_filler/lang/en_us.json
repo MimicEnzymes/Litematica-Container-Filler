@@ -55,12 +55,12 @@
   "litematica_container_filler.config.comment.creativeFill": "When enabled, required items will be printed from thin air in Creative mode, ignoring inventory limitations.",
   "litematica_container_filler.config.comment.hideFillerGui": "Eye Protection Mode: Hides the inventory GUI during filling operations.",
 
-  "litematica_container_filler.config.comment.highlightColorUnfilled": "Color when the container is completely empty but the schematic requires items. Use hex ARGB format.",
-  "litematica_container_filler.config.comment.highlightColorPartial": "Color when the container has required items but not enough, or in the wrong slots. Use hex ARGB format.",
-  "litematica_container_filler.config.comment.highlightColorOverfilled": "Color when the items and slots are correct, but the amount exceeds the requirement, or there are extra items. Use hex ARGB format.",
-  "litematica_container_filler.config.comment.highlightColorWrong": "Color when the container holds completely wrong items compared to the schematic. Use hex ARGB format.",
-  "litematica_container_filler.config.comment.highlightColorSatisfied": "Color when the container perfectly matches the schematic. Use hex ARGB format.",
-  "litematica_container_filler.config.comment.highlightColorUnknown": "Color when the real container data has not yet been fetched from the server. Use hex ARGB format.",
+  "litematica_container_filler.config.comment.highlightColorUnfilled": "Color when the container is completely empty but the schematic requires items. Default: Blue. Use hex ARGB format.",
+  "litematica_container_filler.config.comment.highlightColorPartial": "Color when the container has required items but not enough, or in the wrong slots. Default: Yellow. Use hex ARGB format.",
+  "litematica_container_filler.config.comment.highlightColorOverfilled": "Color when the items and slots are correct, but the amount exceeds the requirement, or there are extra items. Default: Pink. Use hex ARGB format.",
+  "litematica_container_filler.config.comment.highlightColorWrong": "Color when the container holds completely wrong items compared to the schematic. Default: Red. Use hex ARGB format.",
+  "litematica_container_filler.config.comment.highlightColorSatisfied": "Color when the container perfectly matches the schematic. Default: Green. Use hex ARGB format.",
+  "litematica_container_filler.config.comment.highlightColorUnknown": "Color when the real container data has not yet been fetched from the server. Default: Orange. Use hex ARGB format.",
 
   "litematica_container_filler.hotkey.name.fillContainer": "Fill Container Hotkey",
   "litematica_container_filler.hotkey.name.toggleContinuous": "Toggle Continuous Fill",
