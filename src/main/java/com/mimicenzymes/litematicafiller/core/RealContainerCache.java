@@ -138,7 +138,7 @@ public class RealContainerCache {
                 Map<Integer, ItemStack> rightServux = ServuxSyncHandler.getCachedData(halves[0]);
                 Map<Integer, ItemStack> leftServux = ServuxSyncHandler.getCachedData(halves[1]);
                 combined = combineHalves(rightServux, leftServux);
-                if (combined != null && (!rightServux.isEmpty() || !leftServux.isEmpty())) {
+                if (combined != null) {
                     rememberSyncedData(halves, combined);
                     return combined;
                 }
@@ -163,7 +163,7 @@ public class RealContainerCache {
         }
 
         Map<Integer, ItemStack> servuxData = ServuxSyncHandler.getCachedData(pos);
-        if (servuxData != null && !servuxData.isEmpty()) {
+        if (servuxData != null) {
             rememberSyncedData(pos, servuxData);
             return servuxData;
         }
@@ -258,12 +258,10 @@ public class RealContainerCache {
             if (client.world != null) {
                 boolean changed = false;
 
-                if (nbt.contains("Items")) {
-                    Map<Integer, ItemStack> items = parseNbtInventory(nbt, client.world.getRegistryManager());
-                    NBT_QUERY_CACHE.put(pos.toImmutable(), items);
-                    CACHE_TIME.put(pos.toImmutable(), System.currentTimeMillis());
-                    changed = true;
-                }
+                Map<Integer, ItemStack> items = parseNbtInventory(nbt, client.world.getRegistryManager());
+                NBT_QUERY_CACHE.put(pos.toImmutable(), items);
+                CACHE_TIME.put(pos.toImmutable(), System.currentTimeMillis());
+                changed = true;
 
                 if (nbt.contains("disabled_slots")) {
                     LOCK_CACHE.put(pos.toImmutable(), parseDisabledSlots(nbt));
@@ -461,8 +459,6 @@ public class RealContainerCache {
             LOCK_CACHE.put(pos.toImmutable(), parseDisabledSlots(nbt));
         }
 
-        if (!hasItems) return null;
-
         return parseNbtInventory(nbt, client.world.getRegistryManager());
     }
 
@@ -494,8 +490,6 @@ public class RealContainerCache {
                 client.world.getBlockState(pos).getBlock() instanceof net.minecraft.block.CrafterBlock) {
             LOCK_CACHE.put(pos.toImmutable(), parseDisabledSlots(nbt));
         }
-
-        if (!hasItems) return null;
 
         return parseNbtInventory(nbt, client.world.getRegistryManager());
     }
