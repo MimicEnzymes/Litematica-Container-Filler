@@ -15,11 +15,26 @@ repositories {
     flatDir {
         dirs 'libs'
     }
-    maven { url "https://bmclapi2.bangbang93.com/maven" }
-    maven { url "https://maven.aliyun.com/repository/public" }
+    maven {
+        url "https://maven.fallenbreath.me/releases"
+        content {
+            includeGroup "me.fallenbreath"
+        }
+    }
+    maven {
+        url "https://bmclapi2.bangbang93.com/maven"
+        content {
+            excludeGroup "me.fallenbreath"
+        }
+    }
+    maven {
+        url "https://maven.aliyun.com/repository/public"
+        content {
+            excludeGroup "me.fallenbreath"
+        }
+    }
     maven { url "https://maven.fabricmc.net/" }
     maven { url "https://masa.dy.fi/maven/" }
-    maven { url "https://maven.fallenbreath.me/releases" }
     mavenCentral()
 }
 
