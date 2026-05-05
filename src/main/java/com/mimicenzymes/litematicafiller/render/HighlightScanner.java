@@ -72,6 +72,7 @@ public class HighlightScanner {
     public static void onPlacementChanged() {
         lastIndexTime = 0;
         SCHEMATIC_CONTAINERS = Collections.emptySet();
+        SCHEMATIC_REQ_CACHE.clear();
         HIGHLIGHT_REQUEST_TIME.clear();
         HIGHLIGHT_REQUEST_INTERVALS.clear();
         DATA_REQUEST_QUEUE.clear();
@@ -120,6 +121,9 @@ public class HighlightScanner {
             CompletableFuture.runAsync(() -> {
                 try {
                     Set<BlockPos> found = extractAllContainersFromSchematic();
+                    if (!found.equals(SCHEMATIC_CONTAINERS)) {
+                        SCHEMATIC_REQ_CACHE.clear();
+                    }
                     SCHEMATIC_CONTAINERS = found;
                     SCHEMATIC_CONTAINER_BUCKETS = buildContainerBuckets(found);
                 } catch (Exception e) {} finally {
@@ -172,7 +176,7 @@ public class HighlightScanner {
                 Map<Integer, ItemStack> cached = RealContainerCache.getCachedItems(checkPos);
                 HighlightState type;
 
-                if (cached == null || shouldKeepEmptyDataUnknown(checkPos, cached, now)) {
+                if (cached == null) {
                     type = HighlightState.UNKNOWN;
                     queueHighlightRefresh(checkPos, UNKNOWN_REQUEST_INTERVAL_MS, now);
                 } else {
@@ -217,16 +221,6 @@ public class HighlightScanner {
 
     private static long requestIntervalFor(HighlightState type) {
         return type == HighlightState.SATISFIED ? SATISFIED_REQUEST_INTERVAL_MS : ACTIVE_REQUEST_INTERVAL_MS;
-    }
-
-    private static boolean shouldKeepEmptyDataUnknown(BlockPos pos, Map<Integer, ItemStack> cached, long now) {
-        if (cached == null || !cached.isEmpty()) return false;
-
-        Long lastRequest = HIGHLIGHT_REQUEST_TIME.get(pos);
-        if (lastRequest == null) return true;
-
-        long age = now - lastRequest;
-        return age >= 0L && age < EMPTY_SYNC_CONFIRMATION_MS;
     }
 
     private static void queueHighlightRefresh(BlockPos pos, long minIntervalMs, long now) {
@@ -334,10 +328,10 @@ public class HighlightScanner {
             Object manager = fi.dy.masa.litematica.data.DataManager.getSchematicPlacementManager();
             Collection<?> all = (Collection<?>) manager.getClass().getMethod("getAllSchematicsPlacements").invoke(manager);
             if (all != null) {
-                Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
                 var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
 
                 for (Object p : all) {
+                    Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
                     boolean enabled = true;
                     try { enabled = (boolean) p.getClass().getMethod("isEnabled").invoke(p); } catch (Exception e) {}
                     if (!enabled) continue;
