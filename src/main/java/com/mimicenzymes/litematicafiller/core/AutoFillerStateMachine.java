@@ -1194,7 +1194,7 @@ public class AutoFillerStateMachine {
                         if (dropExtracted) simulateSlotClick(handledScreen, crafterHandler.getSlot(i), i, 1, ContainerInput.THROW);
                         else simulateSlotClick(handledScreen, crafterHandler.getSlot(i), i, 0, ContainerInput.QUICK_MOVE);
                     } else {
-                        simulateSlotClick(handledScreen, crafterHandler.getSlot(i), i, 0, ContainerInput.PICKUP);
+                        setCrafterSlotEnabled(client, crafterHandler, i, !shouldBeDisabled);
                     }
 
                     toggledInThisTick = true;
@@ -1707,32 +1707,29 @@ public class AutoFillerStateMachine {
         return isWorking() && currentPhase != Phase.IDLE && !aborting;
     }
 
+    private void setCrafterSlotEnabled(Minecraft client, CrafterMenu handler, int slotId, boolean enabled) {
+        handler.setSlotState(slotId, enabled);
+
+        if (client.gameMode != null) {
+            client.gameMode.handleSlotStateChanged(slotId, handler.containerId, enabled);
+        }
+
+        Set<Integer> disabledSlots = new HashSet<>();
+        for (int i = 0; i < 9; i++) {
+            if (handler.isSlotDisabled(i)) {
+                disabledSlots.add(i);
+            }
+        }
+        RealContainerCache.putLock(currentTask.targetPos, disabledSlots);
+    }
+
     private void simulateSlotClick(AbstractContainerScreen<?> screen, Slot slot, int slotId, int button, ContainerInput actionType) {
         try {
             Minecraft client = Minecraft.getInstance();
 
             if (screen == null) {
-                if (client.player.containerMenu instanceof CrafterMenu) {
-                    try {
-                        Class<?> cls = Class.forName("net.minecraft.client.gui.screens.inventory.CrafterScreen");
-                        screen = (AbstractContainerScreen<?>) cls.getConstructor(CrafterMenu.class, net.minecraft.world.entity.player.Inventory.class, net.minecraft.network.chat.Component.class)
-                                .newInstance(client.player.containerMenu, client.player.getInventory(), net.minecraft.network.chat.Component.literal("Crafter"));
-
-                        Class<?> screenClass = net.minecraft.client.gui.screens.Screen.class;
-                        for (java.lang.reflect.Field f : screenClass.getDeclaredFields()) {
-                            if (f.getType() == Minecraft.class) {
-                                f.setAccessible(true);
-                                f.set(screen, client);
-                                break;
-                            }
-                        }
-                    } catch (Exception e) {}
-                }
-
-                if (screen == null) {
-                    client.gameMode.handleContainerInput(client.player.containerMenu.containerId, slotId, button, actionType, client.player);
-                    return;
-                }
+                client.gameMode.handleContainerInput(client.player.containerMenu.containerId, slotId, button, actionType, client.player);
+                return;
             }
 
             java.lang.reflect.Method targetMethod = null;
