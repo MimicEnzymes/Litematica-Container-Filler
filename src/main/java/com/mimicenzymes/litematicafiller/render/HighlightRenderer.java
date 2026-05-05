@@ -1,11 +1,13 @@
 package com.mimicenzymes.litematicafiller.render;
 
+import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.logging.LogUtils;
-import com.mimicenzymes.litematicafiller.config.Configs;
 import fi.dy.masa.malilib.util.Color4f;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gl.VertexBuffer;
 import net.minecraft.client.render.BufferBuilder;
+import net.minecraft.client.render.BuiltBuffer;
 import net.minecraft.client.render.GameRenderer;
 import net.minecraft.client.render.Tessellator;
 import net.minecraft.client.render.VertexFormat;
@@ -15,14 +17,18 @@ import net.minecraft.util.math.Vec3d;
 import org.lwjgl.opengl.GL11;
 import org.slf4j.Logger;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
 
 public class HighlightRenderer {
     private static final HighlightRenderer INSTANCE = new HighlightRenderer();
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final long EMPTY_SIGNATURE = Long.MIN_VALUE;
     private static final int RENDER_CACHE_REGION_SHIFT = 6;
-    private static final int MAX_CHUNK_REBUILDS_PER_FRAME = 1;
+    private static final int MAX_CHUNK_REBUILDS_PER_FRAME = 2;
 
     private final Map<ChunkKey, ChunkRenderCache> chunkCaches = new HashMap<>();
     private final Map<ChunkKey, Map<BlockPos, HighlightState>> desiredChunks = new HashMap<>();
@@ -56,14 +62,12 @@ public class HighlightRenderer {
         }
 
         boolean xray = Configs.HIGHLIGHT_XRAY.getBooleanValue();
-        long styleSignature = computeStyleSignature(xray);
+        long styleSignature = computeStyleSignature();
         int highlightVersion = HighlightScanner.getHighlightVersion();
-        Vec3d cameraPos = client.gameRenderer.getCamera().getPos();
         boolean stateApplied = false;
 
         try {
-            setupRenderState(client, xray);
-            stateApplied = true;
+            Vec3d cameraPos = client.gameRenderer.getCamera().getPos();
 
             if (cachedStyleSignature != styleSignature) {
                 clearRenderCache();
@@ -74,6 +78,9 @@ public class HighlightRenderer {
                 updateDesiredChunks(highlights);
                 cachedHighlightVersion = highlightVersion;
             }
+
+            setupRenderState(client, xray);
+            stateApplied = true;
 
             rebuildDirtyChunks(cameraPos);
             drawChunkCaches(cameraPos);
@@ -129,15 +136,9 @@ public class HighlightRenderer {
             }
 
             ChunkRenderCache cache = buildChunkCache(highlights, cameraPos);
-            if (cache == null) {
-                iterator.remove();
-                removeChunkCache(key);
-                continue;
-            }
-
             ChunkRenderCache oldCache = chunkCaches.put(key, cache);
             if (oldCache != null) {
-                closeMesh(oldCache.meshData);
+                closeVertexBuffer(oldCache.vertexBuffer);
             }
 
             iterator.remove();
@@ -148,35 +149,46 @@ public class HighlightRenderer {
     private ChunkRenderCache buildChunkCache(Map<BlockPos, HighlightState> highlights, Vec3d cameraPos) {
         Tessellator tessellator = Tessellator.getInstance();
         BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
-        Object meshData = null;
-        boolean keepMesh = false;
+        BuiltBuffer meshData = null;
+        VertexBuffer vertexBuffer = null;
+        boolean keepBuffer = false;
 
         try {
             for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
-                Color4f color = getColor(entry.getValue());
-                drawBoxBatched(entry.getKey(), color, 0.015, buffer, cameraPos);
+                drawBoxBatched(entry.getKey(), getColor(entry.getValue()), 0.015, buffer, cameraPos);
             }
 
-            meshData = endBuffer(buffer);
-            if (meshData == null) return null;
+            meshData = buffer.endNullable();
+            if (meshData == null) {
+                throw new IllegalStateException("No vertices were generated for container highlight cache");
+            }
 
-            ChunkRenderCache cache = new ChunkRenderCache(meshData, cameraPos.x, cameraPos.y, cameraPos.z);
-            keepMesh = true;
+            vertexBuffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
+            vertexBuffer.bind();
+            vertexBuffer.upload(meshData);
+            meshData = null;
+
+            ChunkRenderCache cache = new ChunkRenderCache(vertexBuffer, cameraPos.x, cameraPos.y, cameraPos.z);
+            keepBuffer = true;
             return cache;
         } finally {
-            if (!keepMesh && meshData != null) {
-                closeMesh(meshData);
+            VertexBuffer.unbind();
+            if (meshData != null) {
+                meshData.close();
+            }
+            if (!keepBuffer && vertexBuffer != null) {
+                closeVertexBuffer(vertexBuffer);
             }
         }
     }
 
     private void drawChunkCaches(Vec3d cameraPos) {
         for (ChunkRenderCache cache : chunkCaches.values()) {
-            if (cache.meshData == null) continue;
+            if (cache.vertexBuffer == null || cache.vertexBuffer.isClosed()) continue;
 
-            renderOffset[0] = (float)(cache.cameraX - cameraPos.x);
-            renderOffset[1] = (float)(cache.cameraY - cameraPos.y);
-            renderOffset[2] = (float)(cache.cameraZ - cameraPos.z);
+            renderOffset[0] = (float) (cache.cameraX - cameraPos.x);
+            renderOffset[1] = (float) (cache.cameraY - cameraPos.y);
+            renderOffset[2] = (float) (cache.cameraZ - cameraPos.z);
             drawChunkCache(cache);
         }
     }
@@ -187,11 +199,13 @@ public class HighlightRenderer {
 
         try {
             modelViewStack.translate(renderOffset[0], renderOffset[1], renderOffset[2]);
-            applyModelViewMatrix();
-            drawMesh(cache.meshData);
+            RenderSystem.applyModelViewMatrix();
+            cache.vertexBuffer.bind();
+            cache.vertexBuffer.draw(RenderSystem.getModelViewMatrix(), RenderSystem.getProjectionMatrix(), RenderSystem.getShader());
         } finally {
+            VertexBuffer.unbind();
             modelViewStack.popMatrix();
-            applyModelViewMatrix();
+            RenderSystem.applyModelViewMatrix();
         }
     }
 
@@ -213,8 +227,8 @@ public class HighlightRenderer {
         RenderSystem.polygonOffset(-1.2f, -0.2f);
         float lineWidth = Math.max(2.5F, (float) client.getWindow().getFramebufferWidth() / 1920.0F * 2.5F);
         RenderSystem.lineWidth(lineWidth);
-        setPositionColorShader();
-        applyModelViewMatrix();
+        RenderSystem.setShader(GameRenderer::getPositionColorProgram);
+        RenderSystem.applyModelViewMatrix();
     }
 
     private void restoreRenderState(boolean xray) {
@@ -231,94 +245,6 @@ public class HighlightRenderer {
         RenderSystem.disableBlend();
     }
 
-    private void setPositionColorShader() {
-        java.util.function.Supplier<Object> shaderSupplier = () -> {
-            try {
-                return GameRenderer.class.getMethod("getPositionColorProgram").invoke(null);
-            } catch (Exception ignored) {
-                try {
-                    return GameRenderer.class.getMethod("getPositionColorShader").invoke(null);
-                } catch (Exception ignoredAgain) {
-                    return null;
-                }
-            }
-        };
-
-        try {
-            RenderSystem.class.getMethod("setShader", java.util.function.Supplier.class).invoke(null, shaderSupplier);
-        } catch (Exception ignored) {}
-    }
-
-    private void applyModelViewMatrix() {
-        try {
-            RenderSystem.class.getMethod("applyModelViewMatrix").invoke(null);
-        } catch (Exception ignored) {
-            try {
-                RenderSystem.class.getMethod("method_31988").invoke(null);
-            } catch (Exception ignoredAgain) {}
-        }
-    }
-
-    private Object endBuffer(BufferBuilder buffer) {
-        for (java.lang.reflect.Method method : buffer.getClass().getMethods()) {
-            if (method.getParameterCount() == 0 && method.getReturnType() != void.class) {
-                String name = method.getName();
-                String retName = method.getReturnType().getSimpleName();
-                if (name.equals("end") || name.equals("endNullable") || name.equals("build") || name.equals("buildOrThrow")
-                        || name.equals("method_43428") || name.equals("method_60800")
-                        || retName.contains("Mesh") || retName.contains("Built")) {
-                    try {
-                        method.setAccessible(true);
-                        Object result = method.invoke(buffer);
-                        if (result != null) return result;
-                    } catch (Exception ignored) {}
-                }
-            }
-        }
-        return null;
-    }
-
-    private void drawMesh(Object meshData) {
-        java.lang.reflect.Method drawMethod = null;
-        try {
-            drawMethod = net.minecraft.client.render.BufferRenderer.class.getMethod("drawWithGlobalProgram", meshData.getClass());
-        } catch (Exception ignored) {}
-        if (drawMethod == null) {
-            try {
-                drawMethod = net.minecraft.client.render.BufferRenderer.class.getMethod("method_43433", meshData.getClass());
-            } catch (Exception ignored) {}
-        }
-        if (drawMethod == null) {
-            for (java.lang.reflect.Method method : net.minecraft.client.render.BufferRenderer.class.getDeclaredMethods()) {
-                if (java.lang.reflect.Modifier.isStatic(method.getModifiers()) && method.getParameterCount() == 1
-                        && method.getParameterTypes()[0].isAssignableFrom(meshData.getClass())
-                        && !method.getName().equals("draw") && !method.getName().equals("method_43438")) {
-                    drawMethod = method;
-                    break;
-                }
-            }
-        }
-        if (drawMethod != null) {
-            try {
-                drawMethod.setAccessible(true);
-                drawMethod.invoke(null, meshData);
-            } catch (Exception ignored) {}
-        }
-    }
-
-    private void closeMesh(Object meshData) {
-        if (meshData == null) return;
-
-        for (java.lang.reflect.Method method : meshData.getClass().getMethods()) {
-            if ((method.getName().equals("close") || method.getName().equals("method_43429")) && method.getParameterCount() == 0) {
-                try {
-                    method.invoke(meshData);
-                } catch (Exception ignored) {}
-                break;
-            }
-        }
-    }
-
     private void drawBoxBatched(BlockPos pos, Color4f color, double expand, BufferBuilder buffer, Vec3d cameraPos) {
         float minX = (float) (pos.getX() - cameraPos.x - expand);
         float minY = (float) (pos.getY() - cameraPos.y - expand);
@@ -330,8 +256,8 @@ public class HighlightRenderer {
         fi.dy.masa.malilib.render.RenderUtils.drawBoxAllEdgesBatchedLines(minX, minY, minZ, maxX, maxY, maxZ, color, buffer);
     }
 
-    private long computeStyleSignature(boolean xray) {
-        long sum = xray ? 0x4f1bbcdc7c3a4f31L : 0x9e3779b97f4a7c15L;
+    private long computeStyleSignature() {
+        long sum = 0x9e3779b97f4a7c15L;
         sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_UNFILLED.getColor().intValue);
         sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_PARTIAL.getColor().intValue);
         sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_OVERFILLED.getColor().intValue);
@@ -348,7 +274,7 @@ public class HighlightRenderer {
 
     private void clearRenderCache() {
         for (ChunkRenderCache cache : chunkCaches.values()) {
-            closeMesh(cache.meshData);
+            closeVertexBuffer(cache.vertexBuffer);
         }
         chunkCaches.clear();
         desiredChunks.clear();
@@ -360,7 +286,17 @@ public class HighlightRenderer {
     private void removeChunkCache(ChunkKey key) {
         ChunkRenderCache cache = chunkCaches.remove(key);
         if (cache != null) {
-            closeMesh(cache.meshData);
+            closeVertexBuffer(cache.vertexBuffer);
+        }
+    }
+
+    private void closeVertexBuffer(VertexBuffer vertexBuffer) {
+        if (vertexBuffer == null || vertexBuffer.isClosed()) return;
+
+        try {
+            vertexBuffer.close();
+        } catch (Exception e) {
+            LOGGER.warn("Failed to close container highlight render cache", e);
         }
     }
 
@@ -381,5 +317,5 @@ public class HighlightRenderer {
         }
     }
 
-    private record ChunkRenderCache(Object meshData, double cameraX, double cameraY, double cameraZ) {}
+    private record ChunkRenderCache(VertexBuffer vertexBuffer, double cameraX, double cameraY, double cameraZ) {}
 }
