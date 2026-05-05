@@ -56,6 +56,11 @@
 
 -   Minecraft
 -   Fabric API, MaLiLib, Litematica
+-   可选：QuickShulker（仅“快捷潜影盒提取”功能需要；不使用该功能可以不安装）
+
+### 许可证
+
+本项目使用 LGPL-3.0-only 协议发布。
 
 ---
 <div align="center">Made by MimicEnzymes</div>
