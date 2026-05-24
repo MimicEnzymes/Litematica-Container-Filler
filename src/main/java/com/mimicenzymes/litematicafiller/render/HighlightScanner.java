@@ -30,6 +30,7 @@ public class HighlightScanner {
 
     private static final Map<BlockPos, HighlightState> HIGHLIGHT_MAP = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Map<Integer, ItemStack>> SCHEMATIC_REQ_CACHE = new ConcurrentHashMap<>();
+    private static final Map<BlockPos, Set<Integer>> SCHEMATIC_IGNORED_SLOT_CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Long> HIGHLIGHT_REQUEST_TIME = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Long> HIGHLIGHT_REQUEST_INTERVALS = new ConcurrentHashMap<>();
     private static final Deque<BlockPos> DATA_REQUEST_QUEUE = new ArrayDeque<>();
@@ -42,8 +43,8 @@ public class HighlightScanner {
     });
     private static volatile Set<BlockPos> SCHEMATIC_CONTAINERS = Collections.emptySet();
     private static volatile Map<BucketKey, Set<BlockPos>> SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
-    private static long lastIndexTime = 0;
-    private static boolean isIndexing = false;
+    private static volatile long lastIndexTime = 0;
+    private static volatile boolean isIndexing = false;
 
     private static int tickCounter = 0;
     private static int boostedTicks = 0;
@@ -56,9 +57,107 @@ public class HighlightScanner {
         return highlightVersion;
     }
 
+    public record ContainerSnapshot(List<BlockPos> positions, int nextCursor, int totalCount) {
+    }
+
+    public static ContainerSnapshot getNearbySchematicContainersSnapshot(BlockPos center, int radius, int cursor, int limit) {
+        ensureSchematicContainerIndex();
+        if (limit <= 0) return new ContainerSnapshot(Collections.emptyList(), 0, 0);
+
+        Map<BucketKey, Set<BlockPos>> buckets = SCHEMATIC_CONTAINER_BUCKETS;
+        if (radius <= 0 || buckets.isEmpty()) {
+            return collectSnapshot(SCHEMATIC_CONTAINERS, cursor, limit);
+        }
+
+        int minX = (center.getX() - radius) >> 4;
+        int maxX = (center.getX() + radius) >> 4;
+        int minY = (center.getY() - radius) >> 4;
+        int maxY = (center.getY() + radius) >> 4;
+        int minZ = (center.getZ() - radius) >> 4;
+        int maxZ = (center.getZ() + radius) >> 4;
+        List<Set<BlockPos>> bucketSets = new ArrayList<>();
+        int totalCount = 0;
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    Set<BlockPos> bucket = buckets.get(new BucketKey(x, y, z));
+                    if (bucket == null || bucket.isEmpty()) continue;
+                    bucketSets.add(bucket);
+                    totalCount += bucket.size();
+                }
+            }
+        }
+
+        if (totalCount == 0) return new ContainerSnapshot(Collections.emptyList(), 0, 0);
+
+        int start = Math.floorMod(cursor, totalCount);
+        int targetCount = Math.min(limit, totalCount);
+        List<BlockPos> snapshot = new ArrayList<>(targetCount);
+
+        int index = 0;
+        for (Set<BlockPos> bucket : bucketSets) {
+            for (BlockPos pos : bucket) {
+                if (index++ >= start) {
+                    snapshot.add(pos);
+                    if (snapshot.size() >= targetCount) {
+                        return new ContainerSnapshot(snapshot, (start + snapshot.size()) % totalCount, totalCount);
+                    }
+                }
+            }
+        }
+
+        for (Set<BlockPos> bucket : bucketSets) {
+            for (BlockPos pos : bucket) {
+                snapshot.add(pos);
+                if (snapshot.size() >= targetCount) break;
+            }
+            if (snapshot.size() >= targetCount) break;
+        }
+
+        return new ContainerSnapshot(snapshot, (start + snapshot.size()) % totalCount, totalCount);
+    }
+
+    private static ContainerSnapshot collectSnapshot(Collection<BlockPos> positions, int cursor, int limit) {
+        int totalCount = positions.size();
+        if (totalCount == 0) return new ContainerSnapshot(Collections.emptyList(), 0, 0);
+
+        int start = Math.floorMod(cursor, totalCount);
+        int targetCount = Math.min(limit, totalCount);
+        List<BlockPos> snapshot = new ArrayList<>(targetCount);
+
+        int index = 0;
+        for (BlockPos pos : positions) {
+            if (index++ >= start) {
+                snapshot.add(pos);
+                if (snapshot.size() >= targetCount) {
+                    return new ContainerSnapshot(snapshot, (start + snapshot.size()) % totalCount, totalCount);
+                }
+            }
+        }
+
+        for (BlockPos pos : positions) {
+            snapshot.add(pos);
+            if (snapshot.size() >= targetCount) break;
+        }
+
+        return new ContainerSnapshot(snapshot, (start + snapshot.size()) % totalCount, totalCount);
+    }
+
+    public static boolean hasSchematicContainerIndex() {
+        return !SCHEMATIC_CONTAINERS.isEmpty();
+    }
+
+    public static void ensureSchematicContainerIndex() {
+        long now = System.currentTimeMillis();
+        if (now - lastIndexTime <= 5000 && !SCHEMATIC_CONTAINERS.isEmpty()) return;
+        startIndexingIfIdle(now);
+    }
+
     public static void clearCache() {
         clearHighlights();
         SCHEMATIC_REQ_CACHE.clear();
+        SCHEMATIC_IGNORED_SLOT_CACHE.clear();
         HIGHLIGHT_REQUEST_TIME.clear();
         HIGHLIGHT_REQUEST_INTERVALS.clear();
         DATA_REQUEST_QUEUE.clear();
@@ -73,6 +172,7 @@ public class HighlightScanner {
         lastIndexTime = 0;
         SCHEMATIC_CONTAINERS = Collections.emptySet();
         SCHEMATIC_REQ_CACHE.clear();
+        SCHEMATIC_IGNORED_SLOT_CACHE.clear();
         HIGHLIGHT_REQUEST_TIME.clear();
         HIGHLIGHT_REQUEST_INTERVALS.clear();
         DATA_REQUEST_QUEUE.clear();
@@ -92,6 +192,15 @@ public class HighlightScanner {
         return req;
     }
 
+    public static Map<Integer, ItemStack> getCachedSchematicRequirement(BlockPos pos, MinecraftClient client) {
+        return getCachedSchematicReq(pos, client);
+    }
+
+    private static Set<Integer> getCachedIgnoredSlots(BlockPos pos, MinecraftClient client) {
+        return SCHEMATIC_IGNORED_SLOT_CACHE.computeIfAbsent(pos.toImmutable(),
+                ignored -> LitematicaContainerReader.getIgnoredSlots(pos, client.world.getRegistryManager()));
+    }
+
     public static void tick(MinecraftClient client) {
         tickCounter++;
         if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
@@ -105,6 +214,7 @@ public class HighlightScanner {
         if (schematicWorld == null) {
             clearHighlights();
             if (!SCHEMATIC_REQ_CACHE.isEmpty()) SCHEMATIC_REQ_CACHE.clear();
+            if (!SCHEMATIC_IGNORED_SLOT_CACHE.isEmpty()) SCHEMATIC_IGNORED_SLOT_CACHE.clear();
             if (!HIGHLIGHT_REQUEST_TIME.isEmpty()) HIGHLIGHT_REQUEST_TIME.clear();
             if (!SCHEMATIC_CONTAINERS.isEmpty()) SCHEMATIC_CONTAINERS = Collections.emptySet();
             if (!SCHEMATIC_CONTAINER_BUCKETS.isEmpty()) SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
@@ -116,22 +226,7 @@ public class HighlightScanner {
         long now = System.currentTimeMillis();
         pumpDataRequests(now);
 
-        if (!isIndexing && (now - lastIndexTime > 5000 || SCHEMATIC_CONTAINERS.isEmpty())) {
-            isIndexing = true;
-            CompletableFuture.runAsync(() -> {
-                try {
-                    Set<BlockPos> found = extractAllContainersFromSchematic();
-                    if (!found.equals(SCHEMATIC_CONTAINERS)) {
-                        SCHEMATIC_REQ_CACHE.clear();
-                    }
-                    SCHEMATIC_CONTAINERS = found;
-                    SCHEMATIC_CONTAINER_BUCKETS = buildContainerBuckets(found);
-                } catch (Exception e) {} finally {
-                    lastIndexTime = System.currentTimeMillis();
-                    isIndexing = false;
-                }
-            }, INDEX_EXECUTOR);
-        }
+        startIndexingIfIdle(now);
 
         int updateInterval = boostedTicks > 0 ? BOOSTED_UPDATE_INTERVAL_TICKS : NORMAL_UPDATE_INTERVAL_TICKS;
         if (tickCounter % updateInterval != 0) {
@@ -160,15 +255,18 @@ public class HighlightScanner {
             if (halves != null) checkPos = halves[0];
 
             Map<Integer, ItemStack> required = getCachedSchematicReq(checkPos, client);
+            Set<Integer> ignoredSlots = getCachedIgnoredSlots(checkPos, client);
             boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
 
-            boolean hasJob = (required != null && !required.isEmpty());
-            if (!hasJob && isCrafter) {
+            boolean hasRequiredItems = required != null && !required.isEmpty();
+            boolean hasJob = hasRequiredItems;
+            boolean shouldCheckEmptySchematicContainer = Configs.HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS.getBooleanValue();
+            if (isCrafter) {
                 Set<Integer> schematicLocks = LitematicaContainerReader.getDisabledSlots(checkPos);
-                hasJob = !schematicLocks.isEmpty();
+                hasJob = hasJob || !schematicLocks.isEmpty() || LitematicaContainerReader.doesCrafterNeedLocking(checkPos, client);
             }
 
-            if (!hasJob) continue;
+            if (!hasJob && !shouldCheckEmptySchematicContainer) continue;
 
             if (client.world.isChunkLoaded(checkPos)) {
                 Map<Integer, ItemStack> cached = RealContainerCache.getCachedItems(checkPos);
@@ -178,15 +276,20 @@ public class HighlightScanner {
                     type = HighlightState.UNKNOWN;
                     queueHighlightRefresh(checkPos, UNKNOWN_REQUEST_INTERVAL_MS, now);
                 } else {
-                    type = evaluateState(cached, required, isCrafter, checkPos, client);
+                    type = evaluateState(cached, required, ignoredSlots, isCrafter, checkPos, client);
                     queueHighlightRefresh(checkPos, requestIntervalFor(type), now);
                 }
 
-                if (!(hideCompleted && type == HighlightState.SATISFIED)) {
+                if (!hasJob && type == HighlightState.SATISFIED) {
+                    continue;
+                }
+
+                if (hasJob || type != HighlightState.UNKNOWN) {
+                    if (hideCompleted && type == HighlightState.SATISFIED) continue;
                     nextMap.put(pos.toImmutable(), type);
                 }
             } else {
-                if (!hideCompleted) {
+                if (hasJob && !hideCompleted) {
                     nextMap.put(pos.toImmutable(), HighlightState.UNKNOWN);
                 }
             }
@@ -200,6 +303,26 @@ public class HighlightScanner {
 
     private static void triggerBoost(int ticks) {
         boostedTicks = Math.max(boostedTicks, ticks);
+    }
+
+    private static synchronized void startIndexingIfIdle(long now) {
+        if (isIndexing || (now - lastIndexTime <= 5000 && !SCHEMATIC_CONTAINERS.isEmpty())) return;
+
+        isIndexing = true;
+        CompletableFuture.runAsync(() -> {
+            try {
+                Set<BlockPos> found = extractAllContainersFromSchematic();
+                if (!found.equals(SCHEMATIC_CONTAINERS)) {
+                    SCHEMATIC_REQ_CACHE.clear();
+                    SCHEMATIC_IGNORED_SLOT_CACHE.clear();
+                }
+                SCHEMATIC_CONTAINERS = found;
+                SCHEMATIC_CONTAINER_BUCKETS = buildContainerBuckets(found);
+            } catch (Exception e) {} finally {
+                lastIndexTime = System.currentTimeMillis();
+                isIndexing = false;
+            }
+        }, INDEX_EXECUTOR);
     }
 
     private static void clearHighlights() {
@@ -259,15 +382,19 @@ public class HighlightScanner {
 
         int minX = (center.getX() - radius) >> 4;
         int maxX = (center.getX() + radius) >> 4;
+        int minY = (center.getY() - radius) >> 4;
+        int maxY = (center.getY() + radius) >> 4;
         int minZ = (center.getZ() - radius) >> 4;
         int maxZ = (center.getZ() + radius) >> 4;
         List<BlockPos> nearby = new ArrayList<>();
 
         for (int x = minX; x <= maxX; x++) {
-            for (int z = minZ; z <= maxZ; z++) {
-                Set<BlockPos> bucket = buckets.get(new BucketKey(x, z));
-                if (bucket != null) {
-                    nearby.addAll(bucket);
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    Set<BlockPos> bucket = buckets.get(new BucketKey(x, y, z));
+                    if (bucket != null) {
+                        nearby.addAll(bucket);
+                    }
                 }
             }
         }
@@ -285,7 +412,7 @@ public class HighlightScanner {
         return buckets;
     }
 
-    private static HighlightState evaluateState(Map<Integer, ItemStack> realItems, Map<Integer, ItemStack> required, boolean isCrafter, BlockPos pos, MinecraftClient client) {
+    private static HighlightState evaluateState(Map<Integer, ItemStack> realItems, Map<Integer, ItemStack> required, Set<Integer> ignoredSlots, boolean isCrafter, BlockPos pos, MinecraftClient client) {
         if (realItems == null) return HighlightState.UNKNOWN;
 
         int maxSlot = isCrafter ? 9 : 54;
@@ -295,6 +422,8 @@ public class HighlightScanner {
         boolean hasPartial = false;
 
         for (int i = 0; i < maxSlot; i++) {
+            if (ignoredSlots != null && ignoredSlots.contains(i)) continue;
+
             ItemStack real = realItems.getOrDefault(i, ItemStack.EMPTY);
             ItemStack req = (required != null) ? required.getOrDefault(i, ItemStack.EMPTY) : ItemStack.EMPTY;
 
@@ -449,9 +578,9 @@ public class HighlightScanner {
         return 0;
     }
 
-    private record BucketKey(int x, int z) {
+    private record BucketKey(int x, int y, int z) {
         static BucketKey from(BlockPos pos) {
-            return new BucketKey(pos.getX() >> 4, pos.getZ() >> 4);
+            return new BucketKey(pos.getX() >> 4, pos.getY() >> 4, pos.getZ() >> 4);
         }
     }
 }

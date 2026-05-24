@@ -3,7 +3,6 @@ package com.mimicenzymes.litematicafiller.input;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.config.GuiConfigs;
 import com.mimicenzymes.litematicafiller.config.Hotkeys;
-import com.mimicenzymes.litematicafiller.core.AreaScanner;
 import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
@@ -34,6 +33,17 @@ public class Callbacks implements IHotkeyCallback {
             return true;
         }
 
+        if (key == Configs.WORKING_STATE.getKeybind()) {
+            Configs.WORKING_STATE.toggleBooleanValue();
+            String messageKey = Configs.WORKING_STATE.getBooleanValue()
+                    ? "litematica_container_filler.message.continuous_on"
+                    : "litematica_container_filler.message.continuous_off";
+            if (mc.player != null) {
+                mc.player.sendMessage(Text.translatable(messageKey), true);
+            }
+            return true;
+        }
+
         if (!Configs.ENABLE_MOD.getBooleanValue()) {
             return false;
         }
@@ -44,50 +54,36 @@ public class Callbacks implements IHotkeyCallback {
             AutoFillerStateMachine.getInstance().clearBlacklist();
             executeFill(mc);
             return true;
-        } else if (key == Hotkeys.TOGGLE_CONTINUOUS.getKeybind()) {
-            boolean state = !Configs.CONTINUOUS_FILL.getBooleanValue();
-            Configs.CONTINUOUS_FILL.setBooleanValue(state);
-            mc.player.sendMessage(Text.translatable(state ? "litematica_container_filler.message.continuous_on" : "litematica_container_filler.message.continuous_off"), true);
-            return true;
-        } else if (key == Hotkeys.TOGGLE_MODE.getKeybind()) {
-            boolean state = !Configs.AREA_MODE.getBooleanValue();
-            Configs.AREA_MODE.setBooleanValue(state);
-            mc.player.sendMessage(Text.translatable(state ? "litematica_container_filler.message.mode_area" : "litematica_container_filler.message.mode_single"), true);
-            return true;
         }
 
         return false;
     }
 
     private void executeFill(MinecraftClient mc) {
-        if (Configs.AREA_MODE.getBooleanValue()) {
-            AreaScanner.executeScan(mc, false);
-        } else {
-            if (mc.crosshairTarget != null && mc.crosshairTarget.getType() == HitResult.Type.BLOCK) {
-                BlockHitResult bhr = (BlockHitResult) mc.crosshairTarget;
-                BlockPos pos = bhr.getBlockPos();
+        if (mc.crosshairTarget != null && mc.crosshairTarget.getType() == HitResult.Type.BLOCK) {
+            BlockHitResult bhr = (BlockHitResult) mc.crosshairTarget;
+            BlockPos pos = bhr.getBlockPos();
 
-                var schWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
-                if (schWorld == null || !schWorld.getBlockState(pos).hasBlockEntity()) {
-                    mc.player.sendMessage(Text.translatable("litematica_container_filler.message.no_requirements"), true);
-                    return;
-                }
-
-                Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(pos, mc.world.getRegistryManager());
-                boolean isCrafter = schWorld.getBlockState(pos).getBlock() instanceof net.minecraft.block.CrafterBlock;
-
-                boolean needsLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, mc);
-
-                if (required != null || needsLocking) {
-                    Map<Integer, ItemStack> taskReq = required == null ? new HashMap<>() : required;
-
-                    RealContainerCache.remove(pos);
-
-                    AutoFillerStateMachine.getInstance().addTask(pos, taskReq);
-                }
-            } else {
-                mc.player.sendMessage(Text.translatable("litematica_container_filler.message.target_invalid"), true);
+            var schWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
+            if (schWorld == null || !schWorld.getBlockState(pos).hasBlockEntity()) {
+                mc.player.sendMessage(Text.translatable("litematica_container_filler.message.no_requirements"), true);
+                return;
             }
+
+            Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(pos, mc.world.getRegistryManager());
+            boolean isCrafter = schWorld.getBlockState(pos).getBlock() instanceof net.minecraft.block.CrafterBlock;
+
+            boolean needsLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, mc);
+
+            if (required != null || needsLocking) {
+                Map<Integer, ItemStack> taskReq = required == null ? new HashMap<>() : required;
+
+                RealContainerCache.remove(pos);
+
+                AutoFillerStateMachine.getInstance().addManualTask(pos, taskReq);
+            }
+        } else {
+            mc.player.sendMessage(Text.translatable("litematica_container_filler.message.target_invalid"), true);
         }
     }
 }

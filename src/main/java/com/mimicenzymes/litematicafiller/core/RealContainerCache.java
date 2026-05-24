@@ -305,22 +305,25 @@ public class RealContainerCache {
 
         BlockState state = client.world.getBlockState(pos);
         boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
+        Set<Integer> ignoredSlots = LitematicaContainerReader.getIgnoredSlots(pos, client.world.getRegistryManager());
         if (isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, client)) {
             return false;
         }
 
         Map<Integer, ItemStack> realItems = getCachedItems(pos);
         if (realItems != null) {
-            return checkMapStrict(realItems, required, isCrafter);
+            return checkMapStrict(realItems, required, ignoredSlots, isCrafter);
         }
         return false;
     }
 
-    private static boolean checkMapStrict(Map<Integer, ItemStack> realItems, Map<Integer, ItemStack> required, boolean isCrafter) {
+    private static boolean checkMapStrict(Map<Integer, ItemStack> realItems, Map<Integer, ItemStack> required, Set<Integer> ignoredSlots, boolean isCrafter) {
         if (realItems == null) return false;
         int maxSlot = isCrafter ? 9 : 54;
 
         for (int i = 0; i < maxSlot; i++) {
+            if (ignoredSlots != null && ignoredSlots.contains(i)) continue;
+
             ItemStack real = realItems.getOrDefault(i, ItemStack.EMPTY);
             ItemStack req = (required != null) ? required.getOrDefault(i, ItemStack.EMPTY) : ItemStack.EMPTY;
             if (real.isEmpty() && req.isEmpty()) continue;

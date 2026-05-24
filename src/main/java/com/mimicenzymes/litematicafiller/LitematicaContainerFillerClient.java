@@ -4,28 +4,22 @@ import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.config.GuiConfigs;
 import com.mimicenzymes.litematicafiller.core.*;
 import com.mimicenzymes.litematicafiller.network.ServuxSyncHandler;
+import com.mimicenzymes.litematicafiller.network.TakeItOutCompat;
 
 import fi.dy.masa.malilib.event.InitializationHandler;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-
-import java.util.HashMap;
-import java.util.Map;
 
 public class LitematicaContainerFillerClient implements ClientModInitializer {
     private static boolean isGuiAutoRegistered = false;
-    private static int printerTickTimer = 0;
-    private static final Map<BlockPos, Long> CROSSHAIR_COOLDOWNS = new HashMap<>();
+    private static int workerTickTimer = 0;
 
     @Override
     public void onInitializeClient() {
         ServuxSyncHandler.registerPayloads();
+        TakeItOutCompat.registerPayload();
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (!isGuiAutoRegistered) {
@@ -48,38 +42,15 @@ public class LitematicaContainerFillerClient implements ClientModInitializer {
 
                 ContainerHighlighter.tick(client);
 
-                if (Configs.CONTINUOUS_FILL.getBooleanValue() && AutoFillerStateMachine.getInstance().isIdle()) {
-                    printerTickTimer++;
-                    if (printerTickTimer >= 10) {
-                        printerTickTimer = 0;
-
-                        if (Configs.AREA_MODE.getBooleanValue()) {
-                            AreaScanner.executeScan(client, true);
-                        } else {
-                            if (client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.BLOCK) {
-                                BlockHitResult bhr = (BlockHitResult) client.crosshairTarget;
-                                BlockPos pos = bhr.getBlockPos();
-                                long now = System.currentTimeMillis();
-
-                                if (!CROSSHAIR_COOLDOWNS.containsKey(pos) || now - CROSSHAIR_COOLDOWNS.get(pos) >= 5000) {
-                                    var schWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
-
-                                    if (schWorld != null && schWorld.getBlockState(pos).hasBlockEntity()) {
-                                        Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(pos, client.world.getRegistryManager());
-
-                                        boolean isSatisfied = RealContainerCache.isSatisfied(pos, required);
-                                        boolean isCrafter = client.world.getBlockState(pos).getBlock() instanceof net.minecraft.block.CrafterBlock;
-                                        boolean needsLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, client);
-
-                                        if (!isSatisfied || needsLocking) {
-                                            AutoFillerStateMachine.getInstance().addTask(pos, required == null ? new java.util.HashMap<>() : required);
-                                            CROSSHAIR_COOLDOWNS.put(pos, now);
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                if (Configs.WORKING_STATE.getBooleanValue() && AutoFillerStateMachine.getInstance().isIdle()) {
+                    workerTickTimer++;
+                    int scanInterval = isPlayerMovingFast(client) ? 16 : 6;
+                    if (workerTickTimer >= scanInterval) {
+                        workerTickTimer = 0;
+                        AreaScanner.executeScan(client, true);
                     }
+                } else {
+                    workerTickTimer = 0;
                 }
             }
         });
@@ -90,5 +61,12 @@ public class LitematicaContainerFillerClient implements ClientModInitializer {
             }
         });
         InitializationHandler.getInstance().registerInitializationHandler(new InitHandler());
+    }
+
+    private static boolean isPlayerMovingFast(net.minecraft.client.MinecraftClient client) {
+        if (client.player == null) return false;
+        double vx = client.player.getVelocity().x;
+        double vz = client.player.getVelocity().z;
+        return vx * vx + vz * vz > 0.04D;
     }
 }

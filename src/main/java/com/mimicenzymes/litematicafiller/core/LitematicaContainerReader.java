@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -89,6 +90,32 @@ public class LitematicaContainerReader {
             items.putAll(RealContainerCache.parseNbtInventory(nbt, registries));
         }
         return items;
+    }
+
+    public static Set<Integer> getIgnoredSlots(BlockPos worldPos, RegistryWrapper.WrapperLookup registries) {
+        Set<Integer> ignoredSlots = new HashSet<>();
+        var schematicWorld = SchematicWorldHandler.getSchematicWorld();
+        if (schematicWorld == null) return ignoredSlots;
+
+        BlockState state = schematicWorld.getBlockState(worldPos);
+        BlockPos[] halves = getDoubleContainerHalves(schematicWorld, worldPos, state);
+
+        if (halves != null) {
+            collectIgnoredSlots(getSingleContainerItems(schematicWorld, halves[0], registries), 0, ignoredSlots);
+            collectIgnoredSlots(getSingleContainerItems(schematicWorld, halves[1], registries), 27, ignoredSlots);
+        } else {
+            collectIgnoredSlots(getSingleContainerItems(schematicWorld, worldPos, registries), 0, ignoredSlots);
+        }
+
+        return ignoredSlots;
+    }
+
+    private static void collectIgnoredSlots(Map<Integer, ItemStack> items, int offset, Set<Integer> ignoredSlots) {
+        for (Map.Entry<Integer, ItemStack> entry : items.entrySet()) {
+            if (MaterialReplacer.isIgnored(entry.getValue())) {
+                ignoredSlots.add(entry.getKey() + offset);
+            }
+        }
     }
 
     public static Set<Integer> getDisabledSlots(BlockPos worldPos) {

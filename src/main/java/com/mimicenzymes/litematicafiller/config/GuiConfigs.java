@@ -39,15 +39,19 @@ public class GuiConfigs extends GuiConfigsBase {
     @Override
     public List<ConfigOptionWrapper> getConfigs() {
         List<ConfigOptionWrapper> list = new ArrayList<>();
-        if (tab == Tab.FEATURE) {
-            Configs.OPTIONS.forEach(c -> list.add(new ConfigOptionWrapper(c)));
-        } else {
-            Hotkeys.HOTKEY_LIST.forEach(h -> list.add(new ConfigOptionWrapper(h)));
+        switch (tab) {
+            case FEATURE -> {
+                Configs.CORE_OPTIONS.forEach(c -> list.add(new ConfigOptionWrapper(c)));
+                Configs.DATA_OPTIONS.forEach(c -> list.add(new ConfigOptionWrapper(c)));
+            }
+            case LOGISTICS -> Configs.LOGISTICS_OPTIONS.forEach(c -> list.add(new ConfigOptionWrapper(c)));
+            case RENDER -> Configs.RENDER_OPTIONS.forEach(c -> list.add(new ConfigOptionWrapper(c)));
+            case HOTKEYS -> Hotkeys.HOTKEY_LIST.forEach(h -> list.add(new ConfigOptionWrapper(h)));
         }
         return list;
     }
 
-    public enum Tab { FEATURE, HOTKEYS }
+    public enum Tab { FEATURE, LOGISTICS, RENDER, HOTKEYS }
 
     private record ButtonListener(Tab tab, GuiConfigs parent) implements IButtonActionListener {
         @Override
