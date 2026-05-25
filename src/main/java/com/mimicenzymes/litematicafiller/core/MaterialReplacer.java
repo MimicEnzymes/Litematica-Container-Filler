@@ -9,6 +9,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -64,7 +65,7 @@ public class MaterialReplacer {
                 ItemRule source = parseRule(parts[0].trim());
                 ItemRule target = parseRule(parts[1].trim());
 
-                if (source.item != net.minecraft.item.Items.AIR && target.item != net.minecraft.item.Items.AIR) {
+                if (source.item != net.minecraft.item.Items.AIR) {
                     REPLACEMENTS.add(new Replacement(source, target));
                 }
             }
@@ -103,6 +104,10 @@ public class MaterialReplacer {
 
         for (Replacement rep : REPLACEMENTS) {
             if (rep.source.matches(original)) {
+                if (rep.target.item == net.minecraft.item.Items.AIR) {
+                    return ItemStack.EMPTY;
+                }
+
                 ItemStack newStack = new ItemStack(rep.target.item, original.getCount());
 
                 if (rep.target.name != null) {
@@ -115,14 +120,33 @@ public class MaterialReplacer {
         return original;
     }
 
+    public static boolean isIgnored(ItemStack original) {
+        if (original == null || original.isEmpty()) return false;
+        checkReload();
+        if (REPLACEMENTS.isEmpty()) return false;
+
+        for (Replacement rep : REPLACEMENTS) {
+            if (rep.source.matches(original) && rep.target.item == net.minecraft.item.Items.AIR) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static void replaceInMap(Map<Integer, ItemStack> inventory) {
         if (inventory == null || inventory.isEmpty()) return;
         checkReload();
         if (REPLACEMENTS.isEmpty()) return;
-        for (Map.Entry<Integer, ItemStack> entry : inventory.entrySet()) {
+        Iterator<Map.Entry<Integer, ItemStack>> iterator = inventory.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<Integer, ItemStack> entry = iterator.next();
             ItemStack replaced = replaceSingleStack(entry.getValue());
             if (replaced != entry.getValue()) {
-                entry.setValue(replaced);
+                if (replaced == null || replaced.isEmpty()) {
+                    iterator.remove();
+                } else {
+                    entry.setValue(replaced);
+                }
             }
         }
     }
@@ -134,6 +158,11 @@ public class MaterialReplacer {
                 if (!original.isEmpty()) {
                     ItemStack replaced = replaceSingleStack(original);
                     if (replaced != original) {
+                        if (replaced == null || replaced.isEmpty()) {
+                            itemsList.remove(i);
+                            i--;
+                            continue;
+                        }
                         net.minecraft.nbt.NbtElement newTag = ItemStack.OPTIONAL_CODEC.encodeStart(registries.getOps(net.minecraft.nbt.NbtOps.INSTANCE), replaced).resultOrPartial().orElse(null);
                         if (newTag instanceof net.minecraft.nbt.NbtCompound newCompound) {
                             if (itemTag.contains("Slot")) {
