@@ -31,6 +31,9 @@ public class HighlightRenderer {
     private final float[] renderOffset = new float[3];
     private int cachedHighlightVersion = -1;
     private long cachedStyleSignature = EMPTY_SIGNATURE;
+    private ChunkRenderCache taskOverlayCache = null;
+    private long taskOverlaySignature = EMPTY_SIGNATURE;
+    private long taskOverlayFrame = Long.MIN_VALUE;
 
     public static HighlightRenderer getInstance() { return INSTANCE; }
 
@@ -229,11 +232,27 @@ public class HighlightRenderer {
     }
 
     private void drawTaskOverlays(Vec3d cameraPos, boolean xray, BlockPos currentTaskPos, Set<BlockPos> queuedTaskPositions, Set<BlockPos> missingMaterialPositions, Set<BlockPos> recentFillingPositions) {
-        if (!hasTaskOverlay(currentTaskPos, queuedTaskPositions, missingMaterialPositions, recentFillingPositions)) return;
+        if (!hasTaskOverlay(currentTaskPos, queuedTaskPositions, missingMaterialPositions, recentFillingPositions)) {
+            clearTaskOverlayCache();
+            return;
+        }
 
         RenderContext ctx = null;
         BuiltBuffer meshData = null;
         try {
+            int fpsLimit = Configs.TASK_MARKER_ANIMATION_FPS.getIntegerValue();
+            double rawTime = System.nanoTime() / 1_000_000_000.0D;
+            long frame = fpsLimit <= 0 ? System.nanoTime() : (long)Math.floor(rawTime * fpsLimit);
+            double time = fpsLimit <= 0 ? rawTime : frame / (double)fpsLimit;
+            long signature = computeTaskOverlaySignature(xray, currentTaskPos, queuedTaskPositions, missingMaterialPositions);
+            if (taskOverlayCache != null && taskOverlaySignature == signature && taskOverlayFrame == frame) {
+                renderOffset[0] = (float)(taskOverlayCache.cameraX - cameraPos.x);
+                renderOffset[1] = (float)(taskOverlayCache.cameraY - cameraPos.y);
+                renderOffset[2] = (float)(taskOverlayCache.cameraZ - cameraPos.z);
+                drawChunkCache(taskOverlayCache);
+                return;
+            }
+
             ctx = new RenderContext(
                     () -> "litematica_filler_task_overlays",
                     xray ? MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL : MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_LEQUAL_DEPTH_OFFSET_2
@@ -242,7 +261,6 @@ public class HighlightRenderer {
             var buffer = ctx.getBuilder();
             if (buffer == null) return;
 
-            double time = System.nanoTime() / 1_000_000_000.0D;
             if (Configs.RENDER_FILLING_ARROW.getBooleanValue()) {
                 if (currentTaskPos != null) {
                     drawFillingArrow(getHighlightBox(currentTaskPos), cameraPos, time, buffer);
@@ -274,13 +292,17 @@ public class HighlightRenderer {
             ctx.upload(meshData, false);
             ChunkRenderCache cache = new ChunkRenderCache(null, ctx, cameraPos.x, cameraPos.y, cameraPos.z);
             ctx = null;
+            clearTaskOverlayCache();
+            taskOverlayCache = cache;
+            taskOverlaySignature = signature;
+            taskOverlayFrame = frame;
 
             renderOffset[0] = 0.0f;
             renderOffset[1] = 0.0f;
             renderOffset[2] = 0.0f;
             drawChunkCache(cache);
-            closeContext(cache.fillContext);
         } catch (Exception e) {
+            clearTaskOverlayCache();
             LOGGER.warn("Failed to render container task overlays", e);
         } finally {
             if (meshData != null) meshData.close();
@@ -393,6 +415,36 @@ public class HighlightRenderer {
         return mix64(sum ^ Double.doubleToLongBits(Configs.HIGHLIGHT_TOP_PLATE_SIZE.getDoubleValue()));
     }
 
+    private long computeTaskOverlaySignature(boolean xray, BlockPos currentTaskPos, Set<BlockPos> queuedTaskPositions, Set<BlockPos> missingMaterialPositions) {
+        long sum = xray ? 0x31cb2ad18e5c3f01L : 0x59232765f0aa67bdL;
+        sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_FILLING.getColor().getIntValue());
+        sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_QUEUED.getColor().getIntValue());
+        sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_MISSING_MATERIAL.getColor().getIntValue());
+        sum = mix64(sum ^ Double.doubleToLongBits(Configs.TASK_OVERLAY_SCALE.getDoubleValue()));
+        sum = mix64(sum ^ (Configs.RENDER_FILLING_ARROW.getBooleanValue() ? 0x101L : 0L));
+        sum = mix64(sum ^ (Configs.RENDER_QUEUED_SPINNER.getBooleanValue() ? 0x202L : 0L));
+        sum = mix64(sum ^ (Configs.RENDER_MISSING_MATERIAL_MARKER.getBooleanValue() ? 0x404L : 0L));
+        sum = mix64(sum ^ Configs.MAX_QUEUED_RENDER_OVERLAYS.getIntegerValue());
+        if (currentTaskPos != null) {
+            sum = mix64(sum ^ currentTaskPos.asLong());
+        }
+        int count = 0;
+        int maxQueued = Configs.MAX_QUEUED_RENDER_OVERLAYS.getIntegerValue();
+        for (BlockPos pos : queuedTaskPositions) {
+            if (pos == null || pos.equals(currentTaskPos)) continue;
+            if (count++ >= maxQueued) break;
+            sum = mix64(sum ^ pos.asLong());
+        }
+        count = 0;
+        int maxMissing = Configs.MAX_QUEUED_RENDER_OVERLAYS.getIntegerValue();
+        for (BlockPos pos : missingMaterialPositions) {
+            if (pos == null) continue;
+            if (count++ >= maxMissing) break;
+            sum = mix64(sum ^ Long.rotateLeft(pos.asLong(), 17));
+        }
+        return sum;
+    }
+
     private long mix64(long value) {
         value = (value ^ (value >>> 30)) * 0xbf58476d1ce4e5b9L;
         value = (value ^ (value >>> 27)) * 0x94d049bb133111ebL;
@@ -407,8 +459,19 @@ public class HighlightRenderer {
         chunkCaches.clear();
         desiredChunks.clear();
         dirtyChunks.clear();
+        clearTaskOverlayCache();
         cachedHighlightVersion = -1;
         cachedStyleSignature = EMPTY_SIGNATURE;
+    }
+
+    private void clearTaskOverlayCache() {
+        if (taskOverlayCache != null) {
+            closeContext(taskOverlayCache.fillContext);
+            closeContext(taskOverlayCache.lineContext);
+            taskOverlayCache = null;
+        }
+        taskOverlaySignature = EMPTY_SIGNATURE;
+        taskOverlayFrame = Long.MIN_VALUE;
     }
 
     private void removeChunkCache(ChunkKey key) {

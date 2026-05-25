@@ -43,6 +43,10 @@ public class GuiConfigs extends GuiConfigsBase {
             String label = fi.dy.masa.malilib.util.StringUtils.translate("litematica_container_filler.gui.button.container_filter_picker");
             ButtonGeneric button = new ButtonGeneric(10, 50, 180, 20, label);
             this.addButton(button, (clickedButton, mouseButton) -> GuiBase.openGui(new GuiContainerFilter(this)));
+        } else if (tab == Tab.RENDER) {
+            String label = fi.dy.masa.malilib.util.StringUtils.translate("litematica_container_filler.gui.button.render_editor");
+            ButtonGeneric button = new ButtonGeneric(10, 50, 180, 20, label);
+            this.addButton(button, (clickedButton, mouseButton) -> GuiBase.openGui(new GuiRenderEditor(this)));
         }
     }
 

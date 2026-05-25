@@ -75,6 +75,7 @@ public class Configs implements IConfigHandler {
     public static final ConfigDouble TOOL_HUD_SMOOTHING             = new ConfigDouble("litematica_container_filler.config.name.toolHudSmoothing", 0.22D, 0.05D, 0.8D, "litematica_container_filler.config.comment.toolHudSmoothing");
     public static final ConfigInteger TOOL_HUD_OFFSET               = new ConfigInteger("litematica_container_filler.config.name.toolHudOffset", 34, 12, 120, "litematica_container_filler.config.comment.toolHudOffset");
     public static final ConfigInteger TOOL_HUD_SCALE                = new ConfigInteger("litematica_container_filler.config.name.toolHudScale", 100, 70, 150, "litematica_container_filler.config.comment.toolHudScale");
+    public static final ConfigInteger TOOL_HUD_FRAME_RATE           = new ConfigInteger("litematica_container_filler.config.name.toolHudFrameRate", 30, 0, 240, "litematica_container_filler.config.comment.toolHudFrameRate");
 
     // Container tool hotkeys
     public static final ConfigBooleanHotkeyed TOOL_CLEAR_MODE        = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.toolClearMode", false, "", "litematica_container_filler.config.comment.toolClearMode");
@@ -105,6 +106,7 @@ public class Configs implements IConfigHandler {
     public static final ConfigDouble HIGHLIGHT_GLASS_ALPHA_MULTIPLIER = new ConfigDouble("litematica_container_filler.config.name.highlightGlassAlphaMultiplier", 0.24D, 0.0D, 1.0D, "litematica_container_filler.config.comment.highlightGlassAlphaMultiplier");
     public static final ConfigDouble HIGHLIGHT_TOP_PLATE_SIZE       = new ConfigDouble("litematica_container_filler.config.name.highlightTopPlateSize", 0.64D, 0.1D, 1.2D, "litematica_container_filler.config.comment.highlightTopPlateSize");
     public static final ConfigDouble TASK_OVERLAY_SCALE             = new ConfigDouble("litematica_container_filler.config.name.taskOverlayScale", 1.0D, 0.25D, 3.0D, "litematica_container_filler.config.comment.taskOverlayScale");
+    public static final ConfigInteger TASK_MARKER_ANIMATION_FPS     = new ConfigInteger("litematica_container_filler.config.name.taskMarkerAnimationFps", 30, 0, 240, "litematica_container_filler.config.comment.taskMarkerAnimationFps");
 
     //高亮颜色配置
     public static final ConfigColor HIGHLIGHT_COLOR_UNFILLED        = new ConfigColor("litematica_container_filler.config.name.highlightColorUnfilled", "0x806E5CFF", "litematica_container_filler.config.comment.highlightColorUnfilled");
@@ -172,7 +174,8 @@ public class Configs implements IConfigHandler {
                 TOOL_HUD_OPACITY,
                 TOOL_HUD_SMOOTHING,
                 TOOL_HUD_OFFSET,
-                TOOL_HUD_SCALE
+                TOOL_HUD_SCALE,
+                TOOL_HUD_FRAME_RATE
         );
 
         RENDER_OPTIONS = ImmutableList.of(
@@ -199,6 +202,7 @@ public class Configs implements IConfigHandler {
                 HIGHLIGHT_GLASS_ALPHA_MULTIPLIER,
                 HIGHLIGHT_TOP_PLATE_SIZE,
                 TASK_OVERLAY_SCALE,
+                TASK_MARKER_ANIMATION_FPS,
                 HIGHLIGHT_COLOR_UNFILLED,
                 HIGHLIGHT_COLOR_PARTIAL,
                 HIGHLIGHT_COLOR_OVERFILLED,

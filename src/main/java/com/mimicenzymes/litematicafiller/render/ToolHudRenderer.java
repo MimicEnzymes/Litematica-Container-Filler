@@ -48,6 +48,7 @@ public class ToolHudRenderer {
     private static String cachedHint = "";
     private static String cachedSecondaryHint = "";
     private static int cachedPanelWidth = MIN_PANEL_WIDTH;
+    private static long lastHudUpdateNanos = 0L;
 
     private ToolHudRenderer() {
     }
@@ -63,8 +64,12 @@ public class ToolHudRenderer {
         ContainerToolStateMachine tools = ContainerToolStateMachine.getInstance();
         BlockPos target = tools.isToolEnabled() ? tools.getLookedContainerForHud(client) : null;
         boolean visible = target != null && client.currentScreen == null;
+        long now = System.nanoTime();
+        boolean updateFrame = shouldUpdateFrame(now);
         float smoothing = clamp((float) Configs.TOOL_HUD_SMOOTHING.getDoubleValue(), 0.05f, 0.8f);
-        visibility += ((visible ? 1.0f : 0.0f) - visibility) * smoothing;
+        if (updateFrame) {
+            visibility += ((visible ? 1.0f : 0.0f) - visibility) * smoothing;
+        }
         if (!visible && visibility <= 0.02f) {
             visibility = 0.0f;
             return;
@@ -80,7 +85,7 @@ public class ToolHudRenderer {
         int panelH = Math.round((cachedSecondaryHint.isEmpty() ? 34 : 47) * scale);
         int offset = Math.round(Configs.TOOL_HUD_OFFSET.getIntegerValue() * scale);
 
-        if (visible) {
+        if (visible && updateFrame) {
             updateLayout(client, target, width, height, panelW, panelH, offset, scale, smoothing);
         } else if (!hasLayout()) {
             return;
@@ -101,6 +106,21 @@ public class ToolHudRenderer {
         drawLeader(context, startX, startY, endX, endY, alpha);
         drawAnchor(context, startX, startY, alpha);
         drawPanel(context, client, panelLeft, panelTop, panelW, panelH, scale, alpha);
+    }
+
+    private static boolean shouldUpdateFrame(long nowNanos) {
+        int fpsLimit = Configs.TOOL_HUD_FRAME_RATE.getIntegerValue();
+        if (fpsLimit <= 0) {
+            lastHudUpdateNanos = nowNanos;
+            return true;
+        }
+
+        long interval = 1_000_000_000L / Math.max(1, fpsLimit);
+        if (lastHudUpdateNanos == 0L || nowNanos - lastHudUpdateNanos >= interval) {
+            lastHudUpdateNanos = nowNanos;
+            return true;
+        }
+        return false;
     }
 
     private static void updateLayout(MinecraftClient client, BlockPos target, int width, int height, int panelW, int panelH,
