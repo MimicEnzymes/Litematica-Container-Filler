@@ -140,6 +140,7 @@ public class AreaScanner {
 
         if (!processedPositions.add(taskPos)) return;
         if (eyePos.squaredDistanceTo(Vec3d.ofCenter(taskPos)) > reachSq) return;
+        if (isLoadedRealContainerMissing(mc, taskPos, halves)) return;
 
         Long lastAttempt = ATTEMPT_COOLDOWNS.get(taskPos);
         long cooldownMs = passThroughScan ? 1200L : ATTEMPT_COOLDOWN_MS;
@@ -155,6 +156,22 @@ public class AreaScanner {
         if (!hasItems && !needsLocking) return;
 
         pendingTasks.add(new PendingTask(taskPos, required == null ? new HashMap<>() : required, taskPos.getSquaredDistance(center)));
+    }
+
+    private static boolean isLoadedRealContainerMissing(MinecraftClient mc, BlockPos taskPos, BlockPos[] schematicHalves) {
+        if (schematicHalves == null) {
+            return mc.world.isChunkLoaded(taskPos) &&
+                    !ContainerBlockFilter.isAllowedForSchematicFill(mc.world.getBlockState(taskPos), mc.world, taskPos);
+        }
+
+        for (BlockPos half : schematicHalves) {
+            if (mc.world.isChunkLoaded(half) &&
+                    !ContainerBlockFilter.isAllowedForSchematicFill(mc.world.getBlockState(half), mc.world, half)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static void clearAttemptCooldown(BlockPos pos) {

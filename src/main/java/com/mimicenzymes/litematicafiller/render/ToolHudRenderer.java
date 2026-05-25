@@ -381,6 +381,7 @@ public class ToolHudRenderer {
         int iconBaseY = y + headerHeight + Math.round(27.0f * scale);
         int iconCenterX = iconBaseX + (cachedMode == ContainerToolMode.COPY ? breathe : 0);
         int iconCenterY = iconBaseY + (cachedMode == ContainerToolMode.COPY ? 0 : breathe);
+        float iconScale = scale * clamp(Configs.TOOL_HUD_ICON_SCALE.getIntegerValue() / 100.0f, 0.5f, 1.5f);
         int textX = x + pad + Math.round(36.0f * scale);
 
         drawRoundedInfoCard(context, x + 2, y + 3, width, height, withAlpha(0xFF000000, shadowAlpha));
@@ -391,7 +392,7 @@ public class ToolHudRenderer {
                 x + pad, y + 8, scale, withAlpha(TEXT, alpha));
 
         int labelY = y + headerHeight + 9;
-        drawHudToolIcon(context, iconCenterX, iconCenterY, scale, alpha, eased, cachedMode);
+        drawHudToolIcon(context, iconCenterX, iconCenterY, iconScale, alpha, eased, cachedMode);
         drawScaledText(context, client, cachedLabel, textX, labelY, scale, withAlpha(MUTED_TEXT, Math.round(alpha * 0.88f)));
         drawScaledText(context, client, cachedHint, textX, labelY + lineGap, scale, withAlpha(0xFF55FF68, alpha));
         if (!cachedSecondaryHint.isEmpty()) {
@@ -440,17 +441,17 @@ public class ToolHudRenderer {
         int base = Configs.HIGHLIGHT_COLOR_FILLING.getColor().toVanillaArgb();
         int body = withAlpha(base, Math.round(alpha * 0.88f));
         int shine = withAlpha(0xFFFFFFFF, Math.round(alpha * 0.28f));
-        int halfW = Math.max(8, Math.round(11.0f * scale));
-        int shaft = Math.max(4, Math.round(5.0f * scale));
+        int shaft = Math.max(3, Math.round(3.5f * scale));
+        int halfW = Math.max(7, Math.round(10.5f * scale));
         int top = cy - Math.round(13.0f * scale);
         int headY = cy - Math.round(1.0f * scale);
-        int tailY = cy + Math.round(13.0f * scale);
+        int shoulderY = cy + Math.round(1.0f * scale);
+        int tailY = cy + Math.round(15.0f * scale);
 
-        fillRotatedRect(context, cx, cy, -shaft, top - cy, shaft + 1, headY - cy + 2, body, direction);
-        fillRotatedRect(context, cx, cy, -halfW, headY - cy, halfW + 1, headY - cy + Math.max(5, Math.round(6.0f * scale)), body, direction);
-        fillRotatedRect(context, cx, cy, -Math.round(halfW * 0.72f), headY - cy + Math.round(6.0f * scale), Math.round(halfW * 0.72f) + 1, headY - cy + Math.round(10.0f * scale), body, direction);
-        fillRotatedRect(context, cx, cy, -Math.round(halfW * 0.42f), headY - cy + Math.round(10.0f * scale), Math.round(halfW * 0.42f) + 1, tailY - cy, body, direction);
-        fillRotatedRect(context, cx, cy, -1, top - cy + 2, 2, tailY - cy - 1, shine, direction);
+        fillRotatedPolygon(context, cx, cy, direction, body,
+                new int[]{-shaft, shaft, shaft, halfW, 0, -halfW, -shaft},
+                new int[]{top - cy, top - cy, headY - cy, shoulderY - cy, tailY - cy, shoulderY - cy, headY - cy});
+        fillRotatedRect(context, cx, cy, -1, top - cy + 2, 2, tailY - cy - 3, shine, direction);
     }
 
     private static void drawScaledText(DrawContext context, MinecraftClient client, String text, int x, int y, float scale, int color) {
@@ -471,6 +472,43 @@ public class ToolHudRenderer {
         int[] a = rotate(cx, cy, relX1, relY1, direction);
         int[] b = rotate(cx, cy, relX2, relY2, direction);
         context.fill(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1]), color);
+    }
+
+    private static void fillRotatedPolygon(DrawContext context, int cx, int cy, ArrowDirection direction, int color, int[] relXs, int[] relYs) {
+        int[] xs = new int[relXs.length];
+        int[] ys = new int[relYs.length];
+        for (int i = 0; i < relXs.length; i++) {
+            int[] point = rotate(cx, cy, relXs[i], relYs[i], direction);
+            xs[i] = point[0];
+            ys[i] = point[1];
+        }
+        fillPolygon(context, xs, ys, color);
+    }
+
+    private static void fillPolygon(DrawContext context, int[] xs, int[] ys, int color) {
+        int minY = Integer.MAX_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        for (int y : ys) {
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+        }
+
+        for (int y = minY; y <= maxY; y++) {
+            java.util.ArrayList<Integer> intersections = new java.util.ArrayList<>();
+            for (int i = 0; i < xs.length; i++) {
+                int next = (i + 1) % xs.length;
+                int y1 = ys[i];
+                int y2 = ys[next];
+                if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
+                    double t = (y - y1) / (double)(y2 - y1);
+                    intersections.add((int)Math.round(xs[i] + (xs[next] - xs[i]) * t));
+                }
+            }
+            java.util.Collections.sort(intersections);
+            for (int i = 0; i + 1 < intersections.size(); i += 2) {
+                context.fill(intersections.get(i), y, intersections.get(i + 1) + 1, y + 1, color);
+            }
+        }
     }
 
     private static int[] rotate(int cx, int cy, int x, int y, ArrowDirection direction) {

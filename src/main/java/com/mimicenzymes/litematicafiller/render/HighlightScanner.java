@@ -210,6 +210,10 @@ public class HighlightScanner {
         tickCounter++;
         if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
             clearHighlights();
+            DATA_REQUEST_QUEUE.clear();
+            QUEUED_DATA_REQUESTS.clear();
+            HIGHLIGHT_REQUEST_TIME.clear();
+            HIGHLIGHT_REQUEST_INTERVALS.clear();
             return;
         }
 

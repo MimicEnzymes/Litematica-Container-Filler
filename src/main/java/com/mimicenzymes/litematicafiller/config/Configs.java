@@ -60,7 +60,8 @@ public class Configs implements IConfigHandler {
     public static final ConfigBoolean ENABLE_CREATIVE_FILL          = new ConfigBoolean("litematica_container_filler.config.name.creativeFill", true, "litematica_container_filler.config.comment.creativeFill");
     public static final ConfigBoolean ENABLE_QS_EXTRACTION          = new ConfigBoolean("litematica_container_filler.config.name.enableQsExtraction", true, "litematica_container_filler.config.comment.enableQsExtraction");
     public static final ConfigOptionList QUICK_SHULKER_OPEN_MODE    = new ConfigOptionList("litematica_container_filler.config.name.quickShulkerOpenMode", QuickShulkerOpenMode.INVOKE, "litematica_container_filler.config.comment.quickShulkerOpenMode");
-    public static final ConfigBoolean AUTO_STASH_ITEMS              = new ConfigBoolean("litematica_container_filler.config.name.autoStashItems", true, "litematica_container_filler.config.comment.autoStashItems");
+    private static final ConfigBoolean AUTO_STASH_ITEMS             = new ConfigBoolean("litematica_container_filler.config.name.autoStashItems", true, "litematica_container_filler.config.comment.autoStashItems");
+    public static final ConfigBoolean STORE_ORDERLY                 = new ConfigBoolean("litematica_container_filler.config.name.storeOrderly", true, "litematica_container_filler.config.comment.storeOrderly");
     public static final ConfigBoolean DROP_EXTRACTED_ITEMS          = new ConfigBoolean("litematica_container_filler.config.name.dropExtractedItems", false, "litematica_container_filler.config.comment.dropExtractedItems");
     public static final ConfigBoolean DROP_ITEMS_FROM_EMPTY_SCHEMATIC_CONTAINERS = new ConfigBoolean("litematica_container_filler.config.name.dropItemsFromEmptySchematicContainers", false, "litematica_container_filler.config.comment.dropItemsFromEmptySchematicContainers");
     private static final ConfigBoolean HIDE_FILLER_GUI              = new ConfigBoolean("litematica_container_filler.config.name.hideFillerGui", true, "litematica_container_filler.config.comment.hideFillerGui");
@@ -76,6 +77,7 @@ public class Configs implements IConfigHandler {
     public static final ConfigDouble TOOL_HUD_SMOOTHING             = new ConfigDouble("litematica_container_filler.config.name.toolHudSmoothing", 0.22D, 0.05D, 0.8D, "litematica_container_filler.config.comment.toolHudSmoothing");
     public static final ConfigInteger TOOL_HUD_OFFSET               = new ConfigInteger("litematica_container_filler.config.name.toolHudOffset", 34, 12, 120, "litematica_container_filler.config.comment.toolHudOffset");
     public static final ConfigInteger TOOL_HUD_SCALE                = new ConfigInteger("litematica_container_filler.config.name.toolHudScale", 100, 70, 150, "litematica_container_filler.config.comment.toolHudScale");
+    public static final ConfigInteger TOOL_HUD_ICON_SCALE           = new ConfigInteger("litematica_container_filler.config.name.toolHudIconScale", 82, 50, 150, "litematica_container_filler.config.comment.toolHudIconScale");
     public static final ConfigInteger TOOL_HUD_CUSTOM_X             = new ConfigInteger("litematica_container_filler.config.name.toolHudCustomX", 112, -1000, 1000, "litematica_container_filler.config.comment.toolHudCustomX");
     public static final ConfigInteger TOOL_HUD_CUSTOM_Y             = new ConfigInteger("litematica_container_filler.config.name.toolHudCustomY", -86, -1000, 1000, "litematica_container_filler.config.comment.toolHudCustomY");
     public static final ConfigInteger TOOL_HUD_FRAME_RATE           = new ConfigInteger("litematica_container_filler.config.name.toolHudFrameRate", 30, 0, 240, "litematica_container_filler.config.comment.toolHudFrameRate");
@@ -161,7 +163,7 @@ public class Configs implements IConfigHandler {
                 ENABLE_CREATIVE_FILL,
                 ENABLE_QS_EXTRACTION,
                 QUICK_SHULKER_OPEN_MODE,
-                AUTO_STASH_ITEMS,
+                STORE_ORDERLY,
                 DROP_EXTRACTED_ITEMS,
                 DROP_ITEMS_FROM_EMPTY_SCHEMATIC_CONTAINERS,
                 HIDE_PROJECTION_FILL_GUI
@@ -179,6 +181,7 @@ public class Configs implements IConfigHandler {
                 TOOL_HUD_SMOOTHING,
                 TOOL_HUD_OFFSET,
                 TOOL_HUD_SCALE,
+                TOOL_HUD_ICON_SCALE,
                 TOOL_HUD_CUSTOM_X,
                 TOOL_HUD_CUSTOM_Y,
                 TOOL_HUD_FRAME_RATE
@@ -221,7 +224,7 @@ public class Configs implements IConfigHandler {
                 HIGHLIGHT_COLOR_MISSING_MATERIAL
         );
 
-        LEGACY_OPTIONS = ImmutableList.of(CONTINUOUS_FILL, AREA_MODE, LEGACY_ENABLE_CARPET_LARGE_BARRELS, HIDE_FILLER_GUI);
+        LEGACY_OPTIONS = ImmutableList.of(CONTINUOUS_FILL, AREA_MODE, LEGACY_ENABLE_CARPET_LARGE_BARRELS, AUTO_STASH_ITEMS, HIDE_FILLER_GUI);
 
         ImmutableList.Builder<IConfigBase> builder = ImmutableList.builder();
         builder.addAll(CORE_OPTIONS);
@@ -247,6 +250,7 @@ public class Configs implements IConfigHandler {
                     WORKING_STATE.setBooleanValue(true);
                 }
                 migrateLegacyLargeBarrelConfig(root);
+                migrateLegacyAutoStashConfig(root);
                 migrateLegacyHiddenGuiConfig(root);
                 validateConditionalOptions();
             }
@@ -267,6 +271,13 @@ public class Configs implements IConfigHandler {
         CARPET_LARGE_BARREL_MODE.setValueFromString(
                 LEGACY_ENABLE_CARPET_LARGE_BARRELS.getBooleanValue() ? CarpetLargeBarrelMode.ON.getStringValue() : CarpetLargeBarrelMode.OFF.getStringValue()
         );
+    }
+
+    private static void migrateLegacyAutoStashConfig(JsonObject root) {
+        if (hasConfigEntry(root, STORE_ORDERLY.getName())) return;
+        if (!hasConfigEntry(root, AUTO_STASH_ITEMS.getName())) return;
+
+        STORE_ORDERLY.setBooleanValue(AUTO_STASH_ITEMS.getBooleanValue());
     }
 
     private static void migrateLegacyHiddenGuiConfig(JsonObject root) {

@@ -55,17 +55,33 @@ public class LitematicaContainerFillerClient implements ClientModInitializer {
             handleFillStateProtection(client);
 
             if (client.world != null) {
-                ClickPacketRateLimiter.tick(client);
-                AutoFillerStateMachine.getInstance().tick(client);
-                ContainerToolStateMachine.getInstance().tick(client);
-                LitematicaChangeListener.tick(client);
-                RealContainerCache.tick(client);
-
-                ContainerHighlighter.tick(client);
-
                 AutoFillerStateMachine filler = AutoFillerStateMachine.getInstance();
+                ContainerToolStateMachine tool = ContainerToolStateMachine.getInstance();
+                boolean highlightEnabled = Configs.HIGHLIGHT_CONTAINERS.getBooleanValue();
+                boolean workEnabled = Configs.WORKING_STATE.getBooleanValue();
+                boolean fillerActive = filler.isWorking() || workEnabled;
+                boolean toolActive = tool.isWorking() || Configs.TOOL_ENABLED.getBooleanValue();
+                boolean needsContainerData = highlightEnabled || fillerActive || toolActive;
+
+                ClickPacketRateLimiter.tick(client);
+                if (fillerActive || !filler.isIdle()) {
+                    filler.tick(client);
+                } else {
+                    ClickPacketRateLimiter.setOperationActive(false);
+                }
+                if (toolActive) {
+                    tool.tick(client);
+                }
+                if (needsContainerData) {
+                    LitematicaChangeListener.tick(client);
+                    RealContainerCache.tick(client);
+                }
+                if (highlightEnabled) {
+                    ContainerHighlighter.tick(client);
+                }
+
                 boolean passThroughScan = isPlayerMovingFast(client);
-                if (Configs.WORKING_STATE.getBooleanValue() && (filler.canQueueMoreTasks() || passThroughScan)) {
+                if (workEnabled && (filler.canQueueMoreTasks() || passThroughScan)) {
                     workerTickTimer++;
                     int scanInterval = getWorkerScanInterval(client, filler);
                     if (workerTickTimer >= scanInterval) {
@@ -79,7 +95,7 @@ public class LitematicaContainerFillerClient implements ClientModInitializer {
         });
 
         WorldRenderEvents.AFTER_ENTITIES.register(context -> {
-            if (com.mimicenzymes.litematicafiller.config.Configs.ENABLE_MOD.getBooleanValue()) {
+            if (Configs.ENABLE_MOD.getBooleanValue() && Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
                 ContainerHighlighter.onRender(context);
             }
         });

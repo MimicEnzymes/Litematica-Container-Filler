@@ -55,6 +55,18 @@ public class RealContainerCache {
 
     public static void tick(MinecraftClient client) {
         if (client.world == null || client.player == null) return;
+        boolean activeOperation = AutoFillerStateMachine.getInstance().isWorking() || ContainerToolStateMachine.getInstance().isWorking();
+        boolean hasConsumer = Configs.HIGHLIGHT_CONTAINERS.getBooleanValue() ||
+                Configs.WORKING_STATE.getBooleanValue() ||
+                activeOperation ||
+                Configs.TOOL_ENABLED.getBooleanValue();
+        if (!Configs.ENABLE_MOD.getBooleanValue() || !hasConsumer) {
+            lastObservedHandler = null;
+            lastObservedSyncId = Integer.MIN_VALUE;
+            lastObservedSignature = Long.MIN_VALUE;
+            lastObservedTick = Long.MIN_VALUE;
+            return;
+        }
 
         if (client.world.getTime() % 100 == 0) {
             PENDING_NBT_REQUESTS.clear();

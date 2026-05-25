@@ -321,8 +321,8 @@ public class HighlightRenderer {
         Color4f core = new Color4f(0.82f, 1.0f, 0.96f, 0.36f);
         Color4f glow = new Color4f(base.r, base.g, base.b, 0.12f);
 
-        drawVerticalDownArrow(cx, y, cz, 0.30f * scale, 0.62f * scale, 0.090f * scale, body, cameraPos, buffer);
-        drawVerticalDownArrow(cx, y + 0.010f * scale, cz, 0.18f * scale, 0.39f * scale, 0.052f * scale, core, cameraPos, buffer);
+        drawVerticalDownArrow(cx, y, cz, 0.24f * scale, 0.62f * scale, 0.080f * scale, body, cameraPos, buffer);
+        drawVerticalDownArrow(cx, y + 0.010f * scale, cz, 0.135f * scale, 0.39f * scale, 0.046f * scale, core, cameraPos, buffer);
         drawCenteredWorldBox(cx, box.maxY() + 0.045f, cz, (0.24f + pulse * 0.05f) * scale, 0.020f * scale, glow, cameraPos, buffer);
     }
 
@@ -362,18 +362,47 @@ public class HighlightRenderer {
     }
 
     private void drawVerticalDownArrow(float cx, float cy, float cz, float halfWidth, float height, float halfDepth, Color4f color, Vec3d cameraPos, net.minecraft.client.render.BufferBuilder buffer) {
-        float shaftHalf = halfWidth * 0.28f;
-        float shaftTop = cy + height * 0.42f;
-        float shaftBottom = cy - height * 0.06f;
+        float shaftHalf = halfWidth * 0.26f;
+        float shaftTop = cy + height * 0.44f;
+        float shaftBottom = cy - height * 0.04f;
         float headTop = cy - height * 0.02f;
-        float tip = cy - height * 0.48f;
-        float step = (headTop - tip) / 4.0f;
+        float tipY = cy - height * 0.48f;
+        float[] headXs = {cx - halfWidth, cx + halfWidth, cx};
+        float[] headYs = {headTop, headTop, tipY};
 
         drawWorldBox(cx - shaftHalf, shaftBottom, cz - halfDepth, cx + shaftHalf, shaftTop, cz + halfDepth, color, cameraPos, buffer);
-        drawWorldBox(cx - halfWidth, headTop - step, cz - halfDepth, cx + halfWidth, headTop, cz + halfDepth, color, cameraPos, buffer);
-        drawWorldBox(cx - halfWidth * 0.76f, headTop - step * 2.0f, cz - halfDepth, cx + halfWidth * 0.76f, headTop - step, cz + halfDepth, color, cameraPos, buffer);
-        drawWorldBox(cx - halfWidth * 0.52f, headTop - step * 3.0f, cz - halfDepth, cx + halfWidth * 0.52f, headTop - step * 2.0f, cz + halfDepth, color, cameraPos, buffer);
-        drawWorldBox(cx - halfWidth * 0.24f, tip, cz - halfDepth, cx + halfWidth * 0.24f, headTop - step * 3.0f, cz + halfDepth, color, cameraPos, buffer);
+        drawWorldPrism(headXs, headYs, cz, halfDepth, color, cameraPos, buffer);
+    }
+
+    private void drawWorldPrism(float[] xs, float[] ys, float cz, float halfDepth, Color4f color, Vec3d cameraPos, net.minecraft.client.render.BufferBuilder buffer) {
+        if (xs.length < 3 || xs.length != ys.length) return;
+
+        float frontZ = (float)(cz - halfDepth - cameraPos.z);
+        float backZ = (float)(cz + halfDepth - cameraPos.z);
+
+        for (int i = 1; i + 1 < xs.length; i++) {
+            vertex(xs[0], ys[0], frontZ, color, cameraPos, buffer);
+            vertex(xs[i], ys[i], frontZ, color, cameraPos, buffer);
+            vertex(xs[i + 1], ys[i + 1], frontZ, color, cameraPos, buffer);
+            vertex(xs[i + 1], ys[i + 1], frontZ, color, cameraPos, buffer);
+
+            vertex(xs[0], ys[0], backZ, color, cameraPos, buffer);
+            vertex(xs[i + 1], ys[i + 1], backZ, color, cameraPos, buffer);
+            vertex(xs[i], ys[i], backZ, color, cameraPos, buffer);
+            vertex(xs[i], ys[i], backZ, color, cameraPos, buffer);
+        }
+
+        for (int i = 0; i < xs.length; i++) {
+            int next = (i + 1) % xs.length;
+            vertex(xs[i], ys[i], frontZ, color, cameraPos, buffer);
+            vertex(xs[next], ys[next], frontZ, color, cameraPos, buffer);
+            vertex(xs[next], ys[next], backZ, color, cameraPos, buffer);
+            vertex(xs[i], ys[i], backZ, color, cameraPos, buffer);
+        }
+    }
+
+    private void vertex(float worldX, float worldY, float cameraRelativeZ, Color4f color, Vec3d cameraPos, net.minecraft.client.render.BufferBuilder buffer) {
+        buffer.vertex((float)(worldX - cameraPos.x), (float)(worldY - cameraPos.y), cameraRelativeZ).color(color.r, color.g, color.b, color.a);
     }
 
     private void drawCenteredWorldBox(float cx, float cy, float cz, float halfSize, float halfHeight, Color4f color, Vec3d cameraPos, net.minecraft.client.render.BufferBuilder buffer) {

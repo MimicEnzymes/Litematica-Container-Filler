@@ -6,6 +6,7 @@ import com.mimicenzymes.litematicafiller.dependency.DependencyChecker;
 import com.mimicenzymes.litematicafiller.dependency.DummyExtractor;
 import com.mimicenzymes.litematicafiller.dependency.IShulkerExtractor;
 import com.mimicenzymes.litematicafiller.dependency.QuickShulkerWrapper;
+import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.network.ClickPacketRateLimiter;
 import com.mimicenzymes.litematicafiller.network.TakeItOutCompat;
 import net.minecraft.block.ShulkerBoxBlock;
@@ -112,6 +113,7 @@ public class AutoFillerStateMachine {
 
     private final Set<StrictItemStackKey> borrowedItems = new HashSet<>();
     private final Map<StrictItemStackKey, Integer> stashedItemCounts = new HashMap<>();
+    private final Map<StrictItemStackKey, OrderlyStoredItem> orderlyStoredItems = new HashMap<>();
 
     private final Set<Integer> openedShulkerSlots = new LinkedHashSet<>();
     private final Map<Integer, Set<Item>> shulkerMisses = new HashMap<>();
@@ -131,6 +133,12 @@ public class AutoFillerStateMachine {
     private final IShulkerExtractor shulkerExtractor;
 
     private record TakeItOutRequest(int shulkerSlot, int innerSlot, ItemStack requestedStack, int countBefore) {
+    }
+
+    private record OrderlyStoredItem(ItemStack stack, int sourceShulkerSlot, long lastUseTime) {
+        OrderlyStoredItem touch() {
+            return new OrderlyStoredItem(stack.copy(), sourceShulkerSlot, System.currentTimeMillis());
+        }
     }
 
     private static java.lang.reflect.Field CACHE_FIELD = null;
@@ -268,6 +276,11 @@ public class AutoFillerStateMachine {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) return false;
         if (client.world == null) return false;
+        if (client.world.isChunkLoaded(pos) &&
+                !ContainerBlockFilter.isAllowedForSchematicFill(client.world.getBlockState(pos), client.world, pos)) {
+            failedContainers.put(pos, Collections.singleton(net.minecraft.item.Items.BARRIER));
+            return false;
+        }
 
         boolean isCrafter = client.world.getBlockState(pos).getBlock() instanceof net.minecraft.block.CrafterBlock;
         boolean needsCrafterLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, client);
@@ -506,7 +519,7 @@ public class AutoFillerStateMachine {
             }
 
             if (hasGarbageToExtract && !Configs.DROP_EXTRACTED_ITEMS.getBooleanValue() && getEmptySlots(client).size() == 0) {
-                if (Configs.AUTO_STASH_ITEMS.getBooleanValue() && findStashAction(client, currentTask.requiredItems.values()) != null) {
+                if (Configs.STORE_ORDERLY.getBooleanValue() && findStashAction(client, currentTask.requiredItems.values()) != null) {
                     sendFeedback(client, Text.translatable("litematica_container_filler.message.task_dispatched").getString(), true);
                     return true;
                 }
@@ -578,43 +591,119 @@ public class AutoFillerStateMachine {
     private int[] findStashAction(MinecraftClient client, Collection<ItemStack> requiredValues) {
         if (!canOpenShulkerUi()) return null;
 
-        int targetShulker = -1;
-        int itemToStash = -1;
+        int[] orderlyAction = findOrderlyStoredStashAction(client);
+        if (orderlyAction != null) return orderlyAction;
+
+        return findFastFreeSpaceStashAction(client, requiredValues);
+    }
+
+    private int[] findOrderlyStoredStashAction(MinecraftClient client) {
+        int bestSlot = -1;
+        int bestShulker = -1;
+        long bestUseTime = Long.MAX_VALUE;
 
         for (int i = 0; i < 36; i++) {
-            ItemStack s = client.player.getInventory().getStack(i);
-            if (s.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) {
-                ContainerComponent c = s.get(DataComponentTypes.CONTAINER);
-                long size = c == null ? 0 : c.stream().filter(stack -> !stack.isEmpty()).count();
-                if (size < 27) {
-                    targetShulker = i;
-                    break;
-                }
+            ItemStack stack = client.player.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            StrictItemStackKey key = new StrictItemStackKey(stack);
+            OrderlyStoredItem item = orderlyStoredItems.get(key);
+            if (item != null && item.lastUseTime() < bestUseTime) {
+                int targetShulker = findOrderlyStoreShulker(client, stack, i);
+                if (targetShulker == -1) continue;
+
+                bestUseTime = item.lastUseTime();
+                bestSlot = i;
+                bestShulker = targetShulker;
             }
         }
+        return bestSlot == -1 ? null : new int[]{bestShulker, bestSlot};
+    }
 
-        if (targetShulker == -1) return null;
-
+    private int[] findFastFreeSpaceStashAction(MinecraftClient client, Collection<ItemStack> requiredValues) {
         for (int i = 0; i < 36; i++) {
-            if (i == targetShulker) continue;
-            ItemStack s = client.player.getInventory().getStack(i);
-            if (s.isEmpty()) continue;
-            if (s.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) continue;
+            ItemStack stack = client.player.getInventory().getStack(i);
+            if (stack.isEmpty() || isShulkerBox(stack) || isRequiredForCurrentTask(stack, requiredValues)) continue;
 
-            boolean isNeeded = false;
-            for (ItemStack req : requiredValues) {
-                if (ItemMatcher.isSameItem(s, req)) {
-                    isNeeded = true; break;
-                }
-            }
-            if (!isNeeded) {
-                itemToStash = i;
-                break;
-            }
+            int targetShulker = findOrderlyStoreShulker(client, stack, i);
+            if (targetShulker != -1) return new int[]{targetShulker, i};
         }
-
-        if (itemToStash != -1) return new int[]{targetShulker, itemToStash};
         return null;
+    }
+
+    private boolean isRequiredForCurrentTask(ItemStack stack, Collection<ItemStack> requiredValues) {
+        for (ItemStack req : requiredValues) {
+            if (ItemMatcher.isSameItem(stack, req)) return true;
+        }
+        return false;
+    }
+
+    private int findOrderlyStoreShulker(MinecraftClient client, ItemStack stackToStore, int itemSlot) {
+        if (stackToStore.isEmpty()) return -1;
+
+        OrderlyStoredItem orderlyItem = orderlyStoredItems.get(new StrictItemStackKey(stackToStore));
+        if (orderlyItem != null && canShulkerAccept(client, orderlyItem.sourceShulkerSlot(), stackToStore, itemSlot)) {
+            return orderlyItem.sourceShulkerSlot();
+        }
+
+        int firstEmptySpace = -1;
+        for (int i = 0; i < 36; i++) {
+            if (i == itemSlot) continue;
+            ItemStack shulker = client.player.getInventory().getStack(i);
+            if (!isShulkerBox(shulker)) continue;
+
+            ContainerComponent c = shulker.get(DataComponentTypes.CONTAINER);
+            if (c == null) return i;
+
+            long occupied = 0;
+            for (ItemStack inner : c.stream().toList()) {
+                if (inner.isEmpty()) continue;
+                occupied++;
+                if (ItemMatcher.isSameItem(inner, stackToStore) && inner.getCount() < inner.getMaxCount()) {
+                    return i;
+                }
+            }
+            if (occupied < 27 && firstEmptySpace == -1) firstEmptySpace = i;
+        }
+        return firstEmptySpace;
+    }
+
+    private boolean canShulkerAccept(MinecraftClient client, int shulkerSlot, ItemStack stackToStore, int itemSlot) {
+        if (shulkerSlot < 0 || shulkerSlot >= 36 || shulkerSlot == itemSlot) return false;
+
+        ItemStack shulker = client.player.getInventory().getStack(shulkerSlot);
+        if (!isShulkerBox(shulker)) return false;
+
+        ContainerComponent c = shulker.get(DataComponentTypes.CONTAINER);
+        if (c == null) return true;
+
+        long occupied = 0;
+        for (ItemStack inner : c.stream().toList()) {
+            if (inner.isEmpty()) continue;
+            occupied++;
+            if (ItemMatcher.isSameItem(inner, stackToStore) && inner.getCount() < inner.getMaxCount()) return true;
+        }
+        return occupied < 27;
+    }
+
+    private boolean isShulkerBox(ItemStack stack) {
+        return stack.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock;
+    }
+
+    private void recordOrderlyStoredItem(ItemStack stack, int sourceShulkerSlot) {
+        if (stack.isEmpty() || sourceShulkerSlot < 0) return;
+
+        StrictItemStackKey key = new StrictItemStackKey(stack);
+        orderlyStoredItems.put(key, new OrderlyStoredItem(stack.copy(), sourceShulkerSlot, System.currentTimeMillis()));
+    }
+
+    private void touchOrderlyStoredItem(ItemStack stack) {
+        if (stack.isEmpty()) return;
+
+        StrictItemStackKey key = new StrictItemStackKey(stack);
+        OrderlyStoredItem item = orderlyStoredItems.get(key);
+        if (item != null) {
+            orderlyStoredItems.put(key, item.touch());
+        }
     }
 
     public boolean isSilentlyExtracting() { return silentlyExtracting; }
@@ -940,7 +1029,7 @@ public class AutoFillerStateMachine {
         }
 
         int emptySlots = getEmptySlots(client).size();
-        if (emptySlots == 0 && Configs.AUTO_STASH_ITEMS.getBooleanValue()) {
+        if (emptySlots == 0 && Configs.STORE_ORDERLY.getBooleanValue()) {
             int[] stashAction = findStashAction(client, currentTask.requiredItems.values());
             if (stashAction != null) {
                 stashShulkerSlot = stashAction[0];
@@ -1289,6 +1378,7 @@ public class AutoFillerStateMachine {
                 });
                 return true;
             }
+            recordOrderlyStoredItem(pendingTakeItOutRequest.requestedStack(), pendingTakeItOutRequest.shulkerSlot());
             pendingTakeItOutRequest = null;
         }
 
@@ -1440,6 +1530,7 @@ public class AutoFillerStateMachine {
                 }
 
                 borrowedItems.add(new StrictItemStackKey(req));
+                recordOrderlyStoredItem(req, activeShulkerSlot);
                 amountTaken += amountToTake;
 
                 if (amountToTake > partialSpace) {
@@ -1485,7 +1576,7 @@ public class AutoFillerStateMachine {
     }
 
     private void triggerStashOrAbort(MinecraftClient client) {
-        if (Configs.AUTO_STASH_ITEMS.getBooleanValue()) {
+        if (Configs.STORE_ORDERLY.getBooleanValue()) {
             int[] stashAction = findStashAction(client, currentTask.requiredItems.values());
             if (stashAction != null) {
                 actionQueue.add(() -> client.player.closeHandledScreen());
@@ -1996,6 +2087,7 @@ public class AutoFillerStateMachine {
         pendingTakeItOutRequest = null;
         borrowedItems.clear();
         stashedItemCounts.clear();
+        orderlyStoredItems.clear();
         openedShulkerSlots.clear();
         shulkerMisses.clear();
         blacklistedSlots.clear();
@@ -2209,6 +2301,7 @@ public class AutoFillerStateMachine {
         ItemStack sourceStack = client.player.getInventory().getStack(playerSlot);
         int countInSlot = sourceStack.getCount();
         int amountToMove = Math.min(needed, countInSlot);
+        touchOrderlyStoredItem(sourceStack);
 
         if (amountToMove == countInSlot) {
             client.interactionManager.clickSlot(syncId, uiPlayerSlot, 0, SlotActionType.PICKUP, client.player);
