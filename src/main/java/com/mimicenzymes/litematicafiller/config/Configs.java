@@ -35,7 +35,7 @@ public class Configs implements IConfigHandler {
     private static final String CONFIG_FILE_NAME = "litematica_container_filler.json";
 
     //核心运行设置
-    public static final ConfigBoolean ENABLE_MOD                    = new ConfigBoolean("litematica_container_filler.config.name.enableMod", true, "litematica_container_filler.config.comment.enableMod");
+    public static final ConfigBooleanHotkeyed ENABLE_MOD            = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.enableMod", true, "", "litematica_container_filler.config.comment.enableMod");
     public static final ConfigBooleanHotkeyed WORKING_STATE         = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.workingState", false, "", "litematica_container_filler.config.comment.workingState");
     private static final ConfigBoolean CONTINUOUS_FILL              = new ConfigBoolean("litematica_container_filler.config.name.continuousFill", false, "litematica_container_filler.config.comment.continuousFill");
     private static final ConfigBoolean AREA_MODE                    = new ConfigBoolean("litematica_container_filler.config.name.areaMode", false, "litematica_container_filler.config.comment.areaMode");
@@ -53,13 +53,14 @@ public class Configs implements IConfigHandler {
     public static final ConfigStringList MATERIAL_REPLACEMENTS      = new ConfigStringList("litematica_container_filler.config.name.materialReplacements", ImmutableList.of(), "litematica_container_filler.config.comment.materialReplacements");
 
     //数据同步设置
-    public static final ConfigBoolean ENABLE_DATA_SYNC              = new ConfigBoolean("litematica_container_filler.config.name.enableDataSync", true, "litematica_container_filler.config.comment.enableDataSync");
+    public static final ConfigBooleanHotkeyed ENABLE_DATA_SYNC      = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.enableDataSync", true, "", "litematica_container_filler.config.comment.enableDataSync");
     public static final ConfigBoolean ENABLE_OP_NBT_QUERY           = new ConfigBoolean("litematica_container_filler.config.name.enableOpNbtQuery", true, "litematica_container_filler.config.comment.enableOpNbtQuery");
 
     //自动物流设置
     public static final ConfigBoolean ENABLE_CREATIVE_FILL          = new ConfigBoolean("litematica_container_filler.config.name.creativeFill", true, "litematica_container_filler.config.comment.creativeFill");
     public static final ConfigBoolean ENABLE_QS_EXTRACTION          = new ConfigBoolean("litematica_container_filler.config.name.enableQsExtraction", true, "litematica_container_filler.config.comment.enableQsExtraction");
     public static final ConfigOptionList QUICK_SHULKER_OPEN_MODE    = new ConfigOptionList("litematica_container_filler.config.name.quickShulkerOpenMode", QuickShulkerOpenMode.INVOKE, "litematica_container_filler.config.comment.quickShulkerOpenMode");
+    public static final ConfigBoolean MATCH_SHULKER_BOXES_BY_CONTENT = new ConfigBoolean("litematica_container_filler.config.name.matchShulkerBoxesByContent", false, "litematica_container_filler.config.comment.matchShulkerBoxesByContent");
     private static final ConfigBoolean AUTO_STASH_ITEMS             = new ConfigBoolean("litematica_container_filler.config.name.autoStashItems", true, "litematica_container_filler.config.comment.autoStashItems");
     public static final ConfigBoolean STORE_ORDERLY                 = new ConfigBoolean("litematica_container_filler.config.name.storeOrderly", true, "litematica_container_filler.config.comment.storeOrderly");
     public static final ConfigBoolean DROP_EXTRACTED_ITEMS          = new ConfigBoolean("litematica_container_filler.config.name.dropExtractedItems", false, "litematica_container_filler.config.comment.dropExtractedItems");
@@ -71,7 +72,7 @@ public class Configs implements IConfigHandler {
     public static final ConfigBoolean ENABLE_SYNC_TOOL_QS_EXTRACTION = new ConfigBoolean("litematica_container_filler.config.name.enableSyncToolQsExtraction", true, "litematica_container_filler.config.comment.enableSyncToolQsExtraction");
     public static final ConfigOptionList CONTAINER_CLEAR_OUTPUT_MODE = new ConfigOptionList("litematica_container_filler.config.name.containerClearOutputMode", ContainerClearOutputMode.DROP, "litematica_container_filler.config.comment.containerClearOutputMode");
     public static final ConfigBoolean HIDE_TOOL_GUI                 = new ConfigBoolean("litematica_container_filler.config.name.hideToolGui", true, "litematica_container_filler.config.comment.hideToolGui");
-    public static final ConfigBoolean ENABLE_TOOL_HUD               = new ConfigBoolean("litematica_container_filler.config.name.enableToolHud", false, "litematica_container_filler.config.comment.enableToolHud");
+    public static final ConfigBooleanHotkeyed ENABLE_TOOL_HUD       = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.enableToolHud", false, "", "litematica_container_filler.config.comment.enableToolHud");
     public static final ConfigOptionList TOOL_HUD_STYLE             = new ConfigOptionList("litematica_container_filler.config.name.toolHudStyle", ToolHudStyle.FIXED_CARD, "litematica_container_filler.config.comment.toolHudStyle");
     public static final ConfigDouble TOOL_HUD_OPACITY               = new ConfigDouble("litematica_container_filler.config.name.toolHudOpacity", 0.52D, 0.1D, 1.0D, "litematica_container_filler.config.comment.toolHudOpacity");
     public static final ConfigDouble TOOL_HUD_SMOOTHING             = new ConfigDouble("litematica_container_filler.config.name.toolHudSmoothing", 0.22D, 0.05D, 0.8D, "litematica_container_filler.config.comment.toolHudSmoothing");
@@ -88,24 +89,24 @@ public class Configs implements IConfigHandler {
     public static final ConfigBooleanHotkeyed TOOL_COPY_MODE         = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.toolCopyMode", false, "", "litematica_container_filler.config.comment.toolCopyMode");
 
     //高亮渲染基础设置
-    public static final ConfigBoolean HIGHLIGHT_CONTAINERS          = new ConfigBoolean("litematica_container_filler.config.name.highlightContainers", true, "litematica_container_filler.config.comment.highlightContainers");
-    public static final ConfigBoolean HIGHLIGHT_XRAY                = new ConfigBoolean("litematica_container_filler.config.name.highlightXray", true, "litematica_container_filler.config.comment.highlightXray");
+    public static final ConfigBooleanHotkeyed HIGHLIGHT_CONTAINERS  = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightContainers", true, "", "litematica_container_filler.config.comment.highlightContainers");
+    public static final ConfigBooleanHotkeyed HIGHLIGHT_XRAY        = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightXray", true, "", "litematica_container_filler.config.comment.highlightXray");
     public static final ConfigInteger RENDER_RADIUS                 = new ConfigInteger("litematica_container_filler.config.name.renderRadius", 15, 0, 1024, "litematica_container_filler.config.comment.renderRadius");
-    public static final ConfigBoolean SYNC_LITE_LAYER               = new ConfigBoolean("litematica_container_filler.config.name.syncLiteLayer", true, "litematica_container_filler.config.comment.syncLiteLayer");
-    public static final ConfigBoolean HIDE_COMPLETED_CONTAINERS     = new ConfigBoolean("litematica_container_filler.config.name.hideCompletedContainers", true, "litematica_container_filler.config.comment.hideCompletedContainers");
-    public static final ConfigBoolean HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS = new ConfigBoolean("litematica_container_filler.config.name.highlightEmptySchematicContainers", true, "litematica_container_filler.config.comment.highlightEmptySchematicContainers");
-    public static final ConfigBoolean RENDER_STATE_UNFILLED         = new ConfigBoolean("litematica_container_filler.config.name.renderStateUnfilled", true, "litematica_container_filler.config.comment.renderStateUnfilled");
-    public static final ConfigBoolean RENDER_STATE_PARTIAL          = new ConfigBoolean("litematica_container_filler.config.name.renderStatePartial", true, "litematica_container_filler.config.comment.renderStatePartial");
-    public static final ConfigBoolean RENDER_STATE_OVERFILLED       = new ConfigBoolean("litematica_container_filler.config.name.renderStateOverfilled", true, "litematica_container_filler.config.comment.renderStateOverfilled");
-    public static final ConfigBoolean RENDER_STATE_WRONG            = new ConfigBoolean("litematica_container_filler.config.name.renderStateWrong", true, "litematica_container_filler.config.comment.renderStateWrong");
-    public static final ConfigBoolean RENDER_STATE_SATISFIED        = new ConfigBoolean("litematica_container_filler.config.name.renderStateSatisfied", true, "litematica_container_filler.config.comment.renderStateSatisfied");
-    public static final ConfigBoolean RENDER_STATE_UNKNOWN          = new ConfigBoolean("litematica_container_filler.config.name.renderStateUnknown", true, "litematica_container_filler.config.comment.renderStateUnknown");
-    public static final ConfigBoolean HIGHLIGHT_UNPLACED_CONTAINERS = new ConfigBoolean("litematica_container_filler.config.name.highlightUnplacedContainers", true, "litematica_container_filler.config.comment.highlightUnplacedContainers");
-    public static final ConfigBoolean RENDER_STATE_GLASS            = new ConfigBoolean("litematica_container_filler.config.name.renderStateGlass", true, "litematica_container_filler.config.comment.renderStateGlass");
-    public static final ConfigBoolean RENDER_STATE_TOP_PLATE        = new ConfigBoolean("litematica_container_filler.config.name.renderStateTopPlate", true, "litematica_container_filler.config.comment.renderStateTopPlate");
-    public static final ConfigBoolean RENDER_FILLING_ARROW          = new ConfigBoolean("litematica_container_filler.config.name.renderFillingArrow", true, "litematica_container_filler.config.comment.renderFillingArrow");
-    public static final ConfigBoolean RENDER_QUEUED_SPINNER         = new ConfigBoolean("litematica_container_filler.config.name.renderQueuedSpinner", true, "litematica_container_filler.config.comment.renderQueuedSpinner");
-    public static final ConfigBoolean RENDER_MISSING_MATERIAL_MARKER = new ConfigBoolean("litematica_container_filler.config.name.renderMissingMaterialMarker", true, "litematica_container_filler.config.comment.renderMissingMaterialMarker");
+    public static final ConfigBooleanHotkeyed SYNC_LITE_LAYER       = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.syncLiteLayer", true, "", "litematica_container_filler.config.comment.syncLiteLayer");
+    public static final ConfigBooleanHotkeyed HIDE_COMPLETED_CONTAINERS = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.hideCompletedContainers", true, "", "litematica_container_filler.config.comment.hideCompletedContainers");
+    public static final ConfigBooleanHotkeyed HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightEmptySchematicContainers", true, "", "litematica_container_filler.config.comment.highlightEmptySchematicContainers");
+    public static final ConfigBooleanHotkeyed RENDER_STATE_UNFILLED = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderStateUnfilled", true, "", "litematica_container_filler.config.comment.renderStateUnfilled");
+    public static final ConfigBooleanHotkeyed RENDER_STATE_PARTIAL  = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderStatePartial", true, "", "litematica_container_filler.config.comment.renderStatePartial");
+    public static final ConfigBooleanHotkeyed RENDER_STATE_OVERFILLED = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderStateOverfilled", true, "", "litematica_container_filler.config.comment.renderStateOverfilled");
+    public static final ConfigBooleanHotkeyed RENDER_STATE_WRONG    = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderStateWrong", true, "", "litematica_container_filler.config.comment.renderStateWrong");
+    public static final ConfigBooleanHotkeyed RENDER_STATE_SATISFIED = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderStateSatisfied", true, "", "litematica_container_filler.config.comment.renderStateSatisfied");
+    public static final ConfigBooleanHotkeyed RENDER_STATE_UNKNOWN  = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderStateUnknown", true, "", "litematica_container_filler.config.comment.renderStateUnknown");
+    public static final ConfigBooleanHotkeyed HIGHLIGHT_UNPLACED_CONTAINERS = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightUnplacedContainers", true, "", "litematica_container_filler.config.comment.highlightUnplacedContainers");
+    public static final ConfigBooleanHotkeyed RENDER_STATE_GLASS    = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderStateGlass", true, "", "litematica_container_filler.config.comment.renderStateGlass");
+    public static final ConfigBooleanHotkeyed RENDER_STATE_TOP_PLATE = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderStateTopPlate", true, "", "litematica_container_filler.config.comment.renderStateTopPlate");
+    public static final ConfigBooleanHotkeyed RENDER_FILLING_ARROW  = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderFillingArrow", true, "", "litematica_container_filler.config.comment.renderFillingArrow");
+    public static final ConfigBooleanHotkeyed RENDER_QUEUED_SPINNER = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderQueuedSpinner", true, "", "litematica_container_filler.config.comment.renderQueuedSpinner");
+    public static final ConfigBooleanHotkeyed RENDER_MISSING_MATERIAL_MARKER = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderMissingMaterialMarker", true, "", "litematica_container_filler.config.comment.renderMissingMaterialMarker");
     public static final ConfigInteger MAX_QUEUED_RENDER_OVERLAYS    = new ConfigInteger("litematica_container_filler.config.name.maxQueuedRenderOverlays", 20, 0, 256, "litematica_container_filler.config.comment.maxQueuedRenderOverlays");
     public static final ConfigInteger TASK_OVERLAY_LINGER_TICKS     = new ConfigInteger("litematica_container_filler.config.name.taskOverlayLingerTicks", 40, 0, 200, "litematica_container_filler.config.comment.taskOverlayLingerTicks");
     public static final ConfigDouble HIGHLIGHT_GLASS_ALPHA_MULTIPLIER = new ConfigDouble("litematica_container_filler.config.name.highlightGlassAlphaMultiplier", 0.24D, 0.0D, 1.0D, "litematica_container_filler.config.comment.highlightGlassAlphaMultiplier");
@@ -132,6 +133,7 @@ public class Configs implements IConfigHandler {
     public static final List<IConfigBase> FILTER_OPTIONS;
     public static final List<IConfigBase> TOOL_OPTIONS;
     public static final List<IConfigBase> RENDER_OPTIONS;
+    public static final List<ConfigBooleanHotkeyed> BOOLEAN_HOTKEY_OPTIONS;
     private static final List<IConfigBase> LEGACY_OPTIONS;
 
     static {
@@ -163,6 +165,7 @@ public class Configs implements IConfigHandler {
                 ENABLE_CREATIVE_FILL,
                 ENABLE_QS_EXTRACTION,
                 QUICK_SHULKER_OPEN_MODE,
+                MATCH_SHULKER_BOXES_BY_CONTENT,
                 STORE_ORDERLY,
                 DROP_EXTRACTED_ITEMS,
                 DROP_ITEMS_FROM_EMPTY_SCHEMATIC_CONTAINERS,
@@ -222,6 +225,29 @@ public class Configs implements IConfigHandler {
                 HIGHLIGHT_COLOR_FILLING,
                 HIGHLIGHT_COLOR_QUEUED,
                 HIGHLIGHT_COLOR_MISSING_MATERIAL
+        );
+
+        BOOLEAN_HOTKEY_OPTIONS = ImmutableList.of(
+                ENABLE_MOD,
+                ENABLE_DATA_SYNC,
+                ENABLE_TOOL_HUD,
+                HIGHLIGHT_CONTAINERS,
+                HIGHLIGHT_XRAY,
+                SYNC_LITE_LAYER,
+                HIDE_COMPLETED_CONTAINERS,
+                HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS,
+                RENDER_STATE_UNFILLED,
+                RENDER_STATE_PARTIAL,
+                RENDER_STATE_OVERFILLED,
+                RENDER_STATE_WRONG,
+                RENDER_STATE_SATISFIED,
+                RENDER_STATE_UNKNOWN,
+                HIGHLIGHT_UNPLACED_CONTAINERS,
+                RENDER_STATE_GLASS,
+                RENDER_STATE_TOP_PLATE,
+                RENDER_FILLING_ARROW,
+                RENDER_QUEUED_SPINNER,
+                RENDER_MISSING_MATERIAL_MARKER
         );
 
         LEGACY_OPTIONS = ImmutableList.of(CONTINUOUS_FILL, AREA_MODE, LEGACY_ENABLE_CARPET_LARGE_BARRELS, AUTO_STASH_ITEMS, HIDE_FILLER_GUI);

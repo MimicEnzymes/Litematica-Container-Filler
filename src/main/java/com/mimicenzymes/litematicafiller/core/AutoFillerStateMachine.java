@@ -78,8 +78,7 @@ public class AutoFillerStateMachine {
         }
         @Override
         public int hashCode() {
-            net.minecraft.text.Text name = stack.get(DataComponentTypes.CUSTOM_NAME);
-            return stack.getItem().hashCode() * 31 + (name != null ? name.getString().hashCode() : 0);
+            return ItemMatcher.matchingHash(stack);
         }
     }
 
@@ -87,6 +86,8 @@ public class AutoFillerStateMachine {
     public static AutoFillerStateMachine getInstance() { return INSTANCE; }
     private static final int MAX_TASK_QUEUE_SIZE = 20;
     private static final int MAX_ACTIONS_PER_TICK = 24;
+    private static final long MISSING_MATERIAL_MARKER_MS = 1200L;
+    private static final long TICK_MS = 50L;
 
     private final Queue<FillTask> taskQueue = new ConcurrentLinkedQueue<>();
     private FillTask currentTask = null;
@@ -118,8 +119,8 @@ public class AutoFillerStateMachine {
     private final Set<Integer> openedShulkerSlots = new LinkedHashSet<>();
     private final Map<Integer, Set<Item>> shulkerMisses = new HashMap<>();
     private final Map<BlockPos, Set<Item>> failedContainers = new ConcurrentHashMap<>();
-    private final Map<BlockPos, Integer> missingMaterialMarkers = new ConcurrentHashMap<>();
-    private final Map<BlockPos, Integer> recentFillingMarkers = new ConcurrentHashMap<>();
+    private final Map<BlockPos, Long> missingMaterialMarkers = new ConcurrentHashMap<>();
+    private final Map<BlockPos, Long> recentFillingMarkers = new ConcurrentHashMap<>();
     private final Set<Integer> blacklistedSlots = new HashSet<>();
 
     private boolean lastContinuousState = false;
@@ -416,14 +417,17 @@ public class AutoFillerStateMachine {
 
     private void markMissingMaterials(BlockPos pos, Set<Item> missingTypes) {
         if (pos == null || missingTypes == null || missingTypes.isEmpty()) return;
-        missingMaterialMarkers.put(pos.toImmutable(), 24);
+        missingMaterialMarkers.put(pos.toImmutable(), System.currentTimeMillis() + MISSING_MATERIAL_MARKER_MS);
     }
 
     private void tickTransientMarkers() {
-        missingMaterialMarkers.entrySet().removeIf(entry -> entry.getValue() <= 1);
-        missingMaterialMarkers.replaceAll((pos, ticks) -> ticks - 1);
-        recentFillingMarkers.entrySet().removeIf(entry -> entry.getValue() <= 1);
-        recentFillingMarkers.replaceAll((pos, ticks) -> ticks - 1);
+        pruneExpiredMarkers();
+    }
+
+    private void pruneExpiredMarkers() {
+        long now = System.currentTimeMillis();
+        missingMaterialMarkers.entrySet().removeIf(entry -> entry.getValue() <= now);
+        recentFillingMarkers.entrySet().removeIf(entry -> entry.getValue() <= now);
     }
 
     private boolean checkMaterialsAndPrepare(MinecraftClient client) {
@@ -713,6 +717,7 @@ public class AutoFillerStateMachine {
         taskQueue.clear();
         failedContainers.clear();
         blacklistedSlots.clear();
+        ClickPacketRateLimiter.reset();
         if (client != null && client.player != null && client.player.currentScreenHandler != client.player.playerScreenHandler) {
             client.player.closeHandledScreen();
         }
@@ -1950,7 +1955,10 @@ public class AutoFillerStateMachine {
         RealContainerCache.putPredicted(currentTask.targetPos, currentTask.requiredItems);
         lastCompletedTaskPos = currentTask.targetPos;
         lastCompletedTaskItems = collectRequiredItemTypes(currentTask.requiredItems);
-        recentFillingMarkers.put(currentTask.targetPos.toImmutable(), Math.max(0, Configs.TASK_OVERLAY_LINGER_TICKS.getIntegerValue()));
+        int lingerTicks = Math.max(0, Configs.TASK_OVERLAY_LINGER_TICKS.getIntegerValue());
+        if (lingerTicks > 0) {
+            recentFillingMarkers.put(currentTask.targetPos.toImmutable(), System.currentTimeMillis() + lingerTicks * TICK_MS);
+        }
 
         sendFeedback(client, Text.translatable("litematica_container_filler.message.fill_completed").getString(), true);
 
@@ -2061,9 +2069,6 @@ public class AutoFillerStateMachine {
     }
 
     private void reset() {
-        if (currentTask == null && taskQueue.isEmpty() && actionQueue.isEmpty()) {
-            ClickPacketRateLimiter.setOperationActive(false);
-        }
         aborting = false;
         currentTask = null;
         currentMapper = null;
@@ -2091,6 +2096,7 @@ public class AutoFillerStateMachine {
         openedShulkerSlots.clear();
         shulkerMisses.clear();
         blacklistedSlots.clear();
+        ClickPacketRateLimiter.setOperationActive(!taskQueue.isEmpty());
     }
 
     private void cancelContinuousWork(MinecraftClient client) {
@@ -2108,6 +2114,7 @@ public class AutoFillerStateMachine {
         taskQueue.clear();
         failedContainers.clear();
         blacklistedSlots.clear();
+        ClickPacketRateLimiter.reset();
         if (client.player != null && client.player.currentScreenHandler != client.player.playerScreenHandler) {
             client.player.closeHandledScreen();
         }
@@ -2330,14 +2337,17 @@ public class AutoFillerStateMachine {
     }
 
     public Set<BlockPos> getMissingMaterialPositions() {
+        pruneExpiredMarkers();
         return new LinkedHashSet<>(missingMaterialMarkers.keySet());
     }
 
     public Set<BlockPos> getRecentFillingPositions() {
+        pruneExpiredMarkers();
         return new LinkedHashSet<>(recentFillingMarkers.keySet());
     }
 
     public boolean hasRenderableTaskMarkers() {
+        pruneExpiredMarkers();
         return currentTask != null || !taskQueue.isEmpty() || !missingMaterialMarkers.isEmpty() || !recentFillingMarkers.isEmpty();
     }
 

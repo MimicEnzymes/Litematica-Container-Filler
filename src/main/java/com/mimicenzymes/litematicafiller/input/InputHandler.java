@@ -2,6 +2,7 @@ package com.mimicenzymes.litematicafiller.input;
 
 import com.mimicenzymes.litematicafiller.config.Hotkeys;
 import com.mimicenzymes.litematicafiller.config.Configs;
+import fi.dy.masa.malilib.config.options.ConfigBooleanHotkeyed;
 import fi.dy.masa.malilib.hotkeys.IHotkey;
 import fi.dy.masa.malilib.hotkeys.IKeybindManager;
 import fi.dy.masa.malilib.hotkeys.IKeybindProvider;
@@ -26,6 +27,10 @@ public class InputHandler implements IKeybindProvider, IKeyboardInputHandler {
         }
         Configs.WORKING_STATE.getKeybind().setCallback(Callbacks.getInstance());
         manager.addKeybindToMap(Configs.WORKING_STATE.getKeybind());
+        for (ConfigBooleanHotkeyed config : Configs.BOOLEAN_HOTKEY_OPTIONS) {
+            config.getKeybind().setCallback(Callbacks.getInstance());
+            manager.addKeybindToMap(config.getKeybind());
+        }
     }
 
     @Override
