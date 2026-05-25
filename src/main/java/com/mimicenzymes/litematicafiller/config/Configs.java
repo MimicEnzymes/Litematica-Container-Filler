@@ -70,6 +70,8 @@ public class Configs implements IConfigHandler {
     public static final ConfigBoolean TOOL_ENABLED                  = new ConfigBoolean("litematica_container_filler.config.name.toolEnabled", false, "litematica_container_filler.config.comment.toolEnabled");
     public static final ConfigOptionList CONTAINER_TOOL_MODE        = new ConfigOptionList("litematica_container_filler.config.name.containerToolMode", ContainerToolMode.CLEAR, "litematica_container_filler.config.comment.containerToolMode");
     public static final ConfigBoolean ENABLE_SYNC_TOOL_QS_EXTRACTION = new ConfigBoolean("litematica_container_filler.config.name.enableSyncToolQsExtraction", true, "litematica_container_filler.config.comment.enableSyncToolQsExtraction");
+    public static final ConfigBoolean ENABLE_TOOL_HOLD_REPEAT       = new ConfigBoolean("litematica_container_filler.config.name.enableToolHoldRepeat", false, "litematica_container_filler.config.comment.enableToolHoldRepeat");
+    public static final ConfigInteger TOOL_REPEAT_SAME_CONTAINER_COOLDOWN = new ConfigInteger("litematica_container_filler.config.name.toolRepeatSameContainerCooldown", 20, 0, 200, "litematica_container_filler.config.comment.toolRepeatSameContainerCooldown");
     public static final ConfigOptionList CONTAINER_CLEAR_OUTPUT_MODE = new ConfigOptionList("litematica_container_filler.config.name.containerClearOutputMode", ContainerClearOutputMode.DROP, "litematica_container_filler.config.comment.containerClearOutputMode");
     public static final ConfigBoolean HIDE_TOOL_GUI                 = new ConfigBoolean("litematica_container_filler.config.name.hideToolGui", true, "litematica_container_filler.config.comment.hideToolGui");
     public static final ConfigBooleanHotkeyed ENABLE_TOOL_HUD       = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.enableToolHud", false, "", "litematica_container_filler.config.comment.enableToolHud");
@@ -176,6 +178,8 @@ public class Configs implements IConfigHandler {
                 TOOL_ENABLED,
                 CONTAINER_TOOL_MODE,
                 ENABLE_SYNC_TOOL_QS_EXTRACTION,
+                ENABLE_TOOL_HOLD_REPEAT,
+                TOOL_REPEAT_SAME_CONTAINER_COOLDOWN,
                 CONTAINER_CLEAR_OUTPUT_MODE,
                 HIDE_TOOL_GUI,
                 ENABLE_TOOL_HUD,
