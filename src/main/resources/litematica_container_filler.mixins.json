@@ -5,8 +5,10 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [],
   "client": [
+    "ClientCommonNetworkHandlerMixin",
     "ScreenInterceptorMixin",
     "ClientPlayNetworkHandlerMixin",
+    "InGameHudMixin",
     "GuiMainMenuMixin",
     "GuiMaterialListMixin",
     "MaterialListBaseMixin",
