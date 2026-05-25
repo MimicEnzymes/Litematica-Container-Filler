@@ -1,5 +1,6 @@
 package com.mimicenzymes.litematicafiller.config;
 
+import com.mimicenzymes.litematicafiller.gui.GuiConfigs;
 import com.terraformersmc.modmenu.api.ConfigScreenFactory;
 import com.terraformersmc.modmenu.api.ModMenuApi;
 
