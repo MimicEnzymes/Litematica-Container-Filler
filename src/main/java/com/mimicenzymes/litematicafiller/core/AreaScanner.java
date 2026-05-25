@@ -24,6 +24,7 @@ public class AreaScanner {
     private static final long ATTEMPT_RETENTION_MS = 60000L;
     private static final Map<BlockPos, Long> ATTEMPT_COOLDOWNS = new HashMap<>();
     private static final int SILENT_CANDIDATE_BUDGET = 384;
+    private static final int PASS_THROUGH_CANDIDATE_BUDGET = 96;
     private static final int MANUAL_CANDIDATE_BUDGET = 2048;
     private static int scanCursor = 0;
 
@@ -40,6 +41,10 @@ public class AreaScanner {
     }
 
     public static void executeScan(MinecraftClient mc, boolean isSilentPrinter) {
+        executeScan(mc, isSilentPrinter, false);
+    }
+
+    public static void executeScan(MinecraftClient mc, boolean isSilentPrinter, boolean passThroughScan) {
         if (mc.player == null || mc.world == null) return;
 
         var schematicWorld = SchematicWorldHandler.getSchematicWorld();
@@ -54,7 +59,7 @@ public class AreaScanner {
         long now = System.currentTimeMillis();
         ATTEMPT_COOLDOWNS.entrySet().removeIf(entry -> now - entry.getValue() > ATTEMPT_RETENTION_MS);
 
-        int maxTasks = isSilentPrinter ? 15 : 40;
+        int maxTasks = passThroughScan ? 4 : (isSilentPrinter ? 15 : 40);
 
         double reach = mc.player.getBlockInteractionRange();
         double reachSq = (reach + 0.5) * (reach + 0.5);
@@ -64,7 +69,7 @@ public class AreaScanner {
 
         List<PendingTask> pendingTasks = new ArrayList<>();
         Set<BlockPos> processedPositions = new HashSet<>();
-        int maxCandidates = isSilentPrinter ? SILENT_CANDIDATE_BUDGET : MANUAL_CANDIDATE_BUDGET;
+        int maxCandidates = passThroughScan ? PASS_THROUGH_CANDIDATE_BUDGET : (isSilentPrinter ? SILENT_CANDIDATE_BUDGET : MANUAL_CANDIDATE_BUDGET);
         List<BlockPos> candidates = collectCandidates(center, r, effectiveCandidateRadius, maxCandidates);
 
         int processedCandidates = 0;
@@ -75,14 +80,14 @@ public class AreaScanner {
             if (r > 0 && rawPos.getSquaredDistance(center) > (double) r * r) continue;
             if (syncLayer && !fi.dy.masa.litematica.data.DataManager.getRenderLayerRange().isPositionWithinRange(rawPos)) continue;
 
-            collectPendingTask(mc, schematicWorld, center, eyePos, reachSq, now, isSilentPrinter, processedPositions, pendingTasks, rawPos);
+            collectPendingTask(mc, schematicWorld, center, eyePos, reachSq, now, isSilentPrinter, passThroughScan, processedPositions, pendingTasks, rawPos);
         }
 
         pendingTasks.sort(Comparator.comparingDouble(t -> t.distSq));
 
         int count = 0;
         for (PendingTask task : pendingTasks) {
-            if (AutoFillerStateMachine.getInstance().addTask(task.pos, task.required)) {
+            if (AutoFillerStateMachine.getInstance().addTask(task.pos, task.required, passThroughScan)) {
                 ATTEMPT_COOLDOWNS.put(task.pos, now);
                 count++;
             }
@@ -121,11 +126,13 @@ public class AreaScanner {
                                            double reachSq,
                                            long now,
                                            boolean isSilentPrinter,
+                                           boolean passThroughScan,
                                            Set<BlockPos> processedPositions,
                                            List<PendingTask> pendingTasks,
                                            BlockPos rawPos) {
         BlockState state = schematicWorld.getBlockState(rawPos);
         if (state == null || state.isAir() || !state.hasBlockEntity()) return;
+        if (!ContainerBlockFilter.isAllowedForSchematicFill(state, schematicWorld, rawPos)) return;
 
         BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(schematicWorld, rawPos, state);
         BlockPos taskPos = halves != null ? halves[0] : rawPos;
@@ -134,7 +141,8 @@ public class AreaScanner {
         if (eyePos.squaredDistanceTo(Vec3d.ofCenter(taskPos)) > reachSq) return;
 
         Long lastAttempt = ATTEMPT_COOLDOWNS.get(taskPos);
-        if (isSilentPrinter && lastAttempt != null && now - lastAttempt < ATTEMPT_COOLDOWN_MS) {
+        long cooldownMs = passThroughScan ? 1200L : ATTEMPT_COOLDOWN_MS;
+        if (isSilentPrinter && lastAttempt != null && now - lastAttempt < cooldownMs) {
             return;
         }
 
@@ -146,5 +154,9 @@ public class AreaScanner {
         if (!hasItems && !needsLocking) return;
 
         pendingTasks.add(new PendingTask(taskPos, required == null ? new HashMap<>() : required, taskPos.getSquaredDistance(center)));
+    }
+
+    public static void clearAttemptCooldown(BlockPos pos) {
+        if (pos != null) ATTEMPT_COOLDOWNS.remove(pos);
     }
 }

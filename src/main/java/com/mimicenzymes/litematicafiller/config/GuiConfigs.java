@@ -1,6 +1,7 @@
 package com.mimicenzymes.litematicafiller.config;
 
 import com.mimicenzymes.litematicafiller.Reference;
+import fi.dy.masa.malilib.gui.GuiBase;
 import fi.dy.masa.malilib.gui.GuiConfigsBase;
 import fi.dy.masa.malilib.gui.button.ButtonBase;
 import fi.dy.masa.malilib.gui.button.ButtonGeneric;
@@ -15,7 +16,7 @@ public class GuiConfigs extends GuiConfigsBase {
     private static Tab tab = Tab.FEATURE;
 
     public GuiConfigs(Screen parent) {
-        super(10, 50, Reference.MOD_ID, parent, "litematica_container_filler.gui.title.configs");
+        super(10, 74, Reference.MOD_ID, parent, "litematica_container_filler.gui.title.configs");
     }
 
     public GuiConfigs() {
@@ -31,8 +32,15 @@ public class GuiConfigs extends GuiConfigsBase {
         for (Tab tab : Tab.values()) {
             String tabName = fi.dy.masa.malilib.util.StringUtils.translate("litematica_container_filler.gui.button." + tab.name().toLowerCase());
             ButtonGeneric botton = new ButtonGeneric(x, y, -1, 20, tabName);
+            botton.setEnabled(GuiConfigs.tab != tab);
             this.addButton(botton, new ButtonListener(tab, this));
             x += botton.getWidth() + 2;
+        }
+
+        if (tab == Tab.FILTER) {
+            String label = fi.dy.masa.malilib.util.StringUtils.translate("litematica_container_filler.gui.button.container_filter_picker");
+            ButtonGeneric button = new ButtonGeneric(10, 50, 180, 20, label);
+            this.addButton(button, (clickedButton, mouseButton) -> GuiBase.openGui(new GuiContainerFilter(this)));
         }
     }
 
@@ -42,16 +50,22 @@ public class GuiConfigs extends GuiConfigsBase {
         switch (tab) {
             case FEATURE -> {
                 Configs.CORE_OPTIONS.forEach(c -> list.add(new ConfigOptionWrapper(c)));
-                Configs.DATA_OPTIONS.forEach(c -> list.add(new ConfigOptionWrapper(c)));
             }
+            case DATA -> Configs.DATA_OPTIONS.forEach(c -> list.add(new ConfigOptionWrapper(c)));
             case LOGISTICS -> Configs.LOGISTICS_OPTIONS.forEach(c -> list.add(new ConfigOptionWrapper(c)));
+            case FILTER -> {
+                list.add(new ConfigOptionWrapper(Configs.CONTAINER_FILTER_MODE));
+                list.add(new ConfigOptionWrapper(Configs.CONTAINER_FILTER_SCOPE));
+                list.add(new ConfigOptionWrapper(Configs.CONTAINER_FILTER_LIST));
+            }
+            case TOOLS -> Configs.TOOL_OPTIONS.forEach(c -> list.add(new ConfigOptionWrapper(c)));
             case RENDER -> Configs.RENDER_OPTIONS.forEach(c -> list.add(new ConfigOptionWrapper(c)));
             case HOTKEYS -> Hotkeys.HOTKEY_LIST.forEach(h -> list.add(new ConfigOptionWrapper(h)));
         }
         return list;
     }
 
-    public enum Tab { FEATURE, LOGISTICS, RENDER, HOTKEYS }
+    public enum Tab { FEATURE, LOGISTICS, DATA, FILTER, TOOLS, RENDER, HOTKEYS }
 
     private record ButtonListener(Tab tab, GuiConfigs parent) implements IButtonActionListener {
         @Override

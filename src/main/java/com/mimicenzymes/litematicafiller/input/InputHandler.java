@@ -14,6 +14,9 @@ public class InputHandler implements IKeybindProvider, IKeyboardInputHandler {
     private InputHandler() {
         Hotkeys.OPEN_CONFIG_GUI.getKeybind().setCallback(Callbacks.getInstance());
         Hotkeys.FILL_CONTAINER.getKeybind().setCallback(Callbacks.getInstance());
+        Hotkeys.TOOL_TRIGGER.getKeybind().setCallback(Callbacks.getInstance());
+        Hotkeys.TOOL_SWITCH_MODE.getKeybind().setCallback(Callbacks.getInstance());
+        Hotkeys.TOOL_CLOSE_ALL.getKeybind().setCallback(Callbacks.getInstance());
     }
 
     @Override

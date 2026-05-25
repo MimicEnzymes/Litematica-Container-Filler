@@ -4,6 +4,8 @@ import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.config.GuiConfigs;
 import com.mimicenzymes.litematicafiller.config.Hotkeys;
 import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
+import com.mimicenzymes.litematicafiller.core.ContainerToolStateMachine;
+import com.mimicenzymes.litematicafiller.core.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
 import fi.dy.masa.malilib.gui.GuiBase;
@@ -33,6 +35,10 @@ public class Callbacks implements IHotkeyCallback {
             return true;
         }
 
+        if (!Configs.ENABLE_MOD.getBooleanValue()) {
+            return false;
+        }
+
         if (key == Configs.WORKING_STATE.getKeybind()) {
             Configs.WORKING_STATE.toggleBooleanValue();
             String messageKey = Configs.WORKING_STATE.getBooleanValue()
@@ -44,15 +50,28 @@ public class Callbacks implements IHotkeyCallback {
             return true;
         }
 
-        if (!Configs.ENABLE_MOD.getBooleanValue()) {
-            return false;
-        }
-
         if (mc.player == null) return false;
 
         if (key == Hotkeys.FILL_CONTAINER.getKeybind()) {
             AutoFillerStateMachine.getInstance().clearBlacklist();
             executeFill(mc);
+            return true;
+        }
+
+        if (key == Hotkeys.TOOL_TRIGGER.getKeybind()) {
+            ContainerToolStateMachine.getInstance().triggerCurrent(mc);
+            return true;
+        }
+
+        if (key == Hotkeys.TOOL_SWITCH_MODE.getKeybind()) {
+            ContainerToolStateMachine.getInstance().switchMode(mc);
+            return true;
+        }
+
+        if (key == Hotkeys.TOOL_CLOSE_ALL.getKeybind()) {
+            AutoFillerStateMachine.getInstance().emergencyStop(mc);
+            Configs.WORKING_STATE.setBooleanValue(false);
+            ContainerToolStateMachine.getInstance().closeAll(mc);
             return true;
         }
 
@@ -67,6 +86,15 @@ public class Callbacks implements IHotkeyCallback {
             var schWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
             if (schWorld == null || !schWorld.getBlockState(pos).hasBlockEntity()) {
                 mc.player.sendMessage(Text.translatable("litematica_container_filler.message.no_requirements"), true);
+                return;
+            }
+            if (!ContainerBlockFilter.isAllowedForSchematicFill(schWorld.getBlockState(pos), schWorld, pos)) {
+                mc.player.sendMessage(Text.translatable("litematica_container_filler.message.container_filtered"), true);
+                return;
+            }
+            if (!ContainerBlockFilter.isAllowedForSchematicFill(mc.world.getBlockState(pos), mc.world, pos)) {
+                mc.player.sendMessage(Text.translatable("litematica_container_filler.message.target_invalid"), true);
+                RealContainerCache.remove(pos);
                 return;
             }
 
@@ -86,4 +114,5 @@ public class Callbacks implements IHotkeyCallback {
             mc.player.sendMessage(Text.translatable("litematica_container_filler.message.target_invalid"), true);
         }
     }
+
 }

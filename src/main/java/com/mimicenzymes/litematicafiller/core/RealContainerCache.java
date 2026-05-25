@@ -29,11 +29,17 @@ public class RealContainerCache {
     private static final int MAX_PENDING_NBT_REQUESTS = 2048;
     private static final Map<BlockPos, Map<Integer, ItemStack>> CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Set<Integer>> LOCK_CACHE = new ConcurrentHashMap<>();
+    private static final Map<BlockPos, Integer> SLOT_COUNT_CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Map<Integer, ItemStack>> SYNC_SNAPSHOT_CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Long> SYNC_SNAPSHOT_TIME = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Long> CACHE_TIME = new ConcurrentHashMap<>();
+    private static final Map<BlockPos, BlockState> BLOCK_STATE_CACHE = new ConcurrentHashMap<>();
     private static BlockPos lastLookedPos = null;
     private static final long SYNC_SNAPSHOT_TTL_MS = 15000L;
+    private static ScreenHandler lastObservedHandler = null;
+    private static int lastObservedSyncId = Integer.MIN_VALUE;
+    private static long lastObservedSignature = Long.MIN_VALUE;
+    private static long lastObservedTick = Long.MIN_VALUE;
 
     private static final Map<BlockPos, Map<Integer, ItemStack>> NBT_QUERY_CACHE = new ConcurrentHashMap<>();
     private static final Map<Integer, BlockPos> PENDING_NBT_REQUESTS = new ConcurrentHashMap<>();
@@ -62,7 +68,12 @@ public class RealContainerCache {
         }
 
         if (client.currentScreen instanceof HandledScreen<?> screen) {
-            updateFromHandler(client, screen.getScreenHandler());
+            updateFromHandlerIfNeeded(client, screen.getScreenHandler());
+        } else {
+            lastObservedHandler = null;
+            lastObservedSyncId = Integer.MIN_VALUE;
+            lastObservedSignature = Long.MIN_VALUE;
+            lastObservedTick = Long.MIN_VALUE;
         }
     }
 
@@ -75,8 +86,7 @@ public class RealContainerCache {
     public static void updateFromHandler(MinecraftClient client, ScreenHandler handler) {
         if (handler == null) return;
 
-        if (handler instanceof net.minecraft.screen.PlayerScreenHandler ||
-                handler.getClass().getSimpleName().contains("CreativeScreenHandler")) {
+        if (shouldIgnoreHandler(handler)) {
             return;
         }
 
@@ -99,14 +109,21 @@ public class RealContainerCache {
             }
         }
 
+        int slotCount = primaryInv != null ? primaryInv.size() : inferSlotCount(items);
         BlockState state = client.world.getBlockState(pos);
-        BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.world, pos, state);
+        BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.world, pos, state, slotCount);
 
+        boolean changed;
         if (halves != null) {
-            putCachedItems(halves[0].toImmutable(), items);
-            putCachedItems(halves[1].toImmutable(), items);
+            changed = putCachedItemsIfChanged(halves[0].toImmutable(), items);
+            changed |= putCachedItemsIfChanged(halves[1].toImmutable(), items);
+            changed |= putSlotCountIfChanged(halves[0], slotCount);
+            changed |= putSlotCountIfChanged(halves[1], slotCount);
+            rememberSyncedData(halves, items);
         } else {
-            putCachedItems(pos.toImmutable(), items);
+            changed = putCachedItemsIfChanged(pos.toImmutable(), items);
+            changed |= putSlotCountIfChanged(pos, slotCount);
+            rememberSyncedData(pos, items);
         }
 
         if (handler instanceof net.minecraft.screen.CrafterScreenHandler crafterHandler) {
@@ -114,10 +131,91 @@ public class RealContainerCache {
             for (int i = 0; i < 9; i++) {
                 if (crafterHandler.isSlotDisabled(i)) locks.add(i);
             }
-            LOCK_CACHE.put(pos.toImmutable(), locks);
+            Set<Integer> previousLocks = LOCK_CACHE.put(pos.toImmutable(), locks);
+            changed |= !locks.equals(previousLocks);
         }
 
-        cacheVersion++;
+        if (changed) {
+            cacheVersion++;
+        }
+    }
+
+    private static void updateFromHandlerIfNeeded(MinecraftClient client, ScreenHandler handler) {
+        if (handler == null || client.world == null) return;
+        if (shouldIgnoreHandler(handler)) {
+            lastObservedHandler = null;
+            lastObservedSyncId = Integer.MIN_VALUE;
+            lastObservedSignature = Long.MIN_VALUE;
+            lastObservedTick = Long.MIN_VALUE;
+            return;
+        }
+
+        boolean activeOperation = AutoFillerStateMachine.getInstance().isWorking() || ContainerToolStateMachine.getInstance().isWorking();
+        long worldTime = client.world.getTime();
+        boolean newHandler = handler != lastObservedHandler || handler.syncId != lastObservedSyncId;
+        int intervalTicks = activeOperation ? 1 : 4;
+
+        if (!newHandler && worldTime - lastObservedTick < intervalTicks) {
+            return;
+        }
+
+        long signature = computeHandlerSignature(handler, client);
+        lastObservedTick = worldTime;
+        if (!newHandler && signature == lastObservedSignature) {
+            return;
+        }
+
+        lastObservedHandler = handler;
+        lastObservedSyncId = handler.syncId;
+        lastObservedSignature = signature;
+        updateFromHandler(client, handler);
+    }
+
+    private static boolean shouldIgnoreHandler(ScreenHandler handler) {
+        return handler instanceof net.minecraft.screen.PlayerScreenHandler ||
+                handler.getClass().getSimpleName().contains("CreativeScreenHandler");
+    }
+
+    private static long computeHandlerSignature(ScreenHandler handler, MinecraftClient client) {
+        if (handler == null) return 0L;
+
+        net.minecraft.inventory.Inventory primaryInv = null;
+        if (!handler.slots.isEmpty()) {
+            primaryInv = handler.slots.get(0).inventory;
+        }
+
+        long hash = 0xcbf29ce484222325L;
+        if (primaryInv != null) {
+            hash = mix(hash, primaryInv.size());
+        }
+
+        for (Slot slot : handler.slots) {
+            if (slot.inventory == null || slot.inventory != primaryInv) continue;
+
+            ItemStack stack = slot.getStack();
+            if (stack.isEmpty()) continue;
+
+            hash = mix(hash, slot.getIndex());
+            hash = mix(hash, stack.getCount());
+            hash = mix(hash, ItemStack.hashCode(stack));
+        }
+
+        if (handler instanceof net.minecraft.screen.CrafterScreenHandler crafterHandler) {
+            int disabledMask = 0;
+            for (int i = 0; i < 9; i++) {
+                if (crafterHandler.isSlotDisabled(i)) {
+                    disabledMask |= 1 << i;
+                }
+            }
+            hash = mix(hash, disabledMask);
+        }
+
+        return hash;
+    }
+
+    private static long mix(long hash, int value) {
+        hash ^= value;
+        return hash * 0x100000001b3L;
     }
 
     public static Map<Integer, ItemStack> getCachedItems(BlockPos pos) {
@@ -260,6 +358,7 @@ public class RealContainerCache {
 
                 Map<Integer, ItemStack> items = parseNbtInventory(nbt, client.world.getRegistryManager());
                 NBT_QUERY_CACHE.put(pos.toImmutable(), items);
+                putSlotCount(pos, inferSlotCount(nbt, items));
                 CACHE_TIME.put(pos.toImmutable(), System.currentTimeMillis());
                 changed = true;
 
@@ -398,9 +497,11 @@ public class RealContainerCache {
     public static void clear() {
         CACHE.clear();
         LOCK_CACHE.clear();
+        SLOT_COUNT_CACHE.clear();
         SYNC_SNAPSHOT_CACHE.clear();
         SYNC_SNAPSHOT_TIME.clear();
         CACHE_TIME.clear();
+        BLOCK_STATE_CACHE.clear();
         NBT_QUERY_CACHE.clear();
         PENDING_NBT_REQUESTS.clear();
         LAST_REQUEST_TIME.clear();
@@ -414,6 +515,29 @@ public class RealContainerCache {
         cacheVersion++;
     }
 
+    public static void putPredicted(BlockPos pos, Map<Integer, ItemStack> items) {
+        if (pos == null || items == null) return;
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.world != null) {
+            BlockState state = client.world.getBlockState(pos);
+            BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.world, pos, state);
+            if (halves != null) {
+                Map<Integer, ItemStack> snapshot = copyItems(items);
+                putCachedItems(halves[0].toImmutable(), snapshot);
+                putCachedItems(halves[1].toImmutable(), snapshot);
+                rememberSyncedData(halves, snapshot);
+                cacheVersion++;
+                return;
+            }
+        }
+
+        Map<Integer, ItemStack> snapshot = copyItems(items);
+        putCachedItems(pos.toImmutable(), snapshot);
+        rememberSyncedData(pos, snapshot);
+        cacheVersion++;
+    }
+
     public static void remove(BlockPos pos) {
         if (pos == null) return;
 
@@ -422,31 +546,36 @@ public class RealContainerCache {
             BlockState state = client.world.getBlockState(pos);
             BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.world, pos, state);
             if (halves != null) {
-                CACHE.remove(halves[0]);
-                CACHE.remove(halves[1]);
-                SYNC_SNAPSHOT_CACHE.remove(halves[0]);
-                SYNC_SNAPSHOT_CACHE.remove(halves[1]);
-                SYNC_SNAPSHOT_TIME.remove(halves[0]);
-                SYNC_SNAPSHOT_TIME.remove(halves[1]);
-                NBT_QUERY_CACHE.remove(halves[0]);
-                NBT_QUERY_CACHE.remove(halves[1]);
-                CACHE_TIME.remove(halves[0]);
-                CACHE_TIME.remove(halves[1]);
-                ServuxSyncHandler.INDEPENDENT_CACHE.remove(halves[0]);
-                ServuxSyncHandler.INDEPENDENT_CACHE.remove(halves[1]);
-                LAST_REQUEST_TIME.remove(halves[0]);
-                LAST_REQUEST_TIME.remove(halves[1]);
+                removeCachedDataOnly(halves[0]);
+                removeCachedDataOnly(halves[1]);
             }
         }
 
+        removeCachedDataOnly(pos);
+        cacheVersion++;
+    }
+
+    public static void observeBlockState(BlockPos pos, BlockState state) {
+        if (pos == null || state == null) return;
+
+        BlockPos key = pos.toImmutable();
+        BlockState previous = BLOCK_STATE_CACHE.put(key, state);
+        if (previous != null && !previous.equals(state)) {
+            removeCachedDataOnly(key);
+            cacheVersion++;
+        }
+    }
+
+    private static void removeCachedDataOnly(BlockPos pos) {
         CACHE.remove(pos);
+        LOCK_CACHE.remove(pos);
+        SLOT_COUNT_CACHE.remove(pos);
         SYNC_SNAPSHOT_CACHE.remove(pos);
         SYNC_SNAPSHOT_TIME.remove(pos);
         NBT_QUERY_CACHE.remove(pos);
         CACHE_TIME.remove(pos);
         ServuxSyncHandler.INDEPENDENT_CACHE.remove(pos);
         LAST_REQUEST_TIME.remove(pos);
-        cacheVersion++;
     }
 
     private static Map<Integer, ItemStack> getLitematicaSyncedItems(BlockPos pos) {
@@ -569,6 +698,47 @@ public class RealContainerCache {
         CACHE_TIME.put(pos, System.currentTimeMillis());
     }
 
+    private static boolean putCachedItemsIfChanged(BlockPos pos, Map<Integer, ItemStack> items) {
+        evictIfNeeded();
+        Map<Integer, ItemStack> snapshot = copyItems(items);
+        Map<Integer, ItemStack> previous = CACHE.get(pos);
+        boolean changed = !sameItems(previous, snapshot);
+        if (changed) {
+            CACHE.put(pos, snapshot);
+        }
+        CACHE_TIME.put(pos, System.currentTimeMillis());
+        return changed;
+    }
+
+    private static boolean putSlotCountIfChanged(BlockPos pos, int slotCount) {
+        if (pos == null || slotCount <= 0) return false;
+        Integer previous = SLOT_COUNT_CACHE.put(pos.toImmutable(), slotCount);
+        return previous == null || previous != slotCount;
+    }
+
+    private static boolean sameItems(Map<Integer, ItemStack> first, Map<Integer, ItemStack> second) {
+        if (first == second) return true;
+        if (first == null || second == null || first.size() != second.size()) return false;
+        for (Map.Entry<Integer, ItemStack> entry : second.entrySet()) {
+            ItemStack a = first.getOrDefault(entry.getKey(), ItemStack.EMPTY);
+            ItemStack b = entry.getValue();
+            if (a.getCount() != b.getCount() || !ItemMatcher.isSameItem(a, b)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static Map<Integer, ItemStack> copyItems(Map<Integer, ItemStack> items) {
+        Map<Integer, ItemStack> copy = new HashMap<>();
+        for (Map.Entry<Integer, ItemStack> entry : items.entrySet()) {
+            if (entry.getValue() != null && !entry.getValue().isEmpty()) {
+                copy.put(entry.getKey(), entry.getValue().copy());
+            }
+        }
+        return copy;
+    }
+
     private static void cleanupExpiredCache() {
         long now = System.currentTimeMillis();
         CACHE_TIME.entrySet().removeIf(entry -> now - entry.getValue() > CACHE_TTL_MS);
@@ -595,9 +765,78 @@ public class RealContainerCache {
         if (oldest != null) {
             CACHE.remove(oldest);
             LOCK_CACHE.remove(oldest);
+            SLOT_COUNT_CACHE.remove(oldest);
             NBT_QUERY_CACHE.remove(oldest);
             LAST_REQUEST_TIME.remove(oldest);
             CACHE_TIME.remove(oldest);
         }
+    }
+
+    public static int getKnownSlotCount(BlockPos pos) {
+        if (pos == null) return -1;
+
+        Integer slotCount = SLOT_COUNT_CACHE.get(pos);
+        if (slotCount != null) return slotCount;
+
+        Map<Integer, ItemStack> cached = CACHE.get(pos);
+        if (cached != null) return inferSlotCount(cached);
+
+        Map<Integer, ItemStack> nbt = NBT_QUERY_CACHE.get(pos);
+        if (nbt != null) return inferSlotCount(nbt);
+
+        Map<Integer, ItemStack> servux = ServuxSyncHandler.getCachedData(pos);
+        if (servux != null) return inferSlotCount(servux);
+
+        Map<Integer, ItemStack> snapshot = getSyncSnapshot(pos);
+        if (snapshot != null) return inferSlotCount(snapshot);
+
+        return -1;
+    }
+
+    private static void putSlotCount(BlockPos pos, int slotCount) {
+        if (pos == null || slotCount <= 0) return;
+        SLOT_COUNT_CACHE.put(pos.toImmutable(), slotCount);
+    }
+
+    private static int inferSlotCount(NbtCompound nbt, Map<Integer, ItemStack> items) {
+        int inferred = inferSlotCount(items);
+        if (nbt != null && nbt.contains("Items")) {
+            inferred = Math.max(inferred, inferSlotCountFromItemsNbt(nbt));
+        }
+        return inferred;
+    }
+
+    private static int inferSlotCount(Map<Integer, ItemStack> items) {
+        if (items == null || items.isEmpty()) return -1;
+
+        int maxSlot = -1;
+        for (Integer slot : items.keySet()) {
+            if (slot != null && slot > maxSlot) {
+                maxSlot = slot;
+            }
+        }
+
+        if (maxSlot >= 27) return 54;
+        if (maxSlot >= 0) return 27;
+        return -1;
+    }
+
+    private static int inferSlotCountFromItemsNbt(NbtCompound nbt) {
+        NbtElement itemsElem = nbt.get("Items");
+        if (!(itemsElem instanceof NbtList list)) return -1;
+
+        int maxSlot = -1;
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i) instanceof NbtCompound itemTag && itemTag.contains("Slot")) {
+                try {
+                    int slot = Integer.parseInt(itemTag.get("Slot").toString().replaceAll("[^0-9]", "")) & 255;
+                    if (slot > maxSlot) maxSlot = slot;
+                } catch (Exception ignored) {}
+            }
+        }
+
+        if (maxSlot >= 27) return 54;
+        if (maxSlot >= 0) return 27;
+        return -1;
     }
 }

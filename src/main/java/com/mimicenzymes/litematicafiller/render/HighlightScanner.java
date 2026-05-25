@@ -1,9 +1,13 @@
 package com.mimicenzymes.litematicafiller.render;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
+import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
+import com.mimicenzymes.litematicafiller.core.ContainerBlockFilter;
+import com.mimicenzymes.litematicafiller.core.ContainerToolStateMachine;
 import com.mimicenzymes.litematicafiller.core.ItemMatcher;
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.ItemStack;
@@ -20,6 +24,7 @@ import java.util.concurrent.Executors;
 
 public class HighlightScanner {
     private static final int NORMAL_UPDATE_INTERVAL_TICKS = 10;
+    private static final int IDLE_UPDATE_INTERVAL_TICKS = 20;
     private static final int BOOSTED_UPDATE_INTERVAL_TICKS = 2;
     private static final int BOOST_DURATION_TICKS = 60;
     private static final int MAX_DATA_REQUESTS_PER_TICK = 128;
@@ -150,7 +155,7 @@ public class HighlightScanner {
 
     public static void ensureSchematicContainerIndex() {
         long now = System.currentTimeMillis();
-        if (now - lastIndexTime <= 5000 && !SCHEMATIC_CONTAINERS.isEmpty()) return;
+        if (now - lastIndexTime <= 5000) return;
         startIndexingIfIdle(now);
     }
 
@@ -224,11 +229,20 @@ public class HighlightScanner {
         BlockPos currentCenter = client.player.getBlockPos();
 
         long now = System.currentTimeMillis();
+        boolean modOperating = AutoFillerStateMachine.getInstance().isWorking() || ContainerToolStateMachine.getInstance().isWorking();
+        boolean userHandledScreenOpen = client.currentScreen instanceof HandledScreen<?> && !modOperating;
+        if (userHandledScreenOpen) {
+            return;
+        }
+
         pumpDataRequests(now);
 
         startIndexingIfIdle(now);
 
-        int updateInterval = boostedTicks > 0 ? BOOSTED_UPDATE_INTERVAL_TICKS : NORMAL_UPDATE_INTERVAL_TICKS;
+        boolean fillWorkEnabled = Configs.WORKING_STATE.getBooleanValue();
+        int updateInterval = boostedTicks > 0
+                ? BOOSTED_UPDATE_INTERVAL_TICKS
+                : (modOperating || fillWorkEnabled ? NORMAL_UPDATE_INTERVAL_TICKS : IDLE_UPDATE_INTERVAL_TICKS);
         if (tickCounter % updateInterval != 0) {
             if (boostedTicks > 0) boostedTicks--;
             return;
@@ -249,10 +263,12 @@ public class HighlightScanner {
 
             BlockState state = schematicWorld.getBlockState(pos);
             if (state == null || state.isAir() || !state.hasBlockEntity()) continue;
+            if (!ContainerBlockFilter.isAllowedForSchematicFill(state, schematicWorld, pos)) continue;
 
             BlockPos checkPos = pos;
-            BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(schematicWorld, pos, state);
+            BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
             if (halves != null) checkPos = halves[0];
+            if (!checkPos.equals(pos)) continue;
 
             Map<Integer, ItemStack> required = getCachedSchematicReq(checkPos, client);
             Set<Integer> ignoredSlots = getCachedIgnoredSlots(checkPos, client);
@@ -268,7 +284,17 @@ public class HighlightScanner {
 
             if (!hasJob && !shouldCheckEmptySchematicContainer) continue;
 
-            if (client.world.isChunkLoaded(checkPos)) {
+            if (isRealContainerAreaLoaded(client, checkPos, halves)) {
+                if (isRealContainerMissing(client, checkPos, halves)) {
+                    observeRealContainerStates(client, checkPos, halves);
+                    clearRealContainerCache(checkPos, halves);
+                    if (Configs.HIGHLIGHT_UNPLACED_CONTAINERS.getBooleanValue()) {
+                        nextMap.put(pos.toImmutable(), HighlightState.UNPLACED);
+                    }
+                    continue;
+                }
+
+                observeRealContainerStates(client, checkPos, halves);
                 Map<Integer, ItemStack> cached = RealContainerCache.getCachedItems(checkPos);
                 HighlightState type;
 
@@ -301,12 +327,60 @@ public class HighlightScanner {
         }
     }
 
+    private static boolean isRealContainerMissing(MinecraftClient client, BlockPos checkPos, BlockPos[] schematicHalves) {
+        if (schematicHalves == null) {
+            return isRealContainerMissingAt(client, checkPos);
+        }
+
+        for (BlockPos half : schematicHalves) {
+            if (isRealContainerMissingAt(client, half)) return true;
+        }
+
+        return false;
+    }
+
+    private static boolean isRealContainerAreaLoaded(MinecraftClient client, BlockPos checkPos, BlockPos[] schematicHalves) {
+        if (schematicHalves == null) return client.world.isChunkLoaded(checkPos);
+
+        for (BlockPos half : schematicHalves) {
+            if (!client.world.isChunkLoaded(half)) return false;
+        }
+
+        return true;
+    }
+
+    private static boolean isRealContainerMissingAt(MinecraftClient client, BlockPos pos) {
+        BlockState realState = client.world.getBlockState(pos);
+        return realState == null || realState.isAir() || !realState.hasBlockEntity() ||
+                !ContainerBlockFilter.isAllowedForSchematicFill(realState, client.world, pos);
+    }
+
+    private static void clearRealContainerCache(BlockPos checkPos, BlockPos[] schematicHalves) {
+        RealContainerCache.remove(checkPos);
+        if (schematicHalves == null) return;
+
+        for (BlockPos half : schematicHalves) {
+            RealContainerCache.remove(half);
+        }
+    }
+
+    private static void observeRealContainerStates(MinecraftClient client, BlockPos checkPos, BlockPos[] schematicHalves) {
+        if (schematicHalves == null) {
+            RealContainerCache.observeBlockState(checkPos, client.world.getBlockState(checkPos));
+            return;
+        }
+
+        for (BlockPos half : schematicHalves) {
+            RealContainerCache.observeBlockState(half, client.world.getBlockState(half));
+        }
+    }
+
     private static void triggerBoost(int ticks) {
         boostedTicks = Math.max(boostedTicks, ticks);
     }
 
     private static synchronized void startIndexingIfIdle(long now) {
-        if (isIndexing || (now - lastIndexTime <= 5000 && !SCHEMATIC_CONTAINERS.isEmpty())) return;
+        if (isIndexing || now - lastIndexTime <= 5000) return;
 
         isIndexing = true;
         CompletableFuture.runAsync(() -> {

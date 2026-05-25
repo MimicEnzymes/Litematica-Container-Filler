@@ -2,6 +2,8 @@ package com.mimicenzymes.litematicafiller.render;
 
 import com.mojang.logging.LogUtils;
 import com.mimicenzymes.litematicafiller.config.Configs;
+import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
+import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
 import com.mojang.blaze3d.systems.RenderSystem;
 import fi.dy.masa.malilib.render.MaLiLibPipelines;
 import fi.dy.masa.malilib.render.RenderContext;
@@ -9,6 +11,7 @@ import fi.dy.masa.malilib.render.RenderUtils;
 import fi.dy.masa.malilib.util.data.Color4f;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.BuiltBuffer;
+import net.minecraft.block.BlockState;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import org.slf4j.Logger;
@@ -37,15 +40,28 @@ public class HighlightRenderer {
             return;
         }
 
-        Map<BlockPos, HighlightState> highlights = HighlightScanner.getHighlights();
-        if (highlights.isEmpty()) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.world == null || client.player == null) {
             clearRenderCache();
             return;
         }
 
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client == null || client.world == null || client.player == null) {
+        AutoFillerStateMachine filler = AutoFillerStateMachine.getInstance();
+        Map<BlockPos, HighlightState> highlights = HighlightScanner.getHighlights();
+        if (highlights.isEmpty() && !filler.hasRenderableTaskMarkers()) {
             clearRenderCache();
+            return;
+        }
+
+        BlockPos currentTaskPos = filler.getCurrentTaskPos();
+        Set<BlockPos> queuedTaskPositions = filler.getQueuedTaskPositions();
+        Set<BlockPos> missingMaterialPositions = filler.getMissingMaterialPositions();
+        Set<BlockPos> recentFillingPositions = filler.getRecentFillingPositions();
+        if (highlights.isEmpty()) {
+            clearRenderCache();
+            if (hasTaskOverlay(currentTaskPos, queuedTaskPositions, missingMaterialPositions, recentFillingPositions)) {
+                drawTaskOverlays(RenderUtils.camPos(), Configs.HIGHLIGHT_XRAY.getBooleanValue(), currentTaskPos, queuedTaskPositions, missingMaterialPositions, recentFillingPositions);
+            }
             return;
         }
 
@@ -67,6 +83,7 @@ public class HighlightRenderer {
 
             rebuildDirtyChunks(xray, cameraPos);
             drawChunkCaches(cameraPos);
+            drawTaskOverlays(cameraPos, xray, currentTaskPos, queuedTaskPositions, missingMaterialPositions, recentFillingPositions);
         } catch (Exception e) {
             clearRenderCache();
             LOGGER.warn("Failed to render container highlights", e);
@@ -77,6 +94,7 @@ public class HighlightRenderer {
         Map<ChunkKey, Map<BlockPos, HighlightState>> nextChunks = new HashMap<>();
 
         for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
+            if (!shouldRenderState(entry.getValue())) continue;
             ChunkKey key = ChunkKey.from(entry.getKey());
             nextChunks.computeIfAbsent(key, ignored -> new HashMap<>()).put(entry.getKey().toImmutable(), entry.getValue());
         }
@@ -123,7 +141,8 @@ public class HighlightRenderer {
 
             ChunkRenderCache oldCache = chunkCaches.put(key, cache);
             if (oldCache != null) {
-                closeContext(oldCache.context);
+                closeContext(oldCache.fillContext);
+                closeContext(oldCache.lineContext);
             }
 
             iterator.remove();
@@ -132,44 +151,53 @@ public class HighlightRenderer {
     }
 
     private ChunkRenderCache buildChunkCache(Map<BlockPos, HighlightState> highlights, boolean xray, Vec3d cameraPos) {
-        RenderContext ctx = null;
-        BuiltBuffer meshData = null;
+        RenderContext fillCtx = null;
+        BuiltBuffer fillMeshData = null;
 
         try {
-            ctx = new RenderContext(
-                    () -> "litematica_filler_lines",
-                    xray ? MaLiLibPipelines.DEBUG_LINES_MASA_SIMPLE_NO_DEPTH_NO_CULL : MaLiLibPipelines.DEBUG_LINES_MASA_SIMPLE_OFFSET_2
+            fillCtx = new RenderContext(
+                    () -> "litematica_filler_glass",
+                    xray ? MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL : MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_LEQUAL_DEPTH_OFFSET_2
             );
 
-            var buffer = ctx.getBuilder();
-            if (buffer == null) return null;
+            var fillBuffer = fillCtx.getBuilder();
+            if (fillBuffer == null) return null;
 
             for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
                 Color4f c = getColor(entry.getValue());
-                RenderUtils.drawBlockBoundingBoxOutlinesBatchedLinesSimple(entry.getKey(), c, 0.015, buffer);
+                float alphaMultiplier = (float) Configs.HIGHLIGHT_GLASS_ALPHA_MULTIPLIER.getDoubleValue();
+                Color4f glass = new Color4f(c.r, c.g, c.b, Math.min(0.24f, Math.max(0.04f, c.a * alphaMultiplier)));
+                Color4f crown = new Color4f(c.r, c.g, c.b, Math.min(0.34f, Math.max(0.12f, c.a * 0.36f)));
+                HighlightBox box = getHighlightBox(entry.getKey());
+
+                if (Configs.RENDER_STATE_GLASS.getBooleanValue()) {
+                    drawInflatedWorldBox(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(), 0.012f, glass, cameraPos, fillBuffer);
+                }
+                if (Configs.RENDER_STATE_TOP_PLATE.getBooleanValue()) {
+                    float inset = Math.max(0.02f, (1.0f - (float) Configs.HIGHLIGHT_TOP_PLATE_SIZE.getDoubleValue()) * 0.5f);
+                    drawWorldBox(
+                            box.minX() + inset, box.maxY() + 0.035f, box.minZ() + inset,
+                            box.maxX() - inset, box.maxY() + 0.095f, box.maxZ() - inset,
+                            crown, cameraPos, fillBuffer
+                    );
+                }
             }
 
-            meshData = buffer.endNullable();
-            if (meshData == null) return null;
+            fillMeshData = fillBuffer.endNullable();
+            if (fillMeshData == null) return null;
 
-            ctx.upload(meshData, false);
-            ChunkRenderCache cache = new ChunkRenderCache(ctx, cameraPos.x, cameraPos.y, cameraPos.z);
-            ctx = null;
+            fillCtx.upload(fillMeshData, false);
+            ChunkRenderCache cache = new ChunkRenderCache(null, fillCtx, cameraPos.x, cameraPos.y, cameraPos.z);
+            fillCtx = null;
             return cache;
         } finally {
-            if (meshData != null) {
-                meshData.close();
-            }
-            if (ctx != null) {
-                closeContext(ctx);
-            }
+            if (fillMeshData != null) fillMeshData.close();
+            closeContext(fillCtx);
         }
     }
 
     private void drawChunkCaches(Vec3d cameraPos) {
         for (ChunkRenderCache cache : chunkCaches.values()) {
-            if (cache.context == null || !cache.context.isUploaded()) continue;
-
             renderOffset[0] = (float)(cache.cameraX - cameraPos.x);
             renderOffset[1] = (float)(cache.cameraY - cameraPos.y);
             renderOffset[2] = (float)(cache.cameraZ - cameraPos.z);
@@ -183,10 +211,171 @@ public class HighlightRenderer {
 
         try {
             modelViewStack.translate(renderOffset[0], renderOffset[1], renderOffset[2]);
-            cache.context.drawPost(false, false);
+            if (cache.fillContext != null && cache.fillContext.isUploaded()) {
+                cache.fillContext.drawPost(false, false);
+            }
+            if (cache.lineContext != null && cache.lineContext.isUploaded()) {
+                cache.lineContext.drawPost(false, false);
+            }
         } finally {
             modelViewStack.popMatrix();
         }
+    }
+
+    private boolean hasTaskOverlay(BlockPos currentTaskPos, Set<BlockPos> queuedTaskPositions, Set<BlockPos> missingMaterialPositions, Set<BlockPos> recentFillingPositions) {
+        return (Configs.RENDER_FILLING_ARROW.getBooleanValue() && currentTaskPos != null)
+                || (Configs.RENDER_QUEUED_SPINNER.getBooleanValue() && !queuedTaskPositions.isEmpty())
+                || (Configs.RENDER_MISSING_MATERIAL_MARKER.getBooleanValue() && !missingMaterialPositions.isEmpty());
+    }
+
+    private void drawTaskOverlays(Vec3d cameraPos, boolean xray, BlockPos currentTaskPos, Set<BlockPos> queuedTaskPositions, Set<BlockPos> missingMaterialPositions, Set<BlockPos> recentFillingPositions) {
+        if (!hasTaskOverlay(currentTaskPos, queuedTaskPositions, missingMaterialPositions, recentFillingPositions)) return;
+
+        RenderContext ctx = null;
+        BuiltBuffer meshData = null;
+        try {
+            ctx = new RenderContext(
+                    () -> "litematica_filler_task_overlays",
+                    xray ? MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL : MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_LEQUAL_DEPTH_OFFSET_2
+            );
+
+            var buffer = ctx.getBuilder();
+            if (buffer == null) return;
+
+            double time = System.nanoTime() / 1_000_000_000.0D;
+            if (Configs.RENDER_FILLING_ARROW.getBooleanValue()) {
+                if (currentTaskPos != null) {
+                    drawFillingArrow(getHighlightBox(currentTaskPos), cameraPos, time, buffer);
+                }
+            }
+
+            if (Configs.RENDER_QUEUED_SPINNER.getBooleanValue()) {
+                int count = 0;
+                int maxQueued = Configs.MAX_QUEUED_RENDER_OVERLAYS.getIntegerValue();
+                for (BlockPos pos : queuedTaskPositions) {
+                    if (pos == null || pos.equals(currentTaskPos)) continue;
+                    if (count++ >= maxQueued) break;
+                    drawQueuedSpinner(getHighlightBox(pos), cameraPos, time + count * 0.17D, buffer);
+                }
+            }
+
+            if (Configs.RENDER_MISSING_MATERIAL_MARKER.getBooleanValue()) {
+                int count = 0;
+                int maxMissing = Configs.MAX_QUEUED_RENDER_OVERLAYS.getIntegerValue();
+                for (BlockPos pos : missingMaterialPositions) {
+                    if (count++ >= maxMissing) break;
+                    if (pos != null) drawMissingMaterialMarker(getHighlightBox(pos), cameraPos, time, buffer);
+                }
+            }
+
+            meshData = buffer.endNullable();
+            if (meshData == null) return;
+
+            ctx.upload(meshData, false);
+            ChunkRenderCache cache = new ChunkRenderCache(null, ctx, cameraPos.x, cameraPos.y, cameraPos.z);
+            ctx = null;
+
+            renderOffset[0] = 0.0f;
+            renderOffset[1] = 0.0f;
+            renderOffset[2] = 0.0f;
+            drawChunkCache(cache);
+            closeContext(cache.fillContext);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to render container task overlays", e);
+        } finally {
+            if (meshData != null) meshData.close();
+            closeContext(ctx);
+        }
+    }
+
+    private void drawFillingArrow(HighlightBox box, Vec3d cameraPos, double time, net.minecraft.client.render.BufferBuilder buffer) {
+        float cx = box.centerX();
+        float cz = box.centerZ();
+        float scale = (float) Configs.TASK_OVERLAY_SCALE.getDoubleValue();
+        float y = box.maxY() + 0.64f + (float)Math.sin(time * 5.0D) * 0.045f;
+        float pulse = 0.5f + 0.5f * (float)Math.sin(time * 7.0D);
+        Color4f base = Configs.HIGHLIGHT_COLOR_FILLING.getColor();
+        Color4f body = new Color4f(base.r, base.g, base.b, Math.min(0.82f, base.a * (0.50f + pulse * 0.12f)));
+        Color4f core = new Color4f(0.82f, 1.0f, 0.96f, 0.36f);
+        Color4f glow = new Color4f(base.r, base.g, base.b, 0.12f);
+
+        drawVerticalDownArrow(cx, y, cz, 0.30f * scale, 0.62f * scale, 0.090f * scale, body, cameraPos, buffer);
+        drawVerticalDownArrow(cx, y + 0.010f * scale, cz, 0.18f * scale, 0.39f * scale, 0.052f * scale, core, cameraPos, buffer);
+        drawCenteredWorldBox(cx, box.maxY() + 0.045f, cz, (0.24f + pulse * 0.05f) * scale, 0.020f * scale, glow, cameraPos, buffer);
+    }
+
+    private void drawQueuedSpinner(HighlightBox box, Vec3d cameraPos, double time, net.minecraft.client.render.BufferBuilder buffer) {
+        float cx = box.centerX();
+        float cz = box.centerZ();
+        float scale = (float) Configs.TASK_OVERLAY_SCALE.getDoubleValue();
+        float cy = box.maxY() + 0.34f + (float)Math.sin(time * 2.4D) * 0.028f;
+        float radius = 0.32f * scale;
+        Color4f base = Configs.HIGHLIGHT_COLOR_QUEUED.getColor();
+
+        for (int i = 0; i < 8; i++) {
+            double angle = time * 3.2D + i * Math.PI / 4.0D;
+            float x = cx + (float)Math.cos(angle) * radius;
+            float z = cz + (float)Math.sin(angle) * radius;
+            float alpha = Math.min(0.70f, base.a * (0.16f + i * 0.055f));
+            Color4f color = new Color4f(base.r, base.g, base.b, alpha);
+            drawCenteredWorldBox(x, cy, z, 0.058f * scale, 0.035f * scale, color, cameraPos, buffer);
+        }
+
+        Color4f hub = new Color4f(base.r, base.g, base.b, 0.12f);
+        drawCenteredWorldBox(cx, cy, cz, 0.15f * scale, 0.025f * scale, hub, cameraPos, buffer);
+    }
+
+    private void drawMissingMaterialMarker(HighlightBox box, Vec3d cameraPos, double time, net.minecraft.client.render.BufferBuilder buffer) {
+        float scale = (float) Configs.TASK_OVERLAY_SCALE.getDoubleValue();
+        float cx = box.centerX();
+        float cz = box.centerZ();
+        float cy = box.maxY() + 0.34f + (float)Math.sin(time * 4.4D) * 0.035f;
+        Color4f base = Configs.HIGHLIGHT_COLOR_MISSING_MATERIAL.getColor();
+        float pulse = 0.5f + 0.5f * (float)Math.sin(time * 8.0D);
+        Color4f color = new Color4f(base.r, base.g, base.b, Math.min(0.82f, base.a * (0.42f + pulse * 0.22f)));
+
+        drawCenteredWorldBox(cx, cy + 0.24f * scale, cz, 0.070f * scale, 0.045f * scale, color, cameraPos, buffer);
+        drawCenteredWorldBox(cx, cy, cz, 0.060f * scale, 0.19f * scale, color, cameraPos, buffer);
+        drawCenteredWorldBox(cx, cy - 0.30f * scale, cz, 0.070f * scale, 0.050f * scale, color, cameraPos, buffer);
+    }
+
+    private void drawVerticalDownArrow(float cx, float cy, float cz, float halfWidth, float height, float halfDepth, Color4f color, Vec3d cameraPos, net.minecraft.client.render.BufferBuilder buffer) {
+        float shaftHalf = halfWidth * 0.28f;
+        float shaftTop = cy + height * 0.42f;
+        float shaftBottom = cy - height * 0.06f;
+        float headTop = cy - height * 0.02f;
+        float tip = cy - height * 0.48f;
+        float step = (headTop - tip) / 4.0f;
+
+        drawWorldBox(cx - shaftHalf, shaftBottom, cz - halfDepth, cx + shaftHalf, shaftTop, cz + halfDepth, color, cameraPos, buffer);
+        drawWorldBox(cx - halfWidth, headTop - step, cz - halfDepth, cx + halfWidth, headTop, cz + halfDepth, color, cameraPos, buffer);
+        drawWorldBox(cx - halfWidth * 0.76f, headTop - step * 2.0f, cz - halfDepth, cx + halfWidth * 0.76f, headTop - step, cz + halfDepth, color, cameraPos, buffer);
+        drawWorldBox(cx - halfWidth * 0.52f, headTop - step * 3.0f, cz - halfDepth, cx + halfWidth * 0.52f, headTop - step * 2.0f, cz + halfDepth, color, cameraPos, buffer);
+        drawWorldBox(cx - halfWidth * 0.24f, tip, cz - halfDepth, cx + halfWidth * 0.24f, headTop - step * 3.0f, cz + halfDepth, color, cameraPos, buffer);
+    }
+
+    private void drawCenteredWorldBox(float cx, float cy, float cz, float halfSize, float halfHeight, Color4f color, Vec3d cameraPos, net.minecraft.client.render.BufferBuilder buffer) {
+        drawWorldBox(
+                cx - halfSize, cy - halfHeight, cz - halfSize,
+                cx + halfSize, cy + halfHeight, cz + halfSize,
+                color, cameraPos, buffer
+        );
+    }
+
+    private void drawInflatedWorldBox(float minX, float minY, float minZ, float maxX, float maxY, float maxZ, float inflate, Color4f color, Vec3d cameraPos, net.minecraft.client.render.BufferBuilder buffer) {
+        drawWorldBox(
+                minX - inflate, minY - inflate, minZ - inflate,
+                maxX + inflate, maxY + inflate, maxZ + inflate,
+                color, cameraPos, buffer
+        );
+    }
+
+    private void drawWorldBox(float minX, float minY, float minZ, float maxX, float maxY, float maxZ, Color4f color, Vec3d cameraPos, net.minecraft.client.render.BufferBuilder buffer) {
+        RenderUtils.drawBoxAllSidesBatchedQuads(
+                (float)(minX - cameraPos.x), (float)(minY - cameraPos.y), (float)(minZ - cameraPos.z),
+                (float)(maxX - cameraPos.x), (float)(maxY - cameraPos.y), (float)(maxZ - cameraPos.z),
+                color, buffer
+        );
     }
 
     private long computeStyleSignature(boolean xray) {
@@ -196,7 +385,12 @@ public class HighlightRenderer {
         sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_OVERFILLED.getColor().getIntValue());
         sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_WRONG.getColor().getIntValue());
         sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_SATISFIED.getColor().getIntValue());
-        return mix64(sum ^ Configs.HIGHLIGHT_COLOR_UNKNOWN.getColor().getIntValue());
+        sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_UNKNOWN.getColor().getIntValue());
+        sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_UNPLACED.getColor().getIntValue());
+        sum = mix64(sum ^ (Configs.RENDER_STATE_GLASS.getBooleanValue() ? 1L : 0L));
+        sum = mix64(sum ^ (Configs.RENDER_STATE_TOP_PLATE.getBooleanValue() ? 2L : 0L));
+        sum = mix64(sum ^ Double.doubleToLongBits(Configs.HIGHLIGHT_GLASS_ALPHA_MULTIPLIER.getDoubleValue()));
+        return mix64(sum ^ Double.doubleToLongBits(Configs.HIGHLIGHT_TOP_PLATE_SIZE.getDoubleValue()));
     }
 
     private long mix64(long value) {
@@ -207,7 +401,8 @@ public class HighlightRenderer {
 
     private void clearRenderCache() {
         for (ChunkRenderCache cache : chunkCaches.values()) {
-            closeContext(cache.context);
+            closeContext(cache.fillContext);
+            closeContext(cache.lineContext);
         }
         chunkCaches.clear();
         desiredChunks.clear();
@@ -219,11 +414,13 @@ public class HighlightRenderer {
     private void removeChunkCache(ChunkKey key) {
         ChunkRenderCache cache = chunkCaches.remove(key);
         if (cache != null) {
-            closeContext(cache.context);
+            closeContext(cache.fillContext);
+            closeContext(cache.lineContext);
         }
     }
 
     private void closeContext(RenderContext ctx) {
+        if (ctx == null) return;
         try {
             ctx.close();
         } catch (Exception e) {
@@ -238,8 +435,36 @@ public class HighlightRenderer {
             case OVERFILLED -> Configs.HIGHLIGHT_COLOR_OVERFILLED.getColor();
             case WRONG_ITEM -> Configs.HIGHLIGHT_COLOR_WRONG.getColor();
             case SATISFIED -> Configs.HIGHLIGHT_COLOR_SATISFIED.getColor();
+            case UNPLACED -> Configs.HIGHLIGHT_COLOR_UNPLACED.getColor();
             default -> Configs.HIGHLIGHT_COLOR_UNKNOWN.getColor();
         };
+    }
+
+    private boolean shouldRenderState(HighlightState state) {
+        return switch (state) {
+            case UNFILLED -> Configs.RENDER_STATE_UNFILLED.getBooleanValue();
+            case PARTIAL -> Configs.RENDER_STATE_PARTIAL.getBooleanValue();
+            case OVERFILLED -> Configs.RENDER_STATE_OVERFILLED.getBooleanValue();
+            case WRONG_ITEM -> Configs.RENDER_STATE_WRONG.getBooleanValue();
+            case SATISFIED -> Configs.RENDER_STATE_SATISFIED.getBooleanValue();
+            case UNPLACED -> Configs.HIGHLIGHT_UNPLACED_CONTAINERS.getBooleanValue();
+            default -> Configs.RENDER_STATE_UNKNOWN.getBooleanValue();
+        };
+    }
+
+    private HighlightBox getHighlightBox(BlockPos pos) {
+        var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
+        if (schematicWorld == null || pos == null) {
+            return HighlightBox.single(pos == null ? BlockPos.ORIGIN : pos);
+        }
+
+        BlockState state = schematicWorld.getBlockState(pos);
+        BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
+        if (halves == null) {
+            return HighlightBox.single(pos);
+        }
+
+        return HighlightBox.of(halves[0], halves[1]);
     }
 
     private record ChunkKey(int x, int z) {
@@ -248,5 +473,30 @@ public class HighlightRenderer {
         }
     }
 
-    private record ChunkRenderCache(RenderContext context, double cameraX, double cameraY, double cameraZ) {}
+    private record ChunkRenderCache(RenderContext lineContext, RenderContext fillContext, double cameraX, double cameraY, double cameraZ) {}
+
+    private record HighlightBox(float minX, float minY, float minZ, float maxX, float maxY, float maxZ) {
+        static HighlightBox single(BlockPos pos) {
+            return new HighlightBox(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1.0f, pos.getY() + 1.0f, pos.getZ() + 1.0f);
+        }
+
+        static HighlightBox of(BlockPos first, BlockPos second) {
+            return new HighlightBox(
+                    Math.min(first.getX(), second.getX()),
+                    Math.min(first.getY(), second.getY()),
+                    Math.min(first.getZ(), second.getZ()),
+                    Math.max(first.getX(), second.getX()) + 1.0f,
+                    Math.max(first.getY(), second.getY()) + 1.0f,
+                    Math.max(first.getZ(), second.getZ()) + 1.0f
+            );
+        }
+
+        float centerX() {
+            return (minX + maxX) * 0.5f;
+        }
+
+        float centerZ() {
+            return (minZ + maxZ) * 0.5f;
+        }
+    }
 }
