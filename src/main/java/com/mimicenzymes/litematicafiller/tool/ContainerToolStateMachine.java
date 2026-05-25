@@ -450,7 +450,9 @@ public class ContainerToolStateMachine {
     }
 
     private boolean clearContainer(Minecraft client, AbstractContainerMenu handler) {
-        boolean toInventory = getClearOutputMode() == ContainerClearOutputMode.INVENTORY;
+        ContainerClearOutputMode outputMode = getClearOutputMode();
+        boolean toInventory = outputMode == ContainerClearOutputMode.INVENTORY;
+        boolean inventoryThenDrop = outputMode == ContainerClearOutputMode.INVENTORY_THEN_DROP;
         if (toInventory && !canAbsorbContainerIntoPlayerInventory(client, handler)) {
             send(client, "litematica_container_filler.message.tool_clear_inventory_full");
             return false;
@@ -458,9 +460,10 @@ public class ContainerToolStateMachine {
 
         for (Slot slot : getContainerSlots(handler, client)) {
             if (!slot.hasItem() || !slot.mayPickup(client.player)) continue;
-            if (toInventory) {
+            if (toInventory || inventoryThenDrop) {
                 client.gameMode.handleContainerInput(handler.containerId, uiSlot(handler, slot), 0, ContainerInput.QUICK_MOVE, client.player);
-            } else {
+            }
+            if (!toInventory && slot.hasItem()) {
                 client.gameMode.handleContainerInput(handler.containerId, uiSlot(handler, slot), 1, ContainerInput.THROW, client.player);
             }
         }
@@ -1387,7 +1390,7 @@ public class ContainerToolStateMachine {
 
         @Override
         public int hashCode() {
-            return ItemStack.hashItemAndComponents(this.stack);
+            return ItemMatcher.matchingHash(this.stack);
         }
     }
 

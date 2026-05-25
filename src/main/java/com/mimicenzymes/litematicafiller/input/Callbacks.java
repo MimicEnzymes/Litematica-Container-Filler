@@ -8,6 +8,7 @@ import com.mimicenzymes.litematicafiller.tool.ContainerToolStateMachine;
 import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
+import fi.dy.masa.malilib.config.options.ConfigBooleanHotkeyed;
 import fi.dy.masa.malilib.gui.GuiBase;
 import fi.dy.masa.malilib.hotkeys.IHotkeyCallback;
 import fi.dy.masa.malilib.hotkeys.IKeybind;
@@ -32,6 +33,12 @@ public class Callbacks implements IHotkeyCallback {
 
         if (key == Hotkeys.OPEN_CONFIG_GUI.getKeybind()) {
             GuiBase.openGui(new GuiConfigs(null));
+            return true;
+        }
+
+        ConfigBooleanHotkeyed toggleConfig = getBooleanHotkeyConfig(key);
+        if (toggleConfig != null) {
+            toggleBooleanConfig(mc, toggleConfig);
             return true;
         }
 
@@ -76,6 +83,26 @@ public class Callbacks implements IHotkeyCallback {
         }
 
         return false;
+    }
+
+    private ConfigBooleanHotkeyed getBooleanHotkeyConfig(IKeybind key) {
+        for (ConfigBooleanHotkeyed config : Configs.BOOLEAN_HOTKEY_OPTIONS) {
+            if (key == config.getKeybind()) {
+                return config;
+            }
+        }
+        return null;
+    }
+
+    private void toggleBooleanConfig(Minecraft mc, ConfigBooleanHotkeyed config) {
+        config.toggleBooleanValue();
+        Configs.saveToFile();
+        if (mc.player != null) {
+            String value = Component.translatable(config.getBooleanValue()
+                    ? "litematica_container_filler.gui.value.on"
+                    : "litematica_container_filler.gui.value.off").getString();
+            mc.player.sendOverlayMessage(Component.literal(Component.translatable(config.getName()).getString() + ": " + value));
+        }
     }
 
     private void executeFill(Minecraft mc) {
