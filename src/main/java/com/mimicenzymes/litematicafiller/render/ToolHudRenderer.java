@@ -10,6 +10,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import org.joml.Matrix3x2fStack;
 
 public class ToolHudRenderer {
     private static final int ACCENT = 0xFF18F6E8;
@@ -23,6 +24,8 @@ public class ToolHudRenderer {
     private static final int TEXT = 0xFFFFFFFF;
     private static final int MUTED_TEXT = 0xFFC5D7DA;
     private static final int MIN_PANEL_WIDTH = 128;
+    private static final int FIXED_PANEL_BASE_HEIGHT = 68;
+    private static final int ANCHORED_PANEL_BASE_HEIGHT = 68;
     private static final float EDGE_MARGIN = 8.0f;
     private static final float PANEL_EDGE_TRIGGER_MARGIN = 22.0f;
     private static final float PANEL_FOLLOW_DEADBAND = 0.72f;
@@ -92,13 +95,13 @@ public class ToolHudRenderer {
         float scale = clamp(Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f, 0.7f, 1.5f);
         int panelW = Math.round(cachedPanelWidth * scale);
         ToolHudStyle style = getHudStyle();
-        int panelH = Math.round((style == ToolHudStyle.FIXED_CARD ? 58 : (cachedSecondaryHint.isEmpty() ? 34 : 47)) * scale);
+        int panelH = Math.round((style == ToolHudStyle.FIXED_CARD ? FIXED_PANEL_BASE_HEIGHT : ANCHORED_PANEL_BASE_HEIGHT) * scale);
         int offset = Math.round(Configs.TOOL_HUD_OFFSET.getIntegerValue() * scale);
 
         if (style == ToolHudStyle.ANCHORED_CARD && visible && updateFrame) {
             updateLayout(client, target, width, height, panelW, panelH, offset, scale, smoothing);
         } else if (style == ToolHudStyle.FIXED_CARD && updateFrame) {
-            updateFixedLayout(width, height, panelW, panelH, offset, smoothing);
+            updateFixedLayout(width, height, panelW, panelH, smoothing);
         } else if ((style == ToolHudStyle.ANCHORED_CARD && !hasLayout()) || (style == ToolHudStyle.FIXED_CARD && !hasFixedLayout())) {
             return;
         }
@@ -108,7 +111,7 @@ public class ToolHudRenderer {
         int alpha = Math.round(255.0f * opacity * eased);
 
         if (style == ToolHudStyle.FIXED_CARD) {
-            drawFixedPanel(context, client, Math.round(fixedPanelX), Math.round(fixedPanelY), panelW, panelH, scale, alpha, eased);
+            drawToolCard(context, client, Math.round(fixedPanelX), Math.round(fixedPanelY), panelW, panelH, scale, alpha, eased, tools.isWorking());
             return;
         }
 
@@ -122,7 +125,7 @@ public class ToolHudRenderer {
 
         drawLeader(context, startX, startY, endX, endY, alpha);
         drawAnchor(context, startX, startY, alpha);
-        drawPanel(context, client, panelLeft, panelTop, panelW, panelH, scale, alpha);
+        drawToolCard(context, client, panelLeft, panelTop, panelW, panelH, scale, alpha, eased, tools.isWorking());
     }
 
     private static ToolHudStyle getHudStyle() {
@@ -193,9 +196,9 @@ public class ToolHudRenderer {
         }
     }
 
-    private static void updateFixedLayout(int width, int height, int panelW, int panelH, int offset, float smoothing) {
-        float targetX = width * 0.5f + Math.max(24.0f, offset * 0.85f);
-        float targetY = height * 0.31f;
+    private static void updateFixedLayout(int width, int height, int panelW, int panelH, float smoothing) {
+        float targetX = width * 0.5f + Configs.TOOL_HUD_CUSTOM_X.getIntegerValue();
+        float targetY = height * 0.5f + Configs.TOOL_HUD_CUSTOM_Y.getIntegerValue();
         targetX = clamp(targetX, EDGE_MARGIN, Math.max(EDGE_MARGIN, width - panelW - EDGE_MARGIN));
         targetY = clamp(targetY, EDGE_MARGIN, Math.max(EDGE_MARGIN, height - panelH - EDGE_MARGIN));
 
@@ -326,7 +329,7 @@ public class ToolHudRenderer {
         cachedSecondaryHint = buildSecondaryHint(switchHotkey, closeHotkey);
         cachedPanelWidth = Math.max(MIN_PANEL_WIDTH,
                 Math.max(Math.max(client.textRenderer.getWidth(cachedLabel), client.textRenderer.getWidth(cachedHint)),
-                        client.textRenderer.getWidth(cachedSecondaryHint)) + 24);
+                        client.textRenderer.getWidth(cachedSecondaryHint)) + 58);
     }
 
     private static String normalizeHotkey(String hotkey) {
@@ -365,87 +368,129 @@ public class ToolHudRenderer {
         drawBentLine(context, x1, y1, corner[0], corner[1], x2, y2, withAlpha(ACCENT, Math.round(alpha * 0.66f)));
     }
 
-    private static void drawPanel(DrawContext context, MinecraftClient client, int x, int y, int width, int height, float scale, int alpha) {
-        int panelAlpha = Math.round(alpha * 0.78f);
-        int edgeAlpha = Math.round(alpha * 0.55f);
-        int pad = Math.max(7, Math.round(8.0f * scale));
-        int lineGap = Math.max(11, Math.round(12.0f * scale));
-
-        drawSoftRect(context, x + 1, y + 2, width, height, withAlpha(0xFF000000, Math.round(alpha * 0.18f)));
-        drawSoftRect(context, x, y, width, height, withAlpha(PANEL, panelAlpha));
-        context.fill(x + 2, y, x + width - 2, y + 1, withAlpha(PANEL_EDGE, edgeAlpha));
-        context.fill(x + 2, y + height - 1, x + width - 2, y + height, withAlpha(PANEL_EDGE, Math.round(edgeAlpha * 0.45f)));
-        context.fill(x, y + 4, x + 2, y + height - 4, withAlpha(ACCENT, Math.round(alpha * 0.72f)));
-
-        context.drawTextWithShadow(client.textRenderer, cachedLabel, x + pad, y + Math.round(5.0f * scale), withAlpha(TEXT, alpha));
-        context.drawTextWithShadow(client.textRenderer, cachedHint, x + pad, y + Math.round(5.0f * scale) + lineGap, withAlpha(MUTED_TEXT, Math.round(alpha * 0.9f)));
-
-        if (!cachedSecondaryHint.isEmpty()) {
-            context.drawTextWithShadow(client.textRenderer, cachedSecondaryHint, x + pad, y + Math.round(5.0f * scale) + lineGap * 2, withAlpha(MUTED_TEXT, Math.round(alpha * 0.72f)));
-        }
-    }
-
-    private static void drawFixedPanel(DrawContext context, MinecraftClient client, int x, int y, int width, int height, float scale, int alpha, float eased) {
+    private static void drawToolCard(DrawContext context, MinecraftClient client, int x, int y, int width, int height, float scale, int alpha, float eased, boolean showProgress) {
         int panelAlpha = Math.round(alpha * 0.92f);
         int borderAlpha = Math.round(alpha * 0.88f);
         int shadowAlpha = Math.round(alpha * 0.34f);
         int pad = Math.max(8, Math.round(9.0f * scale));
-        int iconSize = Math.max(14, Math.round(17.0f * scale));
         int headerHeight = Math.max(15, Math.round(17.0f * scale));
-        int barHeight = Math.max(7, Math.round(8.0f * scale));
+        int barHeight = Math.max(2, Math.round(2.0f * scale));
         int breathe = Math.round((float)Math.sin(System.nanoTime() / 260_000_000.0D) * 2.0f * eased);
+        int lineGap = Math.max(10, Math.round(11.0f * scale));
+        int iconBaseX = x + pad + Math.round(12.0f * scale);
+        int iconBaseY = y + headerHeight + Math.round(27.0f * scale);
+        int iconCenterX = iconBaseX + (cachedMode == ContainerToolMode.COPY ? breathe : 0);
+        int iconCenterY = iconBaseY + (cachedMode == ContainerToolMode.COPY ? 0 : breathe);
+        int textX = x + pad + Math.round(36.0f * scale);
 
         drawRoundedInfoCard(context, x + 2, y + 3, width, height, withAlpha(0xFF000000, shadowAlpha));
         drawRoundedInfoCard(context, x, y, width, height, withAlpha(FIXED_PANEL_EDGE, borderAlpha));
         drawRoundedInfoCard(context, x + 2, y + 2, width - 4, height - 4, withAlpha(FIXED_PANEL_INNER, panelAlpha));
         context.fill(x + 5, y + 5, x + width - 5, y + headerHeight + 5, withAlpha(FIXED_PANEL_HEADER, Math.round(alpha * 0.46f)));
-
-        int iconX = x + pad;
-        int iconY = y + 7;
-        drawGogglesIcon(context, iconX, iconY, iconSize, alpha);
-        context.drawTextWithShadow(client.textRenderer, StringUtils.translate("litematica_container_filler.hud.fixed.title"),
-                iconX + iconSize + 7, y + 8, withAlpha(TEXT, alpha));
+        drawScaledText(context, client, StringUtils.translate("litematica_container_filler.hud.fixed.title"),
+                x + pad, y + 8, scale, withAlpha(TEXT, alpha));
 
         int labelY = y + headerHeight + 9;
-        context.drawTextWithShadow(client.textRenderer, cachedLabel, x + pad + 24, labelY, withAlpha(MUTED_TEXT, Math.round(alpha * 0.88f)));
+        drawHudToolIcon(context, iconCenterX, iconCenterY, scale, alpha, eased, cachedMode);
+        drawScaledText(context, client, cachedLabel, textX, labelY, scale, withAlpha(MUTED_TEXT, Math.round(alpha * 0.88f)));
+        drawScaledText(context, client, cachedHint, textX, labelY + lineGap, scale, withAlpha(0xFF55FF68, alpha));
+        if (!cachedSecondaryHint.isEmpty()) {
+            drawScaledText(context, client, cachedSecondaryHint, textX, labelY + lineGap * 2, scale, withAlpha(MUTED_TEXT, Math.round(alpha * 0.78f)));
+        }
 
-        int barX = x + pad + 24;
-        int barY = labelY + Math.round(12.0f * scale);
-        int barW = Math.max(48, width - pad * 2 - 24);
-        int fillW = Math.max(5, Math.round(barW * clamp(progressAnimation + breathe * 0.006f, 0.08f, 1.0f)));
-        context.fill(barX, barY, barX + barW, barY + barHeight, withAlpha(FIXED_PANEL_BAR_BG, Math.round(alpha * 0.92f)));
-        context.fill(barX, barY, barX + fillW, barY + barHeight, withAlpha(FIXED_PANEL_BAR, Math.round(alpha * 0.95f)));
-        context.fill(barX, barY, barX + Math.min(fillW, Math.max(1, barW / 5)), barY + barHeight, withAlpha(0xFFFFFFFF, Math.round(alpha * 0.34f)));
+        if (showProgress) {
+            int barX = x + 5;
+            int barY = y + height - barHeight - 2;
+            int barW = Math.max(48, width - 10);
+            int fillW = Math.max(5, Math.round(barW * clamp(progressAnimation, 0.08f, 1.0f)));
+            context.fill(barX, barY, barX + barW, barY + barHeight, withAlpha(FIXED_PANEL_BAR_BG, Math.round(alpha * 0.58f)));
+            context.fill(barX, barY, barX + fillW, barY + barHeight, withAlpha(FIXED_PANEL_BAR, Math.round(alpha * 0.95f)));
+        }
+    }
 
-        String action = cachedHint;
-        int actionX = barX + Math.min(barW - client.textRenderer.getWidth(action), fillW + 5);
-        context.drawTextWithShadow(client.textRenderer, action, Math.max(barX, actionX), barY - 1, withAlpha(0xFF55FF68, alpha));
+    private static void drawHudToolIcon(DrawContext context, int cx, int cy, float scale, int alpha, float eased, ContainerToolMode mode) {
+        ArrowDirection direction = switch (mode) {
+            case CLEAR -> ArrowDirection.UP;
+            case COPY -> ArrowDirection.RIGHT;
+            case PACK, FILL_FULL -> ArrowDirection.DOWN;
+        };
+
+        if (mode == ContainerToolMode.PACK) {
+            int boxW = Math.max(20, Math.round(24.0f * scale));
+            int boxH = Math.max(15, Math.round(17.0f * scale));
+            int boxX = cx - boxW / 2;
+            int boxY = cy + Math.round(1.0f * scale);
+            int box = withAlpha(0xFF8E55D9, Math.round(alpha * 0.58f));
+            int edge = withAlpha(0xFFB68CFF, Math.round(alpha * 0.9f));
+            int dark = withAlpha(0xFF2F1748, Math.round(alpha * 0.68f));
+            context.fill(boxX + 1, boxY + 2, boxX + boxW - 1, boxY + boxH, box);
+            context.fill(boxX, boxY, boxX + boxW, boxY + Math.max(4, Math.round(4.0f * scale)), edge);
+            context.fill(boxX, boxY + 3, boxX + 2, boxY + boxH, edge);
+            context.fill(boxX + boxW - 2, boxY + 3, boxX + boxW, boxY + boxH, edge);
+            context.fill(boxX + Math.round(5.0f * scale), boxY + Math.round(7.0f * scale), boxX + boxW - Math.round(5.0f * scale), boxY + Math.round(9.0f * scale), dark);
+            int arrowBounce = Math.round((float)Math.sin(System.nanoTime() / 250_000_000.0D) * 1.8f * eased);
+            drawHudArrowIcon(context, cx, cy - Math.round(13.0f * scale) + arrowBounce, scale * 0.52f, alpha, direction);
+            return;
+        }
+
+        drawHudArrowIcon(context, cx, cy, scale, alpha, direction);
+    }
+
+    private static void drawHudArrowIcon(DrawContext context, int cx, int cy, float scale, int alpha, ArrowDirection direction) {
+        int base = Configs.HIGHLIGHT_COLOR_FILLING.getColor().toVanillaArgb();
+        int body = withAlpha(base, Math.round(alpha * 0.88f));
+        int shine = withAlpha(0xFFFFFFFF, Math.round(alpha * 0.28f));
+        int halfW = Math.max(8, Math.round(11.0f * scale));
+        int shaft = Math.max(4, Math.round(5.0f * scale));
+        int top = cy - Math.round(13.0f * scale);
+        int headY = cy - Math.round(1.0f * scale);
+        int tailY = cy + Math.round(13.0f * scale);
+
+        fillRotatedRect(context, cx, cy, -shaft, top - cy, shaft + 1, headY - cy + 2, body, direction);
+        fillRotatedRect(context, cx, cy, -halfW, headY - cy, halfW + 1, headY - cy + Math.max(5, Math.round(6.0f * scale)), body, direction);
+        fillRotatedRect(context, cx, cy, -Math.round(halfW * 0.72f), headY - cy + Math.round(6.0f * scale), Math.round(halfW * 0.72f) + 1, headY - cy + Math.round(10.0f * scale), body, direction);
+        fillRotatedRect(context, cx, cy, -Math.round(halfW * 0.42f), headY - cy + Math.round(10.0f * scale), Math.round(halfW * 0.42f) + 1, tailY - cy, body, direction);
+        fillRotatedRect(context, cx, cy, -1, top - cy + 2, 2, tailY - cy - 1, shine, direction);
+    }
+
+    private static void drawScaledText(DrawContext context, MinecraftClient client, String text, int x, int y, float scale, int color) {
+        if (Math.abs(scale - 1.0f) < 0.01f) {
+            context.drawTextWithShadow(client.textRenderer, text, x, y, color);
+            return;
+        }
+
+        Matrix3x2fStack matrices = context.getMatrices();
+        matrices.pushMatrix();
+        matrices.translate(x, y);
+        matrices.scale(scale, scale);
+        context.drawTextWithShadow(client.textRenderer, text, 0, 0, color);
+        matrices.popMatrix();
+    }
+
+    private static void fillRotatedRect(DrawContext context, int cx, int cy, int relX1, int relY1, int relX2, int relY2, int color, ArrowDirection direction) {
+        int[] a = rotate(cx, cy, relX1, relY1, direction);
+        int[] b = rotate(cx, cy, relX2, relY2, direction);
+        context.fill(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1]), color);
+    }
+
+    private static int[] rotate(int cx, int cy, int x, int y, ArrowDirection direction) {
+        return switch (direction) {
+            case DOWN -> new int[]{cx + x, cy + y};
+            case UP -> new int[]{cx - x, cy - y};
+            case RIGHT -> new int[]{cx + y, cy - x};
+        };
+    }
+
+    private enum ArrowDirection {
+        DOWN,
+        UP,
+        RIGHT
     }
 
     private static void drawRoundedInfoCard(DrawContext context, int x, int y, int width, int height, int color) {
         context.fill(x + 4, y, x + width - 4, y + height, color);
         context.fill(x, y + 4, x + width, y + height - 4, color);
         context.fill(x + 2, y + 2, x + width - 2, y + height - 2, color);
-    }
-
-    private static void drawGogglesIcon(DrawContext context, int x, int y, int size, int alpha) {
-        int gold = withAlpha(0xFFFFA629, alpha);
-        int glass = withAlpha(0xFF5A2B10, Math.round(alpha * 0.78f));
-        int shine = withAlpha(0xFFFFFFFF, Math.round(alpha * 0.72f));
-        int lens = Math.max(5, size / 2 - 1);
-        int gap = Math.max(3, size / 5);
-
-        drawRing(context, x, y + 2, lens, gold, glass);
-        drawRing(context, x + lens + gap, y + 2, lens, gold, glass);
-        context.fill(x + lens - 1, y + 2 + lens / 2, x + lens + gap + 1, y + 4 + lens / 2, gold);
-        context.fill(x + 2, y + 4, x + 4, y + 6, shine);
-        context.fill(x + lens + gap + 2, y + 4, x + lens + gap + 4, y + 6, shine);
-    }
-
-    private static void drawRing(DrawContext context, int x, int y, int size, int border, int fill) {
-        context.fill(x, y + 2, x + size, y + size - 2, border);
-        context.fill(x + 2, y, x + size - 2, y + size, border);
-        context.fill(x + 2, y + 2, x + size - 2, y + size - 2, fill);
     }
 
     private static void drawLine(DrawContext context, int x1, int y1, int x2, int y2, int color) {

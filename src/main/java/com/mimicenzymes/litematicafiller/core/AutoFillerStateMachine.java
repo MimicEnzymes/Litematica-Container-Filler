@@ -267,11 +267,15 @@ public class AutoFillerStateMachine {
 
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) return false;
+        if (client.world == null) return false;
+
+        boolean isCrafter = client.world.getBlockState(pos).getBlock() instanceof net.minecraft.block.CrafterBlock;
+        boolean needsCrafterLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, client);
 
         Map<Integer, ItemStack> trueData = getTrueContainerData(client, pos);
         if (trueData == null) {
             Set<Item> missingTypes = getUnavailableMissingTypes(client, pos, requiredItems, null);
-            if (!missingTypes.isEmpty()) {
+            if (!missingTypes.isEmpty() && !needsCrafterLocking) {
                 markMissingMaterials(pos, missingTypes);
                 failedContainers.put(pos, missingTypes);
                 return false;
@@ -282,7 +286,6 @@ public class AutoFillerStateMachine {
             return true;
         }
 
-        boolean isCrafter = client.world.getBlockState(pos).getBlock() instanceof net.minecraft.block.CrafterBlock;
         Set<Integer> ignoredSlots = LitematicaContainerReader.getIgnoredSlots(pos, client.world.getRegistryManager());
         boolean needsAction = false;
         Map<Integer, ItemStack> missingItems = new HashMap<>();
@@ -313,11 +316,11 @@ public class AutoFillerStateMachine {
             }
         }
 
-        if (isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, client)) needsAction = true;
+        if (needsCrafterLocking) needsAction = true;
         if (!needsAction) return false;
 
         Set<Item> unavailable = getUnavailableMissingTypes(client, pos, requiredItems, missingItems);
-        if (!unavailable.isEmpty() && !hasExtractableGarbage(pos, requiredItems, trueData, isCrafter, ignoredSlots)) {
+        if (!unavailable.isEmpty() && !needsCrafterLocking && !hasExtractableGarbage(pos, requiredItems, trueData, isCrafter, ignoredSlots)) {
             markMissingMaterials(pos, unavailable);
             failedContainers.put(pos, unavailable);
             return false;

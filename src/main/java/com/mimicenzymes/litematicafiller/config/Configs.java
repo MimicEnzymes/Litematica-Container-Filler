@@ -76,6 +76,8 @@ public class Configs implements IConfigHandler {
     public static final ConfigDouble TOOL_HUD_SMOOTHING             = new ConfigDouble("litematica_container_filler.config.name.toolHudSmoothing", 0.22D, 0.05D, 0.8D, "litematica_container_filler.config.comment.toolHudSmoothing");
     public static final ConfigInteger TOOL_HUD_OFFSET               = new ConfigInteger("litematica_container_filler.config.name.toolHudOffset", 34, 12, 120, "litematica_container_filler.config.comment.toolHudOffset");
     public static final ConfigInteger TOOL_HUD_SCALE                = new ConfigInteger("litematica_container_filler.config.name.toolHudScale", 100, 70, 150, "litematica_container_filler.config.comment.toolHudScale");
+    public static final ConfigInteger TOOL_HUD_CUSTOM_X             = new ConfigInteger("litematica_container_filler.config.name.toolHudCustomX", 112, -1000, 1000, "litematica_container_filler.config.comment.toolHudCustomX");
+    public static final ConfigInteger TOOL_HUD_CUSTOM_Y             = new ConfigInteger("litematica_container_filler.config.name.toolHudCustomY", -86, -1000, 1000, "litematica_container_filler.config.comment.toolHudCustomY");
     public static final ConfigInteger TOOL_HUD_FRAME_RATE           = new ConfigInteger("litematica_container_filler.config.name.toolHudFrameRate", 30, 0, 240, "litematica_container_filler.config.comment.toolHudFrameRate");
 
     // Container tool hotkeys
@@ -177,6 +179,8 @@ public class Configs implements IConfigHandler {
                 TOOL_HUD_SMOOTHING,
                 TOOL_HUD_OFFSET,
                 TOOL_HUD_SCALE,
+                TOOL_HUD_CUSTOM_X,
+                TOOL_HUD_CUSTOM_Y,
                 TOOL_HUD_FRAME_RATE
         );
 
