@@ -8,7 +8,9 @@
                     "MimicEnzymes"
                 ],
     "contact":  {
-
+                    "homepage":  "https://modrinth.com/mod/litematica-container-filler",
+                    "sources":  "https://github.com/MimicEnzymes/Litematica-Container-Filler",
+                    "issues":  "https://github.com/MimicEnzymes/Litematica-Container-Filler/issues"
                 },
     "license":  "LGPL-3.0-only",
     "icon":  "assets/litematica_container_filler/icon.png",
