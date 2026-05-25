@@ -1,10 +1,12 @@
 package com.mimicenzymes.litematicafiller.gui;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
+import com.mimicenzymes.litematicafiller.config.ToolHudStyle;
 import fi.dy.masa.malilib.config.options.ConfigBoolean;
 import fi.dy.masa.malilib.config.options.ConfigColor;
 import fi.dy.masa.malilib.config.options.ConfigDouble;
 import fi.dy.masa.malilib.config.options.ConfigInteger;
+import fi.dy.masa.malilib.config.options.ConfigOptionList;
 import fi.dy.masa.malilib.gui.GuiBase;
 import fi.dy.masa.malilib.gui.button.ButtonGeneric;
 import fi.dy.masa.malilib.util.StringUtils;
@@ -104,6 +106,7 @@ public class GuiRenderEditor extends GuiBase {
             }
             case HUD -> {
                 y = addBooleanButton(controlsX, y, Configs.ENABLE_TOOL_HUD);
+                y = addOptionButton(controlsX, y, Configs.TOOL_HUD_STYLE);
                 y = addStepper(controlsX, y, Configs.TOOL_HUD_OPACITY, 0.05D);
                 y = addStepper(controlsX, y, Configs.TOOL_HUD_SMOOTHING, 0.05D);
                 y = addStepper(controlsX, y, Configs.TOOL_HUD_OFFSET, 4);
@@ -118,6 +121,17 @@ public class GuiRenderEditor extends GuiBase {
         button.setHoverStrings(tr(config.getComment()));
         this.addButton(button, (clickedButton, mouseButton) -> {
             config.setBooleanValue(!config.getBooleanValue());
+            Configs.saveToFile();
+            this.initGui();
+        });
+        return y + 24;
+    }
+
+    private int addOptionButton(int x, int y, ConfigOptionList config) {
+        ButtonGeneric button = new ButtonGeneric(x, y, 210, 20, optionLabel(config));
+        button.setHoverStrings(tr(config.getComment()));
+        this.addButton(button, (clickedButton, mouseButton) -> {
+            config.setOptionListValue(config.getOptionListValue().cycle(mouseButton == 0));
             Configs.saveToFile();
             this.initGui();
         });
@@ -279,21 +293,65 @@ public class GuiRenderEditor extends GuiBase {
         double opacity = Configs.TOOL_HUD_OPACITY.getDoubleValue();
         int alpha = clamp((int)(255.0D * opacity), 25, 255);
         int panelW = Math.round(150 * Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f);
-        int panelH = Math.round(48 * Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f);
-        int panelX = x + width / 2 + Configs.TOOL_HUD_OFFSET.getIntegerValue();
-        int panelY = y + height / 2 - panelH / 2;
-        int anchorX = targetX + 22;
-        int anchorY = targetY - 18;
-        int cornerX = panelX - 28;
-        int cornerY = anchorY;
+        ToolHudStyle style = Configs.TOOL_HUD_STYLE.getOptionListValue() instanceof ToolHudStyle hudStyle ? hudStyle : ToolHudStyle.FIXED_CARD;
+        int panelH = Math.round((style == ToolHudStyle.FIXED_CARD ? 58 : 48) * Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f);
 
-        drawLine(context, anchorX, anchorY, cornerX, cornerY, withAlpha(ACCENT, alpha));
-        drawLine(context, cornerX, cornerY, panelX, panelY + panelH / 2, withAlpha(ACCENT, alpha));
-        context.fill(anchorX - 3, anchorY - 3, anchorX + 4, anchorY + 4, withAlpha(ACCENT, alpha));
+        if (style == ToolHudStyle.ANCHORED_CARD) {
+            int panelX = x + width / 2 + Configs.TOOL_HUD_OFFSET.getIntegerValue();
+            int panelY = y + height / 2 - panelH / 2;
+            int anchorX = targetX + 22;
+            int anchorY = targetY - 18;
+            int cornerX = panelX - 28;
+            int cornerY = anchorY;
+
+            drawLine(context, anchorX, anchorY, cornerX, cornerY, withAlpha(ACCENT, alpha));
+            drawLine(context, cornerX, cornerY, panelX, panelY + panelH / 2, withAlpha(ACCENT, alpha));
+            context.fill(anchorX - 3, anchorY - 3, anchorX + 4, anchorY + 4, withAlpha(ACCENT, alpha));
+            drawLegacyHudCard(context, panelX, panelY, panelW, panelH, alpha);
+            return;
+        }
+
+        int panelX = x + width / 2 + Math.max(24, Configs.TOOL_HUD_OFFSET.getIntegerValue());
+        int panelY = y + height / 3 - panelH / 2;
+        drawFixedHudCard(context, panelX, panelY, panelW, panelH, alpha);
+    }
+
+    private void drawLegacyHudCard(DrawContext context, int panelX, int panelY, int panelW, int panelH, int alpha) {
         drawSoftRect(context, panelX, panelY, panelW, panelH, withAlpha(0xFF071014, (int)(alpha * 0.78D)));
         context.fill(panelX, panelY, panelX + 2, panelY + panelH, withAlpha(ACCENT, alpha));
         drawString(context, tr("litematica_container_filler.gui.label.hud_title"), panelX + 10, panelY + 7, withAlpha(TEXT, alpha));
         drawString(context, tr("litematica_container_filler.gui.label.hud_hint"), panelX + 10, panelY + 22, withAlpha(MUTED, alpha));
+    }
+
+    private void drawFixedHudCard(DrawContext context, int panelX, int panelY, int panelW, int panelH, int alpha) {
+        drawSoftRect(context, panelX + 2, panelY + 3, panelW, panelH, withAlpha(0xFF000000, (int)(alpha * 0.32D)));
+        drawSoftRect(context, panelX, panelY, panelW, panelH, withAlpha(0xFFE6F2E8, (int)(alpha * 0.88D)));
+        drawSoftRect(context, panelX + 2, panelY + 2, panelW - 4, panelH - 4, withAlpha(0xFF050708, (int)(alpha * 0.92D)));
+        context.fill(panelX + 6, panelY + 6, panelX + panelW - 6, panelY + 20, withAlpha(0xFF2A332B, (int)(alpha * 0.46D)));
+        drawString(context, tr("litematica_container_filler.gui.label.hud_title"), panelX + 34, panelY + 8, withAlpha(TEXT, alpha));
+        drawGogglesIcon(context, panelX + 10, panelY + 8, 17, alpha);
+        drawString(context, tr("litematica_container_filler.gui.label.hud_hint"), panelX + 34, panelY + 24, withAlpha(MUTED, alpha));
+        int barX = panelX + 34;
+        int barY = panelY + panelH - 14;
+        int barW = panelW - 46;
+        context.fill(barX, barY, barX + barW, barY + 8, withAlpha(0xFF0B2310, alpha));
+        context.fill(barX, barY, barX + Math.round(barW * 0.62f), barY + 8, withAlpha(0xFF35F05E, alpha));
+    }
+
+    private void drawGogglesIcon(DrawContext context, int x, int y, int size, int alpha) {
+        int gold = withAlpha(0xFFFFA629, alpha);
+        int glass = withAlpha(0xFF5A2B10, Math.round(alpha * 0.78f));
+        int lens = Math.max(5, size / 2 - 1);
+        int gap = Math.max(3, size / 5);
+        drawRing(context, x, y + 2, lens, gold, glass);
+        drawRing(context, x + lens + gap, y + 2, lens, gold, glass);
+        context.fill(x + lens - 1, y + 2 + lens / 2, x + lens + gap + 1, y + 4 + lens / 2, gold);
+    }
+
+    private void drawRing(DrawContext context, int x, int y, int size, int border, int fill) {
+        context.fill(x, y + 2, x + size, y + size - 2, border);
+        context.fill(x + 2, y, x + size - 2, y + size, border);
+        context.fill(x + 2, y + 2, x + size - 2, y + size - 2, fill);
     }
 
     private void drawContainerGlyph(DrawContext context, int x, int y, int width, int height, Color4f color) {
@@ -400,6 +458,10 @@ public class GuiRenderEditor extends GuiBase {
 
     private String colorLabel(ConfigColor config) {
         return tr(config.getName()) + ": " + config.getStringValue();
+    }
+
+    private String optionLabel(ConfigOptionList config) {
+        return tr(config.getName()) + ": " + config.getOptionListValue().getDisplayName();
     }
 
     private void cycleColor(ConfigColor config) {

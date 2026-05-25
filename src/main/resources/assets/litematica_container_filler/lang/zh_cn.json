@@ -108,6 +108,7 @@
   "litematica_container_filler.config.name.highlightColorFilling": "颜色: 正在填充标记",
   "litematica_container_filler.config.name.highlightColorQueued": "颜色: 排队等待标记",
   "litematica_container_filler.config.name.highlightColorMissingMaterial": "颜色: 缺少材料标记",
+  "litematica_container_filler.config.name.toolHudStyle": "工具 HUD 样式",
   "litematica_container_filler.config.name.toolHudOpacity": "工具 HUD 透明度",
   "litematica_container_filler.config.name.toolHudSmoothing": "工具 HUD 平滑度",
   "litematica_container_filler.config.name.toolHudOffset": "工具 HUD 偏移",
@@ -174,9 +175,10 @@
   "litematica_container_filler.config.comment.highlightColorFilling": "正在填充容器上方动态标记的颜色。请使用十六进制 ARGB 格式",
   "litematica_container_filler.config.comment.highlightColorQueued": "排队等待容器动态标记的颜色。请使用十六进制 ARGB 格式",
   "litematica_container_filler.config.comment.highlightColorMissingMaterial": "因缺少材料而跳过的容器标记颜色。请使用十六进制 ARGB 格式",
+  "litematica_container_filler.config.comment.toolHudStyle": "固定信息卡片：稳定显示在屏幕固定区域，不绘制锚点线段。\n锚点指示卡片：旧样式，从选中容器拉线指向 HUD 卡片。",
   "litematica_container_filler.config.comment.toolHudOpacity": "控制容器工具 HUD 面板的透明度。",
-  "litematica_container_filler.config.comment.toolHudSmoothing": "控制工具 HUD 跟随选中容器时的平滑程度。数值越低越柔和，但响应更慢。",
-  "litematica_container_filler.config.comment.toolHudOffset": "选中容器标记与工具 HUD 面板之间的屏幕距离。",
+  "litematica_container_filler.config.comment.toolHudSmoothing": "控制工具 HUD 动画更新的平滑程度。数值越低越柔和，但响应更慢。",
+  "litematica_container_filler.config.comment.toolHudOffset": "固定信息卡片：距离屏幕中心的水平偏移。\n锚点指示卡片：选中容器标记与工具 HUD 面板之间的屏幕距离。",
   "litematica_container_filler.config.comment.toolHudScale": "缩放工具 HUD 面板大小。100 为默认大小。",
   "litematica_container_filler.config.comment.toolHudFrameRate": "工具 HUD 布局和动画的最大更新帧率。0 表示不限制。",
   "litematica_container_filler.config.option.containerFilterMode.disabled": "禁用",
@@ -296,6 +298,9 @@
   "litematica_container_filler.config.option.containerFilterScope.schematicFill": "投影填充",
   "litematica_container_filler.config.option.containerFilterScope.tools": "容器工具",
   "litematica_container_filler.config.option.containerFilterScope.both": "投影填充和工具",
+  "litematica_container_filler.config.option.toolHudStyle.fixedCard": "固定信息卡片",
+  "litematica_container_filler.config.option.toolHudStyle.anchoredCard": "锚点指示卡片",
   "litematica_container_filler.config.name.taskMarkerAnimationFps": "任务标记帧率上限",
-  "litematica_container_filler.config.comment.taskMarkerAnimationFps": "正在填充、排队等待、缺少材料标记的最大动画重建帧率。0 表示不限制。"
+  "litematica_container_filler.config.comment.taskMarkerAnimationFps": "正在填充、排队等待、缺少材料标记的最大动画重建帧率。0 表示不限制。",
+  "litematica_container_filler.hud.fixed.title": "工具信息："
 }

@@ -2,6 +2,7 @@ package com.mimicenzymes.litematicafiller.render;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.config.Hotkeys;
+import com.mimicenzymes.litematicafiller.config.ToolHudStyle;
 import com.mimicenzymes.litematicafiller.tool.ContainerToolMode;
 import com.mimicenzymes.litematicafiller.tool.ContainerToolStateMachine;
 import fi.dy.masa.malilib.util.StringUtils;
@@ -14,6 +15,11 @@ public class ToolHudRenderer {
     private static final int ACCENT = 0xFF18F6E8;
     private static final int PANEL = 0xFF071014;
     private static final int PANEL_EDGE = 0xFF1E5D64;
+    private static final int FIXED_PANEL_EDGE = 0xFFE6F2E8;
+    private static final int FIXED_PANEL_INNER = 0xEE050708;
+    private static final int FIXED_PANEL_HEADER = 0xFF2A332B;
+    private static final int FIXED_PANEL_BAR_BG = 0xFF0B2310;
+    private static final int FIXED_PANEL_BAR = 0xFF35F05E;
     private static final int TEXT = 0xFFFFFFFF;
     private static final int MUTED_TEXT = 0xFFC5D7DA;
     private static final int MIN_PANEL_WIDTH = 128;
@@ -49,6 +55,9 @@ public class ToolHudRenderer {
     private static String cachedSecondaryHint = "";
     private static int cachedPanelWidth = MIN_PANEL_WIDTH;
     private static long lastHudUpdateNanos = 0L;
+    private static float fixedPanelX = -1.0f;
+    private static float fixedPanelY = -1.0f;
+    private static float progressAnimation = 0.0f;
 
     private ToolHudRenderer() {
     }
@@ -82,18 +91,26 @@ public class ToolHudRenderer {
 
         float scale = clamp(Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f, 0.7f, 1.5f);
         int panelW = Math.round(cachedPanelWidth * scale);
-        int panelH = Math.round((cachedSecondaryHint.isEmpty() ? 34 : 47) * scale);
+        ToolHudStyle style = getHudStyle();
+        int panelH = Math.round((style == ToolHudStyle.FIXED_CARD ? 58 : (cachedSecondaryHint.isEmpty() ? 34 : 47)) * scale);
         int offset = Math.round(Configs.TOOL_HUD_OFFSET.getIntegerValue() * scale);
 
-        if (visible && updateFrame) {
+        if (style == ToolHudStyle.ANCHORED_CARD && visible && updateFrame) {
             updateLayout(client, target, width, height, panelW, panelH, offset, scale, smoothing);
-        } else if (!hasLayout()) {
+        } else if (style == ToolHudStyle.FIXED_CARD && updateFrame) {
+            updateFixedLayout(width, height, panelW, panelH, offset, smoothing);
+        } else if ((style == ToolHudStyle.ANCHORED_CARD && !hasLayout()) || (style == ToolHudStyle.FIXED_CARD && !hasFixedLayout())) {
             return;
         }
 
         float eased = easeOutCubic(visibility);
         float opacity = clamp((float) Configs.TOOL_HUD_OPACITY.getDoubleValue(), 0.1f, 1.0f);
         int alpha = Math.round(255.0f * opacity * eased);
+
+        if (style == ToolHudStyle.FIXED_CARD) {
+            drawFixedPanel(context, client, Math.round(fixedPanelX), Math.round(fixedPanelY), panelW, panelH, scale, alpha, eased);
+            return;
+        }
 
         int startX = Math.round(anchorX);
         int startY = Math.round(anchorY);
@@ -106,6 +123,13 @@ public class ToolHudRenderer {
         drawLeader(context, startX, startY, endX, endY, alpha);
         drawAnchor(context, startX, startY, alpha);
         drawPanel(context, client, panelLeft, panelTop, panelW, panelH, scale, alpha);
+    }
+
+    private static ToolHudStyle getHudStyle() {
+        if (Configs.TOOL_HUD_STYLE.getOptionListValue() instanceof ToolHudStyle style) {
+            return style;
+        }
+        return ToolHudStyle.FIXED_CARD;
     }
 
     private static boolean shouldUpdateFrame(long nowNanos) {
@@ -167,6 +191,25 @@ public class ToolHudRenderer {
             panelX = smoothTowardWithDeadband(panelX, targetPanelX, panelSmoothing, PANEL_MOVE_DEADBAND, PANEL_SNAP_EPSILON);
             panelY = smoothTowardWithDeadband(panelY, targetPanelY, panelSmoothing, PANEL_MOVE_DEADBAND, PANEL_SNAP_EPSILON);
         }
+    }
+
+    private static void updateFixedLayout(int width, int height, int panelW, int panelH, int offset, float smoothing) {
+        float targetX = width * 0.5f + Math.max(24.0f, offset * 0.85f);
+        float targetY = height * 0.31f;
+        targetX = clamp(targetX, EDGE_MARGIN, Math.max(EDGE_MARGIN, width - panelW - EDGE_MARGIN));
+        targetY = clamp(targetY, EDGE_MARGIN, Math.max(EDGE_MARGIN, height - panelH - EDGE_MARGIN));
+
+        if (fixedPanelX < 0.0f || fixedPanelY < 0.0f) {
+            fixedPanelX = targetX;
+            fixedPanelY = targetY;
+        } else {
+            float panelSmoothing = Math.min(0.24f, smoothing * 0.55f);
+            fixedPanelX = smoothTowardWithDeadband(fixedPanelX, targetX, panelSmoothing, PANEL_MOVE_DEADBAND, PANEL_SNAP_EPSILON);
+            fixedPanelY = smoothTowardWithDeadband(fixedPanelY, targetY, panelSmoothing, PANEL_MOVE_DEADBAND, PANEL_SNAP_EPSILON);
+        }
+
+        float targetProgress = cachedMode == ContainerToolMode.PACK ? 0.82f : cachedMode == ContainerToolMode.COPY ? 0.68f : 0.55f;
+        progressAnimation = smoothTowardWithSnap(progressAnimation, targetProgress, Math.min(0.34f, smoothing * 0.9f), 0.005f);
     }
 
     private static void updateDirection(float x, float y, int width, int height, float smoothing) {
@@ -342,6 +385,69 @@ public class ToolHudRenderer {
         }
     }
 
+    private static void drawFixedPanel(DrawContext context, MinecraftClient client, int x, int y, int width, int height, float scale, int alpha, float eased) {
+        int panelAlpha = Math.round(alpha * 0.92f);
+        int borderAlpha = Math.round(alpha * 0.88f);
+        int shadowAlpha = Math.round(alpha * 0.34f);
+        int pad = Math.max(8, Math.round(9.0f * scale));
+        int iconSize = Math.max(14, Math.round(17.0f * scale));
+        int headerHeight = Math.max(15, Math.round(17.0f * scale));
+        int barHeight = Math.max(7, Math.round(8.0f * scale));
+        int breathe = Math.round((float)Math.sin(System.nanoTime() / 260_000_000.0D) * 2.0f * eased);
+
+        drawRoundedInfoCard(context, x + 2, y + 3, width, height, withAlpha(0xFF000000, shadowAlpha));
+        drawRoundedInfoCard(context, x, y, width, height, withAlpha(FIXED_PANEL_EDGE, borderAlpha));
+        drawRoundedInfoCard(context, x + 2, y + 2, width - 4, height - 4, withAlpha(FIXED_PANEL_INNER, panelAlpha));
+        context.fill(x + 5, y + 5, x + width - 5, y + headerHeight + 5, withAlpha(FIXED_PANEL_HEADER, Math.round(alpha * 0.46f)));
+
+        int iconX = x + pad;
+        int iconY = y + 7;
+        drawGogglesIcon(context, iconX, iconY, iconSize, alpha);
+        context.drawTextWithShadow(client.textRenderer, StringUtils.translate("litematica_container_filler.hud.fixed.title"),
+                iconX + iconSize + 7, y + 8, withAlpha(TEXT, alpha));
+
+        int labelY = y + headerHeight + 9;
+        context.drawTextWithShadow(client.textRenderer, cachedLabel, x + pad + 24, labelY, withAlpha(MUTED_TEXT, Math.round(alpha * 0.88f)));
+
+        int barX = x + pad + 24;
+        int barY = labelY + Math.round(12.0f * scale);
+        int barW = Math.max(48, width - pad * 2 - 24);
+        int fillW = Math.max(5, Math.round(barW * clamp(progressAnimation + breathe * 0.006f, 0.08f, 1.0f)));
+        context.fill(barX, barY, barX + barW, barY + barHeight, withAlpha(FIXED_PANEL_BAR_BG, Math.round(alpha * 0.92f)));
+        context.fill(barX, barY, barX + fillW, barY + barHeight, withAlpha(FIXED_PANEL_BAR, Math.round(alpha * 0.95f)));
+        context.fill(barX, barY, barX + Math.min(fillW, Math.max(1, barW / 5)), barY + barHeight, withAlpha(0xFFFFFFFF, Math.round(alpha * 0.34f)));
+
+        String action = cachedHint;
+        int actionX = barX + Math.min(barW - client.textRenderer.getWidth(action), fillW + 5);
+        context.drawTextWithShadow(client.textRenderer, action, Math.max(barX, actionX), barY - 1, withAlpha(0xFF55FF68, alpha));
+    }
+
+    private static void drawRoundedInfoCard(DrawContext context, int x, int y, int width, int height, int color) {
+        context.fill(x + 4, y, x + width - 4, y + height, color);
+        context.fill(x, y + 4, x + width, y + height - 4, color);
+        context.fill(x + 2, y + 2, x + width - 2, y + height - 2, color);
+    }
+
+    private static void drawGogglesIcon(DrawContext context, int x, int y, int size, int alpha) {
+        int gold = withAlpha(0xFFFFA629, alpha);
+        int glass = withAlpha(0xFF5A2B10, Math.round(alpha * 0.78f));
+        int shine = withAlpha(0xFFFFFFFF, Math.round(alpha * 0.72f));
+        int lens = Math.max(5, size / 2 - 1);
+        int gap = Math.max(3, size / 5);
+
+        drawRing(context, x, y + 2, lens, gold, glass);
+        drawRing(context, x + lens + gap, y + 2, lens, gold, glass);
+        context.fill(x + lens - 1, y + 2 + lens / 2, x + lens + gap + 1, y + 4 + lens / 2, gold);
+        context.fill(x + 2, y + 4, x + 4, y + 6, shine);
+        context.fill(x + lens + gap + 2, y + 4, x + lens + gap + 4, y + 6, shine);
+    }
+
+    private static void drawRing(DrawContext context, int x, int y, int size, int border, int fill) {
+        context.fill(x, y + 2, x + size, y + size - 2, border);
+        context.fill(x + 2, y, x + size - 2, y + size, border);
+        context.fill(x + 2, y + 2, x + size - 2, y + size - 2, fill);
+    }
+
     private static void drawLine(DrawContext context, int x1, int y1, int x2, int y2, int color) {
         int steps = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1));
         if (steps <= 0) {
@@ -376,6 +482,10 @@ public class ToolHudRenderer {
 
     private static boolean hasLayout() {
         return centerX >= 0.0f && centerY >= 0.0f && anchorX >= 0.0f && anchorY >= 0.0f && panelX >= 0.0f && panelY >= 0.0f;
+    }
+
+    private static boolean hasFixedLayout() {
+        return fixedPanelX >= 0.0f && fixedPanelY >= 0.0f;
     }
 
     private static float smoothToward(float current, float target, float smoothing) {

@@ -110,6 +110,7 @@
   "litematica_container_filler.config.name.highlightColorFilling": "Color: Filling Marker",
   "litematica_container_filler.config.name.highlightColorQueued": "Color: Queued Marker",
   "litematica_container_filler.config.name.highlightColorMissingMaterial": "Color: Missing Material Marker",
+  "litematica_container_filler.config.name.toolHudStyle": "Tool HUD Style",
   "litematica_container_filler.config.name.toolHudOpacity": "Tool HUD Opacity",
   "litematica_container_filler.config.name.toolHudSmoothing": "Tool HUD Smoothness",
   "litematica_container_filler.config.name.toolHudOffset": "Tool HUD Offset",
@@ -180,9 +181,10 @@
   "litematica_container_filler.config.comment.highlightColorFilling": "Color for the animated marker above the container currently being filled. Use hex ARGB format.",
   "litematica_container_filler.config.comment.highlightColorQueued": "Color for queued-container waiting markers. Use hex ARGB format.",
   "litematica_container_filler.config.comment.highlightColorMissingMaterial": "Color for containers skipped because materials are missing. Use hex ARGB format.",
+  "litematica_container_filler.config.comment.toolHudStyle": "Fixed Card: a clean information card stays in a stable screen position without anchor lines.\nAnchored Card: the older style that points from the selected container to the HUD card.",
   "litematica_container_filler.config.comment.toolHudOpacity": "Controls the transparency of the container tool HUD panel.",
-  "litematica_container_filler.config.comment.toolHudSmoothing": "Controls how smoothly the tool HUD follows the selected container. Lower values feel softer but slower.",
-  "litematica_container_filler.config.comment.toolHudOffset": "Screen-space distance between the selected container marker and the tool HUD panel.",
+  "litematica_container_filler.config.comment.toolHudSmoothing": "Controls how smoothly the tool HUD animation updates. Lower values feel softer but slower.",
+  "litematica_container_filler.config.comment.toolHudOffset": "Fixed Card: horizontal distance from the screen center.\nAnchored Card: screen-space distance between the selected container marker and the tool HUD panel.",
   "litematica_container_filler.config.comment.toolHudScale": "Scales the tool HUD panel size. 100 is the default size.",
   "litematica_container_filler.config.comment.toolHudFrameRate": "Maximum update rate for tool HUD layout and animation. 0 means unlimited.",
   "litematica_container_filler.config.option.containerFilterMode.disabled": "Disabled",
@@ -296,6 +298,9 @@
   "litematica_container_filler.config.option.containerClearOutputMode.drop": "Drop",
   "litematica_container_filler.config.option.containerClearOutputMode.inventory": "Inventory",
   "litematica_container_filler.config.option.containerFilterScope.both": "Projection Fill + Tools",
+  "litematica_container_filler.config.option.toolHudStyle.fixedCard": "Fixed Info Card",
+  "litematica_container_filler.config.option.toolHudStyle.anchoredCard": "Anchored Card",
   "litematica_container_filler.config.name.taskMarkerAnimationFps": "Task Marker FPS Limit",
-  "litematica_container_filler.config.comment.taskMarkerAnimationFps": "Maximum animation rebuild rate for filling, queued, and missing-material markers. 0 means unlimited."
+  "litematica_container_filler.config.comment.taskMarkerAnimationFps": "Maximum animation rebuild rate for filling, queued, and missing-material markers. 0 means unlimited.",
+  "litematica_container_filler.hud.fixed.title": "Tool Info:"
 }
