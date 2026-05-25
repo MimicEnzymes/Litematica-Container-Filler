@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "litematica_container_filler",
-  "version": "0.9.3",
+  "version": "0.10.0",
   "name": "Litematica Container Filler",
   "description": "Auto-fill containers from Litematica schematics with material lists, highlights, and configurable filling helpers.",
   "authors": ["MimicEnzymes"],

@@ -43,7 +43,7 @@ public class ServuxSyncHandler {
         if (!minihudChecked) {
             String[] cacheClasses = {
                     "fi.dy.masa.minihud.feature.InventoryCache",
-                    "fi.dy.masa.minihud.inventory.InventoryCache",
+                    "fi.dy.masa.minihud.container.InventoryCache",
                     "fi.dy.masa.minihud.util.InventoryCache"
             };
             for (String c : cacheClasses) {

@@ -3,7 +3,7 @@ package com.mimicenzymes.litematicafiller.dependency;
 public class DummyExtractor implements IShulkerExtractor {
     @Override
     public boolean requestOpenShulker(int playerSlotIndex) {
-        // 没有安装前置，直接拒绝请求
+        // 娌℃湁瀹夎鍓嶇疆锛岀洿鎺ユ嫆缁濊姹?
         return false; 
     }
 }

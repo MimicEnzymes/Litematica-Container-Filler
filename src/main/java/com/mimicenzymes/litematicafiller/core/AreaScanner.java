@@ -1,6 +1,8 @@
 package com.mimicenzymes.litematicafiller.core;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
+import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
+import com.mimicenzymes.litematicafiller.render.HighlightScanner;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.client.Minecraft;
@@ -13,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,6 +24,10 @@ public class AreaScanner {
     private static final long ATTEMPT_COOLDOWN_MS = 5000L;
     private static final long ATTEMPT_RETENTION_MS = 60000L;
     private static final Map<BlockPos, Long> ATTEMPT_COOLDOWNS = new HashMap<>();
+    private static final int SILENT_CANDIDATE_BUDGET = 384;
+    private static final int PASS_THROUGH_CANDIDATE_BUDGET = 96;
+    private static final int MANUAL_CANDIDATE_BUDGET = 2048;
+    private static int scanCursor = 0;
 
     private static class PendingTask {
         final BlockPos pos;
@@ -35,11 +42,15 @@ public class AreaScanner {
     }
 
     public static void executeScan(Minecraft mc, boolean isSilentPrinter) {
+        executeScan(mc, isSilentPrinter, false);
+    }
+
+    public static void executeScan(Minecraft mc, boolean isSilentPrinter, boolean passThroughScan) {
         if (mc.player == null || mc.level == null) return;
 
         var schematicWorld = SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld == null) {
-            if (!isSilentPrinter) mc.gui.setOverlayMessage(Component.translatable("litematica_container_filler.message.no_schematic_world"), true);
+            if (!isSilentPrinter) mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.no_schematic_world"));
             return;
         }
 
@@ -49,50 +60,64 @@ public class AreaScanner {
         long now = System.currentTimeMillis();
         ATTEMPT_COOLDOWNS.entrySet().removeIf(entry -> now - entry.getValue() > ATTEMPT_RETENTION_MS);
 
-        int maxTasks = isSilentPrinter ? 15 : 40;
-
-        List<PendingTask> pendingTasks = new ArrayList<>();
-        Set<BlockPos> processedPositions = new HashSet<>();
+        int maxTasks = passThroughScan ? 4 : (isSilentPrinter ? 15 : 40);
 
         double reach = mc.player.blockInteractionRange();
         double reachSq = (reach + 0.5) * (reach + 0.5);
         Vec3 eyePos = mc.player.getEyePosition();
+        int interactionCandidateRadius = (int) Math.ceil(reach + 2.0);
+        int effectiveCandidateRadius = r > 0 ? Math.min(r, interactionCandidateRadius) : interactionCandidateRadius;
 
-        if (r == 0) {
-            for (BlockPos rawPos : com.mimicenzymes.litematicafiller.render.HighlightScanner.getHighlights().keySet()) {
-                collectPendingTask(mc, schematicWorld, center, eyePos, reachSq, now, isSilentPrinter, processedPositions, pendingTasks, rawPos);
-            }
-        } else {
-            for (int x = -r; x <= r; x++) {
-                for (int y = -r; y <= r; y++) {
-                    for (int z = -r; z <= r; z++) {
-                        BlockPos rawPos = center.offset(x, y, z);
+        List<PendingTask> pendingTasks = new ArrayList<>();
+        Set<BlockPos> processedPositions = new HashSet<>();
+        int maxCandidates = passThroughScan ? PASS_THROUGH_CANDIDATE_BUDGET : (isSilentPrinter ? SILENT_CANDIDATE_BUDGET : MANUAL_CANDIDATE_BUDGET);
+        List<BlockPos> candidates = collectCandidates(center, r, effectiveCandidateRadius, maxCandidates);
 
-                        if (syncLayer && !fi.dy.masa.litematica.data.DataManager.getRenderLayerRange().isPositionWithinRange(rawPos)) continue;
+        int processedCandidates = 0;
+        for (BlockPos rawPos : candidates) {
+            if (processedCandidates >= maxCandidates) break;
+            processedCandidates++;
 
-                        collectPendingTask(mc, schematicWorld, center, eyePos, reachSq, now, isSilentPrinter, processedPositions, pendingTasks, rawPos);
-                    }
-                }
-            }
+            if (r > 0 && rawPos.distSqr(center) > (double) r * r) continue;
+            if (syncLayer && !fi.dy.masa.litematica.data.DataManager.getRenderLayerRange().isPositionWithinRange(rawPos)) continue;
+
+            collectPendingTask(mc, schematicWorld, center, eyePos, reachSq, now, isSilentPrinter, passThroughScan, processedPositions, pendingTasks, rawPos);
         }
 
         pendingTasks.sort(Comparator.comparingDouble(t -> t.distSq));
 
         int count = 0;
         for (PendingTask task : pendingTasks) {
-            AutoFillerStateMachine.getInstance().addTask(task.pos, task.required);
-            ATTEMPT_COOLDOWNS.put(task.pos, now);
-            count++;
+            if (AutoFillerStateMachine.getInstance().addTask(task.pos, task.required, passThroughScan)) {
+                ATTEMPT_COOLDOWNS.put(task.pos, now);
+                count++;
+            }
+
             if (count >= maxTasks) break;
         }
 
         if (!isSilentPrinter) {
             if (count > 0) {
-                mc.gui.setOverlayMessage(Component.translatable("litematica_container_filler.message.scan_start", count), true);
+                mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.scan_start", count));
             } else {
-                mc.gui.setOverlayMessage(Component.translatable("litematica_container_filler.message.no_requirements"), true);
+                mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.no_requirements"));
             }
         }
+    }
+
+    private static List<BlockPos> collectCandidates(BlockPos center, int fillRadius, int candidateRadius, int maxCandidates) {
+        LinkedHashSet<BlockPos> candidates = new LinkedHashSet<>();
+        double candidateRadiusSq = (double) candidateRadius * candidateRadius;
+        for (BlockPos pos : HighlightScanner.getHighlights().keySet()) {
+            if (pos.distSqr(center) > candidateRadiusSq) continue;
+            if (fillRadius > 0 && pos.distSqr(center) > (double) fillRadius * fillRadius) continue;
+            candidates.add(pos);
+        }
+
+        HighlightScanner.ContainerSnapshot snapshot = HighlightScanner.getNearbySchematicContainersSnapshot(center, candidateRadius, scanCursor, maxCandidates);
+        scanCursor = snapshot.nextCursor();
+        candidates.addAll(snapshot.positions());
+        return new ArrayList<>(candidates);
     }
 
     private static void collectPendingTask(Minecraft mc,
@@ -102,24 +127,28 @@ public class AreaScanner {
                                            double reachSq,
                                            long now,
                                            boolean isSilentPrinter,
+                                           boolean passThroughScan,
                                            Set<BlockPos> processedPositions,
                                            List<PendingTask> pendingTasks,
                                            BlockPos rawPos) {
         BlockState state = schematicWorld.getBlockState(rawPos);
         if (state == null || state.isAir() || !state.hasBlockEntity()) return;
+        if (!ContainerBlockFilter.isAllowedForSchematicFill(state, schematicWorld, rawPos)) return;
 
         BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(schematicWorld, rawPos, state);
         BlockPos taskPos = halves != null ? halves[0] : rawPos;
 
         if (!processedPositions.add(taskPos)) return;
         if (eyePos.distanceToSqr(Vec3.atCenterOf(taskPos)) > reachSq) return;
+        if (isLoadedRealContainerMissing(mc, taskPos, halves)) return;
 
         Long lastAttempt = ATTEMPT_COOLDOWNS.get(taskPos);
-        if (isSilentPrinter && lastAttempt != null && now - lastAttempt < ATTEMPT_COOLDOWN_MS) {
+        long cooldownMs = passThroughScan ? 1200L : ATTEMPT_COOLDOWN_MS;
+        if (isSilentPrinter && lastAttempt != null && now - lastAttempt < cooldownMs) {
             return;
         }
 
-        Map<Integer, ItemStack> required = LitematicaContainerReader.getRequiredItems(taskPos, mc.level.registryAccess());
+        Map<Integer, ItemStack> required = HighlightScanner.getCachedSchematicRequirement(taskPos, mc);
         boolean isCrafter = state.getBlock() instanceof net.minecraft.world.level.block.CrafterBlock;
         boolean needsLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(taskPos, mc);
         boolean hasItems = required != null && !required.isEmpty() && !RealContainerCache.isSatisfied(taskPos, required);
@@ -127,5 +156,25 @@ public class AreaScanner {
         if (!hasItems && !needsLocking) return;
 
         pendingTasks.add(new PendingTask(taskPos, required == null ? new HashMap<>() : required, taskPos.distSqr(center)));
+    }
+
+    private static boolean isLoadedRealContainerMissing(Minecraft mc, BlockPos taskPos, BlockPos[] schematicHalves) {
+        if (schematicHalves == null) {
+            return mc.level.hasChunk(taskPos.getX() >> 4, taskPos.getZ() >> 4) &&
+                    !ContainerBlockFilter.isAllowedForSchematicFill(mc.level.getBlockState(taskPos), mc.level, taskPos);
+        }
+
+        for (BlockPos half : schematicHalves) {
+            if (mc.level.hasChunk(half.getX() >> 4, half.getZ() >> 4) &&
+                    !ContainerBlockFilter.isAllowedForSchematicFill(mc.level.getBlockState(half), mc.level, half)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static void clearAttemptCooldown(BlockPos pos) {
+        if (pos != null) ATTEMPT_COOLDOWNS.remove(pos);
     }
 }

@@ -11,9 +11,11 @@
     "SchematicPlacementMixin"
   ],
   "client": [
+    "ClientCommonNetworkHandlerMixin",
     "ClientPacketListenerMixin",
     "GuiMainMenuMixin",
     "GuiMaterialListMixin",
+    "InGameHudMixin",
     "MaterialListBaseMixin",
     "ScreenInterceptorMixin"
   ],

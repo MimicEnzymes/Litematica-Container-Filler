@@ -1,15 +1,17 @@
 package com.mimicenzymes.litematicafiller.core;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
+import com.mimicenzymes.litematicafiller.config.QuickShulkerOpenMode;
 import com.mimicenzymes.litematicafiller.dependency.DependencyChecker;
 import com.mimicenzymes.litematicafiller.dependency.DummyExtractor;
 import com.mimicenzymes.litematicafiller.dependency.IShulkerExtractor;
 import com.mimicenzymes.litematicafiller.dependency.QuickShulkerWrapper;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.ChestBlock;
+import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
+import com.mimicenzymes.litematicafiller.network.ClickPacketRateLimiter;
+import com.mimicenzymes.litematicafiller.network.TakeItOutCompat;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.component.ItemContainerContents;
@@ -83,6 +85,8 @@ public class AutoFillerStateMachine {
 
     private static final AutoFillerStateMachine INSTANCE = new AutoFillerStateMachine();
     public static AutoFillerStateMachine getInstance() { return INSTANCE; }
+    private static final int MAX_TASK_QUEUE_SIZE = 20;
+    private static final int MAX_ACTIONS_PER_TICK = 24;
 
     private final Queue<FillTask> taskQueue = new ConcurrentLinkedQueue<>();
     private FillTask currentTask = null;
@@ -105,24 +109,37 @@ public class AutoFillerStateMachine {
     private int activeShulkerSlot = -1;
     private int stashShulkerSlot = -1;
     private int stashItemSlot = -1;
+    private TakeItOutRequest pendingTakeItOutRequest = null;
 
     private final Set<StrictItemStackKey> borrowedItems = new HashSet<>();
     private final Map<StrictItemStackKey, Integer> stashedItemCounts = new HashMap<>();
+    private final Map<StrictItemStackKey, OrderlyStoredItem> orderlyStoredItems = new HashMap<>();
 
     private final Set<Integer> openedShulkerSlots = new LinkedHashSet<>();
     private final Map<Integer, Set<Item>> shulkerMisses = new HashMap<>();
     private final Map<BlockPos, Set<Item>> failedContainers = new ConcurrentHashMap<>();
+    private final Map<BlockPos, Integer> missingMaterialMarkers = new ConcurrentHashMap<>();
+    private final Map<BlockPos, Integer> recentFillingMarkers = new ConcurrentHashMap<>();
     private final Set<Integer> blacklistedSlots = new HashSet<>();
 
     private boolean lastContinuousState = false;
+    private BlockPos lastCompletedTaskPos = null;
+    private Set<Item> lastCompletedTaskItems = Collections.emptySet();
     private int tickCounter = 0;
     private int consecutiveFailures = 0;
     private int movesThisTask = 0;
     private int cursorStuckAttempts = 0;
 
-    private boolean aborting = false;
-
     private final IShulkerExtractor shulkerExtractor;
+
+    private record TakeItOutRequest(int shulkerSlot, int innerSlot, ItemStack requestedStack, int countBefore) {
+    }
+
+    private record OrderlyStoredItem(ItemStack stack, int sourceShulkerSlot, long lastUseTime) {
+        OrderlyStoredItem touch() {
+            return new OrderlyStoredItem(stack.copy(), sourceShulkerSlot, System.currentTimeMillis());
+        }
+    }
 
     private static java.lang.reflect.Field CACHE_FIELD = null;
     private static java.lang.reflect.Field NBT_QUERY_CACHE_FIELD = null;
@@ -175,14 +192,14 @@ public class AutoFillerStateMachine {
         if (client.isLocalServer() && client.getSingleplayerServer() != null && client.level != null && client.player != null) {
             ServerPlayer serverPlayer = client.getSingleplayerServer().getPlayerList().getPlayer(client.player.getUUID());
             if (serverPlayer != null) {
-                ServerLevel serverWorld =  (ServerLevel) serverPlayer.level();
+                ServerLevel serverWorld = serverPlayer.level();
                 if (serverWorld != null) {
                     net.minecraft.world.level.block.state.BlockState clientState = client.level.getBlockState(finalPos);
                     final BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.level, finalPos, clientState);
                     client.getSingleplayerServer().execute(() -> {
                         net.minecraft.world.level.block.state.BlockState state = serverWorld.getBlockState(finalPos);
                         Map<Integer, ItemStack> inventoryData = null;
-                        if (halves != null && state.is(Blocks.BARREL)) {
+                        if (halves != null && state.is(net.minecraft.world.level.block.Blocks.BARREL)) {
                             Map<Integer, ItemStack> right = getSingleBlockEntityInventory(serverWorld, halves[0]);
                             Map<Integer, ItemStack> left = getSingleBlockEntityInventory(serverWorld, halves[1]);
                             if (right != null && left != null) {
@@ -224,7 +241,7 @@ public class AutoFillerStateMachine {
         net.minecraft.world.Container inv = null;
         net.minecraft.world.level.block.state.BlockState state = world.getBlockState(pos);
         if (state.getBlock() instanceof net.minecraft.world.level.block.ChestBlock chest) {
-            inv = ChestBlock.getContainer(chest, state, world, pos, true);
+            inv = net.minecraft.world.level.block.ChestBlock.getContainer(chest, state, world, pos, true);
         }
         if (inv == null && be instanceof net.minecraft.world.Container inventory) inv = inventory;
         if (inv != null) {
@@ -242,31 +259,53 @@ public class AutoFillerStateMachine {
         return null;
     }
 
-    public void addTask(BlockPos pos, Map<Integer, ItemStack> requiredItems) {
-        if (requiredItems == null) return;
-        if (failedContainers.containsKey(pos)) return;
-        if (currentTask != null && currentTask.targetPos.equals(pos)) return;
-        if (taskQueue.size() >= 20) return;
+    public boolean addTask(BlockPos pos, Map<Integer, ItemStack> requiredItems) {
+        return addTask(pos, requiredItems, false);
+    }
+
+    public boolean addTask(BlockPos pos, Map<Integer, ItemStack> requiredItems, boolean preferNearby) {
+        if (requiredItems == null) return false;
+        pos = pos.immutable();
+        if (failedContainers.containsKey(pos)) return false;
+        if (currentTask != null && currentTask.targetPos.equals(pos)) return false;
 
         for (FillTask t : taskQueue) {
-            if (t.targetPos.equals(pos)) return;
+            if (t.targetPos.equals(pos)) return false;
         }
 
         Minecraft client = Minecraft.getInstance();
-        if (client.player == null) return;
-
-        Map<Integer, ItemStack> trueData = getTrueContainerData(client, pos);
-        if (trueData == null) {
-            taskQueue.add(new FillTask(pos, requiredItems, new HashMap<>(), true, false));
-            RealContainerCache.requestContainerData(pos);
-            return;
+        if (client.player == null) return false;
+        if (client.level == null) return false;
+        if (client.level.hasChunk(pos.getX() >> 4, pos.getZ() >> 4) &&
+                !ContainerBlockFilter.isAllowedForSchematicFill(client.level.getBlockState(pos), client.level, pos)) {
+            failedContainers.put(pos, Collections.singleton(net.minecraft.world.item.Items.BARRIER));
+            return false;
         }
 
         boolean isCrafter = client.level.getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.CrafterBlock;
+        boolean needsCrafterLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, client);
+
+        Map<Integer, ItemStack> trueData = getTrueContainerData(client, pos);
+        if (trueData == null) {
+            Set<Item> missingTypes = getUnavailableMissingTypes(client, pos, requiredItems, null);
+            if (!missingTypes.isEmpty() && !needsCrafterLocking) {
+                markMissingMaterials(pos, missingTypes);
+                failedContainers.put(pos, missingTypes);
+                return false;
+            }
+            if (!ensureQueueSpace(client, pos, preferNearby)) return false;
+            taskQueue.add(new FillTask(pos, requiredItems, new HashMap<>(), true, false));
+            RealContainerCache.requestContainerData(pos);
+            return true;
+        }
+
+        Set<Integer> ignoredSlots = LitematicaContainerReader.getIgnoredSlots(pos, client.level.registryAccess());
         boolean needsAction = false;
         Map<Integer, ItemStack> missingItems = new HashMap<>();
 
         for (int i = 0; i < 54; i++) {
+            if (ignoredSlots.contains(i)) continue;
+
             ItemStack req = requiredItems.getOrDefault(i, ItemStack.EMPTY);
             ItemStack cur = trueData.getOrDefault(i, ItemStack.EMPTY);
 
@@ -290,10 +329,19 @@ public class AutoFillerStateMachine {
             }
         }
 
-        if (isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, client)) needsAction = true;
-        if (!needsAction) return;
+        if (needsCrafterLocking) needsAction = true;
+        if (!needsAction) return false;
 
+        Set<Item> unavailable = getUnavailableMissingTypes(client, pos, requiredItems, missingItems);
+        if (!unavailable.isEmpty() && !needsCrafterLocking && !hasExtractableGarbage(pos, requiredItems, trueData, isCrafter, ignoredSlots)) {
+            markMissingMaterials(pos, unavailable);
+            failedContainers.put(pos, unavailable);
+            return false;
+        }
+
+        if (!ensureQueueSpace(client, pos, preferNearby)) return false;
         taskQueue.add(new FillTask(pos, requiredItems, missingItems, false, false));
+        return true;
     }
 
     public void addManualTask(BlockPos pos, Map<Integer, ItemStack> requiredItems) {
@@ -304,6 +352,78 @@ public class AutoFillerStateMachine {
         taskQueue.removeIf(t -> t.targetPos.equals(pos));
         taskQueue.add(new FillTask(pos, requiredItems, new HashMap<>(), true, true));
         RealContainerCache.requestContainerData(pos);
+    }
+
+    private Set<Item> getUnavailableMissingTypes(Minecraft client, BlockPos pos, Map<Integer, ItemStack> requiredItems, Map<Integer, ItemStack> knownMissingItems) {
+        if (client == null || client.player == null || requiredItems == null || requiredItems.isEmpty()) return Collections.emptySet();
+        if (client.player.isCreative() && Configs.ENABLE_CREATIVE_FILL.getBooleanValue()) return Collections.emptySet();
+
+        Map<Integer, ItemStack> missingItems = knownMissingItems;
+        if (missingItems == null) {
+            Map<Integer, ItemStack> trueData = getTrueContainerData(client, pos);
+            if (trueData == null) trueData = Collections.emptyMap();
+            missingItems = computeMissingItemsForMaterialCheck(client, pos, requiredItems, trueData);
+        }
+
+        Set<Item> missingTypes = new LinkedHashSet<>();
+        for (ItemStack stack : missingItems.values()) {
+            if (stack.isEmpty()) continue;
+            if (!hasItemAnywhere(client, stack)) {
+                missingTypes.add(stack.getItem());
+            }
+        }
+        return missingTypes;
+    }
+
+    private Map<Integer, ItemStack> computeMissingItemsForMaterialCheck(Minecraft client, BlockPos pos, Map<Integer, ItemStack> requiredItems, Map<Integer, ItemStack> trueData) {
+        Map<Integer, ItemStack> missingItems = new HashMap<>();
+        Set<Integer> ignoredSlots = client.level != null ? LitematicaContainerReader.getIgnoredSlots(pos, client.level.registryAccess()) : Collections.emptySet();
+        boolean isCrafter = client.level != null && client.level.getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.CrafterBlock;
+        int maxSlot = isCrafter ? 9 : 54;
+
+        for (int i = 0; i < maxSlot; i++) {
+            if (ignoredSlots.contains(i)) continue;
+            ItemStack req = requiredItems.getOrDefault(i, ItemStack.EMPTY);
+            if (req.isEmpty()) continue;
+
+            ItemStack cur = trueData.getOrDefault(i, ItemStack.EMPTY);
+            if (cur.isEmpty() || !ItemMatcher.isSameItem(req, cur)) {
+                missingItems.put(i, req.copy());
+            } else if (cur.getCount() < req.getCount()) {
+                ItemStack diff = req.copy();
+                diff.setCount(req.getCount() - cur.getCount());
+                missingItems.put(i, diff);
+            }
+        }
+
+        return missingItems;
+    }
+
+    private boolean hasExtractableGarbage(BlockPos pos, Map<Integer, ItemStack> requiredItems, Map<Integer, ItemStack> trueData, boolean isCrafter, Set<Integer> ignoredSlots) {
+        if (!Configs.DROP_EXTRACTED_ITEMS.getBooleanValue()) return false;
+        int maxSlot = isCrafter ? 9 : 54;
+        for (int i = 0; i < maxSlot; i++) {
+            if (ignoredSlots.contains(i)) continue;
+            ItemStack req = requiredItems.getOrDefault(i, ItemStack.EMPTY);
+            ItemStack cur = trueData.getOrDefault(i, ItemStack.EMPTY);
+            if (cur.isEmpty()) continue;
+            if (req.isEmpty() || !ItemMatcher.isSameItem(req, cur) || (!isCrafter && cur.getCount() > req.getCount())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void markMissingMaterials(BlockPos pos, Set<Item> missingTypes) {
+        if (pos == null || missingTypes == null || missingTypes.isEmpty()) return;
+        missingMaterialMarkers.put(pos.immutable(), 24);
+    }
+
+    private void tickTransientMarkers() {
+        missingMaterialMarkers.entrySet().removeIf(entry -> entry.getValue() <= 1);
+        missingMaterialMarkers.replaceAll((pos, ticks) -> ticks - 1);
+        recentFillingMarkers.entrySet().removeIf(entry -> entry.getValue() <= 1);
+        recentFillingMarkers.replaceAll((pos, ticks) -> ticks - 1);
     }
 
     private boolean checkMaterialsAndPrepare(Minecraft client) {
@@ -318,8 +438,11 @@ public class AutoFillerStateMachine {
         if (client.level != null) {
             isCrafter = client.level.getBlockState(currentTask.targetPos).getBlock() instanceof net.minecraft.world.level.block.CrafterBlock;
         }
+        Set<Integer> ignoredSlots = currentIgnoredSlots(client);
 
         for (int i = 0; i < 54; i++) {
+            if (ignoredSlots.contains(i)) continue;
+
             ItemStack req = currentTask.requiredItems.getOrDefault(i, ItemStack.EMPTY);
             ItemStack cur = trueData.getOrDefault(i, ItemStack.EMPTY);
 
@@ -340,6 +463,8 @@ public class AutoFillerStateMachine {
         boolean isCreativeFill = client.player != null && client.player.isCreative() && Configs.ENABLE_CREATIVE_FILL.getBooleanValue();
 
         for (int i = 0; i < 54; i++) {
+            if (ignoredSlots.contains(i)) continue;
+
             ItemStack req = currentTask.requiredItems.getOrDefault(i, ItemStack.EMPTY);
             ItemStack cur = trueData.getOrDefault(i, ItemStack.EMPTY);
 
@@ -373,6 +498,8 @@ public class AutoFillerStateMachine {
                 canExtractSomething = true;
             } else {
                 for (int i = 0; i < 54; i++) {
+                    if (ignoredSlots.contains(i)) continue;
+
                     ItemStack req = currentTask.requiredItems.getOrDefault(i, ItemStack.EMPTY);
                     ItemStack cur = trueData.getOrDefault(i, ItemStack.EMPTY);
                     if (!cur.isEmpty() && (req.isEmpty() || !ItemMatcher.isSameItem(req, cur) || (cur.getCount() > req.getCount() && !isCrafter))) {
@@ -386,20 +513,26 @@ public class AutoFillerStateMachine {
         }
 
         if (!canFillSomething && !canExtractSomething) {
+            if (currentCrafterNeedsLocking(client)) {
+                sendFeedback(client, Component.translatable("litematica_container_filler.message.task_dispatched").getString(), true);
+                return true;
+            }
+
             if (hasGarbageToExtract && !Configs.DROP_EXTRACTED_ITEMS.getBooleanValue() && getEmptySlots(client).size() == 0) {
-                if (Configs.AUTO_STASH_ITEMS.getBooleanValue() && findStashAction(client, currentTask.requiredItems.values()) != null) {
+                if (Configs.STORE_ORDERLY.getBooleanValue() && findStashAction(client, currentTask.requiredItems.values()) != null) {
                     sendFeedback(client, Component.translatable("litematica_container_filler.message.task_dispatched").getString(), true);
                     return true;
                 }
-                abortTask(client, "litematica_container_filler.message.inventory_full_no_stash", true, false);
+                abortTask(client, "litematica_container_filler.message.container_full_no_stash", true, false);
                 return false;
             } else if (!trueMissingTypes.isEmpty()) {
                 failedContainers.put(currentTask.targetPos, trueMissingTypes);
+                markMissingMaterials(currentTask.targetPos, trueMissingTypes);
                 StringBuilder sb = new StringBuilder();
                 int count = 0;
                 for (Item item : trueMissingTypes) {
                     if (count > 0) sb.append(", ");
-                    sb.append(item.getDescriptionId());
+                    sb.append(item.getName(item.getDefaultInstance()).getString());
                     count++;
                     if (count >= 3 && trueMissingTypes.size() > 3) {
                         sb.append(Component.translatable("litematica_container_filler.message.etc").getString());
@@ -423,7 +556,7 @@ public class AutoFillerStateMachine {
         sendFeedback(client, Component.translatable(errorMsgKey).getString(), true);
         if (currentTask != null) {
             if (isLeaking) {
-                failedContainers.put(currentTask.targetPos, Collections.singleton(Items.BARRIER));
+                failedContainers.put(currentTask.targetPos, Collections.singleton(net.minecraft.world.item.Items.BARRIER));
             } else if (isInventoryFull) {
                 failedContainers.put(currentTask.targetPos, Collections.emptySet());
             } else {
@@ -456,61 +589,151 @@ public class AutoFillerStateMachine {
     }
 
     private int[] findStashAction(Minecraft client, Collection<ItemStack> requiredValues) {
-        if (!DependencyChecker.HAS_QUICK_SHULKER || !Configs.ENABLE_QS_EXTRACTION.getBooleanValue()) return null;
+        if (!canOpenShulkerUi()) return null;
 
-        int targetShulker = -1;
-        int itemToStash = -1;
+        int[] orderlyAction = findOrderlyStoredStashAction(client);
+        if (orderlyAction != null) return orderlyAction;
 
-        for (int i = 0; i < 36; i++) {
-            ItemStack s = client.player.getInventory().getItem(i);
-            if (s.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) {
-                ItemContainerContents c = s.get(DataComponents.CONTAINER);
-                long size = c == null ? 0 : c.allItemsCopyStream().filter(stack -> !stack.isEmpty()).count();
-                if (size < 27) {
-                    targetShulker = i;
-                    break;
-                }
-            }
-        }
+        return findFastFreeSpaceStashAction(client, requiredValues);
+    }
 
-        if (targetShulker == -1) return null;
+    private int[] findOrderlyStoredStashAction(Minecraft client) {
+        int bestSlot = -1;
+        int bestShulker = -1;
+        long bestUseTime = Long.MAX_VALUE;
 
         for (int i = 0; i < 36; i++) {
-            if (i == targetShulker) continue;
-            ItemStack s = client.player.getInventory().getItem(i);
-            if (s.isEmpty()) continue;
-            if (s.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) continue;
+            ItemStack stack = client.player.getInventory().getItem(i);
+            if (stack.isEmpty()) continue;
+            StrictItemStackKey key = new StrictItemStackKey(stack);
+            OrderlyStoredItem item = orderlyStoredItems.get(key);
+            if (item != null && item.lastUseTime() < bestUseTime) {
+                int targetShulker = findOrderlyStoreShulker(client, stack, i);
+                if (targetShulker == -1) continue;
 
-            boolean isNeeded = false;
-            for (ItemStack req : requiredValues) {
-                if (ItemMatcher.isSameItem(s, req)) {
-                    isNeeded = true; break;
-                }
-            }
-            if (!isNeeded) {
-                itemToStash = i;
-                break;
+                bestUseTime = item.lastUseTime();
+                bestSlot = i;
+                bestShulker = targetShulker;
             }
         }
+        return bestSlot == -1 ? null : new int[]{bestShulker, bestSlot};
+    }
 
-        if (itemToStash != -1) return new int[]{targetShulker, itemToStash};
+    private int[] findFastFreeSpaceStashAction(Minecraft client, Collection<ItemStack> requiredValues) {
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = client.player.getInventory().getItem(i);
+            if (stack.isEmpty() || isShulkerBox(stack) || isRequiredForCurrentTask(stack, requiredValues)) continue;
+
+            int targetShulker = findOrderlyStoreShulker(client, stack, i);
+            if (targetShulker != -1) return new int[]{targetShulker, i};
+        }
         return null;
+    }
+
+    private boolean isRequiredForCurrentTask(ItemStack stack, Collection<ItemStack> requiredValues) {
+        for (ItemStack req : requiredValues) {
+            if (ItemMatcher.isSameItem(stack, req)) return true;
+        }
+        return false;
+    }
+
+    private int findOrderlyStoreShulker(Minecraft client, ItemStack stackToStore, int itemSlot) {
+        if (stackToStore.isEmpty()) return -1;
+
+        OrderlyStoredItem orderlyItem = orderlyStoredItems.get(new StrictItemStackKey(stackToStore));
+        if (orderlyItem != null && canShulkerAccept(client, orderlyItem.sourceShulkerSlot(), stackToStore, itemSlot)) {
+            return orderlyItem.sourceShulkerSlot();
+        }
+
+        int firstEmptySpace = -1;
+        for (int i = 0; i < 36; i++) {
+            if (i == itemSlot) continue;
+            ItemStack shulker = client.player.getInventory().getItem(i);
+            if (!isShulkerBox(shulker)) continue;
+
+            ItemContainerContents c = shulker.get(DataComponents.CONTAINER);
+            if (c == null) return i;
+
+            long occupied = 0;
+            for (ItemStack inner : c.allItemsCopyStream().toList()) {
+                if (inner.isEmpty()) continue;
+                occupied++;
+                if (ItemMatcher.isSameItem(inner, stackToStore) && inner.getCount() < inner.getMaxStackSize()) {
+                    return i;
+                }
+            }
+            if (occupied < 27 && firstEmptySpace == -1) firstEmptySpace = i;
+        }
+        return firstEmptySpace;
+    }
+
+    private boolean canShulkerAccept(Minecraft client, int shulkerSlot, ItemStack stackToStore, int itemSlot) {
+        if (shulkerSlot < 0 || shulkerSlot >= 36 || shulkerSlot == itemSlot) return false;
+
+        ItemStack shulker = client.player.getInventory().getItem(shulkerSlot);
+        if (!isShulkerBox(shulker)) return false;
+
+        ItemContainerContents c = shulker.get(DataComponents.CONTAINER);
+        if (c == null) return true;
+
+        long occupied = 0;
+        for (ItemStack inner : c.allItemsCopyStream().toList()) {
+            if (inner.isEmpty()) continue;
+            occupied++;
+            if (ItemMatcher.isSameItem(inner, stackToStore) && inner.getCount() < inner.getMaxStackSize()) return true;
+        }
+        return occupied < 27;
+    }
+
+    private boolean isShulkerBox(ItemStack stack) {
+        return stack.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock;
+    }
+
+    private void recordOrderlyStoredItem(ItemStack stack, int sourceShulkerSlot) {
+        if (stack.isEmpty() || sourceShulkerSlot < 0) return;
+
+        StrictItemStackKey key = new StrictItemStackKey(stack);
+        orderlyStoredItems.put(key, new OrderlyStoredItem(stack.copy(), sourceShulkerSlot, System.currentTimeMillis()));
+    }
+
+    private void touchOrderlyStoredItem(ItemStack stack) {
+        if (stack.isEmpty()) return;
+
+        StrictItemStackKey key = new StrictItemStackKey(stack);
+        OrderlyStoredItem item = orderlyStoredItems.get(key);
+        if (item != null) {
+            orderlyStoredItems.put(key, item.touch());
+        }
     }
 
     public boolean isSilentlyExtracting() { return silentlyExtracting; }
     public void clearBlacklist() { failedContainers.clear(); blacklistedSlots.clear(); }
 
+    public void emergencyStop(Minecraft client) {
+        taskQueue.clear();
+        failedContainers.clear();
+        blacklistedSlots.clear();
+        if (client != null && client.player != null && client.player.containerMenu != client.player.inventoryMenu) {
+            client.player.closeContainer();
+        }
+        reset();
+    }
+
     public void tick(Minecraft client) {
         if (client.player == null || client.level == null) { reset(); return; }
+        ClickPacketRateLimiter.setOperationActive(isWorking());
 
-        boolean currentContinuousState = Configs.CONTINUOUS_FILL.getBooleanValue();
+        boolean currentContinuousState = Configs.WORKING_STATE.getBooleanValue();
         if (currentContinuousState != lastContinuousState) {
             clearBlacklist();
-            if (!currentContinuousState) taskQueue.clear();
+            if (!currentContinuousState) {
+                cancelContinuousWork(client);
+            }
             lastContinuousState = currentContinuousState;
         }
 
         tickCounter++;
+        tickTransientMarkers();
         if (!failedContainers.isEmpty() && tickCounter % 10 == 0) {
             failedContainers.entrySet().removeIf(entry -> {
                 Set<Item> reasons = entry.getValue();
@@ -523,20 +746,28 @@ public class AutoFillerStateMachine {
                 return false;
             });
         }
+        if (!taskQueue.isEmpty() && tickCounter % 20 == 0) {
+            prefetchQueuedTaskData();
+        }
 
         if (currentTask != null) {
             watchdogTimer++;
             if (watchdogTimer > 150) {
-                abortTask(client, "litematica_container_filler.message.timeout_reset", false, false);
+                timeoutReset(client);
                 return;
             }
         }
 
         if (actionWaitTicks > 0) { actionWaitTicks--; return; }
 
+        if (ClickPacketRateLimiter.hasPendingPackets()) {
+            return;
+        }
+
         if (currentTask == null) {
             if (!taskQueue.isEmpty()) {
-                currentTask = taskQueue.poll();
+                currentTask = pollBestTask(client);
+                if (currentTask == null) return;
                 borrowedItems.clear();
                 openedShulkerSlots.clear();
                 shulkerMisses.clear();
@@ -561,14 +792,20 @@ public class AutoFillerStateMachine {
         }
 
         yieldTick = false;
+        int actionsThisTick = 0;
         while (!actionQueue.isEmpty() && actionWaitTicks <= 0 && !yieldTick) {
             actionQueue.poll().run();
             if (!yieldTick) watchdogTimer = 0;
+            actionsThisTick++;
+            if (actionsThisTick >= MAX_ACTIONS_PER_TICK && !actionQueue.isEmpty() && actionWaitTicks <= 0 && !yieldTick) {
+                yieldTick = true;
+            }
         }
 
         if (actionWaitTicks <= 0 && actionQueue.isEmpty() && currentTask != null && !yieldTick) {
             AbstractContainerMenu currentHandler = client.player.containerMenu;
             boolean inGui = currentHandler != client.player.inventoryMenu;
+            boolean passiveScreenOpen = isPassiveScreenOpen(client);
 
             switch (currentPhase) {
                 case AWAITING_DATA:
@@ -577,10 +814,13 @@ public class AutoFillerStateMachine {
                         currentTask.needsInspection = false;
 
                         boolean isCrafter = client.level.getBlockState(currentTask.targetPos).getBlock() instanceof net.minecraft.world.level.block.CrafterBlock;
+                        Set<Integer> ignoredSlots = currentIgnoredSlots(client);
                         boolean needsAction = false;
                         Map<Integer, ItemStack> missingItems = new HashMap<>();
 
                         for (int i = 0; i < 54; i++) {
+                            if (ignoredSlots.contains(i)) continue;
+
                             ItemStack req = currentTask.requiredItems.getOrDefault(i, ItemStack.EMPTY);
                             ItemStack cur = lateCache.getOrDefault(i, ItemStack.EMPTY);
 
@@ -630,6 +870,8 @@ public class AutoFillerStateMachine {
                         if (!guiOpenedForPhase) {
                             openTargetContainer(client, currentTask.targetPos);
                             guiOpenedForPhase = true;
+                        } else if (passiveScreenOpen) {
+                            yieldTick = true;
                         } else {
                             abortTask(client, "litematica_container_filler.message.user_aborted", false, false);
                         }
@@ -644,6 +886,8 @@ public class AutoFillerStateMachine {
                         if (!guiOpenedForPhase) {
                             openShulkerBox(client, stashShulkerSlot);
                             guiOpenedForPhase = true;
+                        } else if (passiveScreenOpen) {
+                            yieldTick = true;
                         } else {
                             abortTask(client, "litematica_container_filler.message.user_aborted", false, false);
                         }
@@ -662,6 +906,8 @@ public class AutoFillerStateMachine {
                                 openShulkerBox(client, pendingShulkers.poll());
                                 guiOpenedForPhase = true;
                             }
+                        } else if (passiveScreenOpen) {
+                            yieldTick = true;
                         } else {
                             abortTask(client, "litematica_container_filler.message.user_aborted", false, false);
                         }
@@ -676,6 +922,8 @@ public class AutoFillerStateMachine {
                         if (!guiOpenedForPhase) {
                             openTargetContainer(client, currentTask.targetPos);
                             guiOpenedForPhase = true;
+                        } else if (passiveScreenOpen) {
+                            yieldTick = true;
                         } else {
                             abortTask(client, "litematica_container_filler.message.user_aborted", false, false);
                         }
@@ -699,6 +947,8 @@ public class AutoFillerStateMachine {
                                 openShulkerBox(client, pendingShulkers.poll());
                                 guiOpenedForPhase = true;
                             }
+                        } else if (passiveScreenOpen) {
+                            yieldTick = true;
                         } else {
                             abortTask(client, "litematica_container_filler.message.user_aborted", false, false);
                         }
@@ -723,10 +973,13 @@ public class AutoFillerStateMachine {
             if (newlyCached == null) newlyCached = new HashMap<>();
 
             boolean isCrafter = client.level.getBlockState(currentTask.targetPos).getBlock() instanceof net.minecraft.world.level.block.CrafterBlock;
+            Set<Integer> ignoredSlots = currentIgnoredSlots(client);
             boolean needsAction = false;
             Map<Integer, ItemStack> missingItems = new HashMap<>();
 
             for (int i = 0; i < 54; i++) {
+                if (ignoredSlots.contains(i)) continue;
+
                 ItemStack req = currentTask.requiredItems.getOrDefault(i, ItemStack.EMPTY);
                 ItemStack cur = newlyCached.getOrDefault(i, ItemStack.EMPTY);
 
@@ -767,9 +1020,16 @@ public class AutoFillerStateMachine {
 
     private void checkAndStartGatheringOrFilling(Minecraft client) {
         boolean isCreativeFill = client.player != null && client.player.isCreative() && Configs.ENABLE_CREATIVE_FILL.getBooleanValue();
+        boolean needsCrafterLocking = currentCrafterNeedsLocking(client);
+
+        if (needsCrafterLocking && currentTask.missingItems.isEmpty()) {
+            currentTask.initLedger();
+            changePhase(Phase.FILLING);
+            return;
+        }
 
         int emptySlots = getEmptySlots(client).size();
-        if (emptySlots == 0 && Configs.AUTO_STASH_ITEMS.getBooleanValue()) {
+        if (emptySlots == 0 && Configs.STORE_ORDERLY.getBooleanValue()) {
             int[] stashAction = findStashAction(client, currentTask.requiredItems.values());
             if (stashAction != null) {
                 stashShulkerSlot = stashAction[0];
@@ -788,12 +1048,22 @@ public class AutoFillerStateMachine {
         pendingShulkers.clear();
         List<ItemStack> needed = computeNeededToFetch(client);
         if (!needed.isEmpty()) {
+            if (tryTakeItOutFetch(client, needed)) {
+                changePhase(Phase.GATHERING);
+                return;
+            }
+
             Set<Integer> shulkers = findShulkersContaining(client, needed);
             if (!shulkers.isEmpty()) {
                 pendingShulkers.addAll(shulkers);
                 changePhase(Phase.GATHERING);
                 return;
             } else {
+                if (needsCrafterLocking) {
+                    currentTask.initLedger();
+                    changePhase(Phase.FILLING);
+                    return;
+                }
                 if (hasAnyMaterialsToFill(client)) {
                     currentTask.initLedger();
                     changePhase(Phase.FILLING);
@@ -821,7 +1091,11 @@ public class AutoFillerStateMachine {
             isCrafter = client.level.getBlockState(currentTask.targetPos).getBlock() instanceof net.minecraft.world.level.block.CrafterBlock;
         }
 
+        Set<Integer> ignoredSlots = currentIgnoredSlots(client);
+
         for (int i = 0; i < 54; i++) {
+            if (ignoredSlots.contains(i)) continue;
+
             ItemStack req = currentTask.requiredItems.getOrDefault(i, ItemStack.EMPTY);
             ItemStack cur = trueData.getOrDefault(i, ItemStack.EMPTY);
 
@@ -837,6 +1111,8 @@ public class AutoFillerStateMachine {
         }
 
         for (int i = 0; i < 54; i++) {
+            if (ignoredSlots.contains(i)) continue;
+
             ItemStack req = currentTask.requiredItems.getOrDefault(i, ItemStack.EMPTY);
             ItemStack cur = trueData.getOrDefault(i, ItemStack.EMPTY);
 
@@ -859,6 +1135,8 @@ public class AutoFillerStateMachine {
         if (hasGarbageToExtract) {
             if (Configs.DROP_EXTRACTED_ITEMS.getBooleanValue() || getEmptySlots(client).size() > 0) return true;
             for (int i = 0; i < 54; i++) {
+                if (ignoredSlots.contains(i)) continue;
+
                 ItemStack req = currentTask.requiredItems.getOrDefault(i, ItemStack.EMPTY);
                 ItemStack cur = trueData.getOrDefault(i, ItemStack.EMPTY);
                 if (!cur.isEmpty() && (req.isEmpty() || !ItemMatcher.isSameItem(req, cur) || (cur.getCount() > req.getCount() && !isCrafter))) {
@@ -884,7 +1162,11 @@ public class AutoFillerStateMachine {
         }
 
         Map<StrictItemStackKey, Integer> containerPresent = new HashMap<>();
-        for (ItemStack cur : trueData.values()) {
+        Set<Integer> ignoredSlots = currentIgnoredSlots(client);
+        for (Map.Entry<Integer, ItemStack> entry : trueData.entrySet()) {
+            if (ignoredSlots.contains(entry.getKey())) continue;
+
+            ItemStack cur = entry.getValue();
             if (!cur.isEmpty()) containerPresent.merge(new StrictItemStackKey(cur), cur.getCount(), Integer::sum);
         }
 
@@ -931,7 +1213,7 @@ public class AutoFillerStateMachine {
 
             consecutiveFailures++;
             if (consecutiveFailures > 5) {
-                abortTask(client, "litematica_container_filler.message.inventory_full_cannot_extract", true, false);
+                abortTask(client, "litematica_container_filler.message.container_full_cannot_extract", true, false);
             }
         });
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
@@ -942,7 +1224,7 @@ public class AutoFillerStateMachine {
 
     private Set<Integer> findShulkersContaining(Minecraft client, List<ItemStack> needed) {
         Set<Integer> slots = new LinkedHashSet<>();
-        if (!DependencyChecker.HAS_QUICK_SHULKER || !Configs.ENABLE_QS_EXTRACTION.getBooleanValue()) return slots;
+        if (!canOpenShulkerUi()) return slots;
 
         for (ItemStack req : needed) {
             int amountToFind = req.getCount();
@@ -968,6 +1250,12 @@ public class AutoFillerStateMachine {
     }
 
     private void openTargetContainer(Minecraft client, BlockPos pos) {
+        if (currentTask != null && !currentTask.forcedManual && !isTargetReachable(client, pos)) {
+            AreaScanner.clearAttemptCooldown(pos);
+            reset();
+            return;
+        }
+
         silentlyExtracting = false;
         BlockHitResult hitResult = new BlockHitResult(new Vec3(pos.getX()+0.5, pos.getY()+0.5, pos.getZ()+0.5), Direction.UP, pos, false);
         client.gameMode.useItemOn(client.player, InteractionHand.MAIN_HAND, hitResult);
@@ -975,6 +1263,14 @@ public class AutoFillerStateMachine {
         uiWaitTimer = 0;
         actionQueue.add(this::waitForUi);
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
+    }
+
+    private boolean isTargetReachable(Minecraft client, BlockPos pos) {
+        if (client.player == null) return false;
+
+        double reach = client.player.blockInteractionRange();
+        double reachSq = (reach + 0.5) * (reach + 0.5);
+        return client.player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos)) <= reachSq;
     }
 
     private void openShulkerBox(Minecraft client, int slot) {
@@ -990,10 +1286,162 @@ public class AutoFillerStateMachine {
             sendFeedback(client, Component.translatable("litematica_container_filler.message.opening_shulker_extract").getString(), true);
         }
 
-        actionQueue.add(() -> shulkerExtractor.requestOpenShulker(slot));
+        actionQueue.add(() -> {
+            if (getQuickShulkerOpenMode() == QuickShulkerOpenMode.SIMULATE_CLICK) {
+                simulateOpenShulkerClick(client, slot);
+            } else {
+                shulkerExtractor.requestOpenShulker(slot);
+            }
+        });
         uiWaitTimer = 0;
         actionQueue.add(this::waitForUi);
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
+    }
+
+    private boolean currentCrafterNeedsLocking(Minecraft client) {
+        if (currentTask == null || client.level == null) return false;
+        if (!(client.level.getBlockState(currentTask.targetPos).getBlock() instanceof net.minecraft.world.level.block.CrafterBlock)) return false;
+        return LitematicaContainerReader.doesCrafterNeedLocking(currentTask.targetPos, client);
+    }
+
+    private Set<Integer> currentIgnoredSlots(Minecraft client) {
+        if (currentTask == null || client.level == null) return Collections.emptySet();
+        return LitematicaContainerReader.getIgnoredSlots(currentTask.targetPos, client.level.registryAccess());
+    }
+
+    private boolean canUseShulkerExtraction() {
+        if (!Configs.ENABLE_QS_EXTRACTION.getBooleanValue()) return false;
+        return canUseTakeItOut() || canOpenShulkerUi();
+    }
+
+    private boolean canOpenShulkerUi() {
+        if (!Configs.ENABLE_QS_EXTRACTION.getBooleanValue()) return false;
+        return getQuickShulkerOpenMode() == QuickShulkerOpenMode.SIMULATE_CLICK || DependencyChecker.HAS_QUICK_SHULKER;
+    }
+
+    private boolean canUseTakeItOut() {
+        return Configs.ENABLE_QS_EXTRACTION.getBooleanValue() && TakeItOutCompat.canRequestStack();
+    }
+
+    private QuickShulkerOpenMode getQuickShulkerOpenMode() {
+        if (Configs.QUICK_SHULKER_OPEN_MODE.getOptionListValue() instanceof QuickShulkerOpenMode mode) {
+            return mode;
+        }
+        return QuickShulkerOpenMode.INVOKE;
+    }
+
+    private void simulateOpenShulkerClick(Minecraft client, int playerSlot) {
+        if (client.player == null || client.gameMode == null) return;
+        directRightClickPlayerSlot(client, playerSlot);
+    }
+
+    private void directRightClickPlayerSlot(Minecraft client, int playerSlot) {
+        if (client.player.containerMenu != client.player.inventoryMenu) return;
+
+        AbstractContainerMenu handler = client.player.containerMenu;
+        int uiSlot = getPlayerinventoryMenuSlot(handler, client, playerSlot);
+        if (uiSlot >= 0) {
+            client.gameMode.handleContainerInput(handler.containerId, uiSlot, 1, ContainerInput.PICKUP, client.player);
+        }
+    }
+
+    private void restoreCursorShulkerIfClickWasVanilla(Minecraft client, int syncId, int uiSlot) {
+        if (client.player == null) return;
+
+        AbstractContainerMenu handler = client.player.containerMenu;
+        if (handler != client.player.inventoryMenu) return;
+
+        ItemStack cursor = handler.getCarried();
+        if (cursor.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) {
+            client.gameMode.handleContainerInput(syncId, uiSlot, 0, ContainerInput.PICKUP, client.player);
+        }
+    }
+
+    private int getPlayerinventoryMenuSlot(AbstractContainerMenu handler, Minecraft client, int playerSlot) {
+        for (Slot slot : handler.slots) {
+            if (slot.container == client.player.getInventory() && slot.getContainerSlot() == playerSlot) {
+                return handler.slots.indexOf(slot);
+            }
+        }
+        return playerSlot < 9 ? playerSlot + 36 : playerSlot;
+    }
+
+    private boolean tryTakeItOutFetch(Minecraft client, List<ItemStack> needed) {
+        if (!canUseTakeItOut() || client.player == null) return false;
+
+        if (pendingTakeItOutRequest != null) {
+            if (!hasTakeItOutResultArrived(client, pendingTakeItOutRequest)) {
+                actionQueue.add(() -> actionWaitTicks = getDelay(2));
+                actionQueue.add(() -> {
+                    pendingTakeItOutRequest = null;
+                    if (currentTask != null) checkAndStartGatheringOrFilling(client);
+                });
+                return true;
+            }
+            recordOrderlyStoredItem(pendingTakeItOutRequest.requestedStack(), pendingTakeItOutRequest.shulkerSlot());
+            pendingTakeItOutRequest = null;
+        }
+
+        if (findEmptyPlayerSlot(client) == -1) {
+            return false;
+        }
+
+        TakeItOutRequest request = findTakeItOutRequest(client, needed);
+        if (request == null) return false;
+
+        if (!TakeItOutCompat.requestStack(request.innerSlot(), request.shulkerSlot())) {
+            return false;
+        }
+
+        pendingTakeItOutRequest = request;
+        sendFeedback(client, Component.translatable("litematica_container_filler.message.takeitout_extract").getString(), true);
+        actionQueue.add(() -> actionWaitTicks = getDelay(3));
+        actionQueue.add(() -> {
+            if (currentTask != null) checkAndStartGatheringOrFilling(client);
+        });
+        return true;
+    }
+
+    private boolean hasTakeItOutResultArrived(Minecraft client, TakeItOutRequest request) {
+        if (request == null || request.requestedStack().isEmpty()) return true;
+        if (countItemInPlayerInv(client, request.requestedStack()) > request.countBefore()) return true;
+
+        ItemStack shulker = client.player.getInventory().getItem(request.shulkerSlot());
+        if (!(shulker.getItem() instanceof BlockItem bi) || !(bi.getBlock() instanceof ShulkerBoxBlock)) {
+            return true;
+        }
+
+        ItemContainerContents component = shulker.get(DataComponents.CONTAINER);
+        if (component == null) return true;
+
+        List<ItemStack> innerStacks = component.allItemsCopyStream().toList();
+        if (request.innerSlot() < 0 || request.innerSlot() >= innerStacks.size()) return true;
+
+        ItemStack inner = innerStacks.get(request.innerSlot());
+        return inner.isEmpty() || !ItemMatcher.isSameItem(inner, request.requestedStack());
+    }
+
+    private TakeItOutRequest findTakeItOutRequest(Minecraft client, List<ItemStack> needed) {
+        for (ItemStack req : needed) {
+            for (int shulkerSlot = 0; shulkerSlot < 36; shulkerSlot++) {
+                ItemStack shulker = client.player.getInventory().getItem(shulkerSlot);
+                if (!(shulker.getItem() instanceof BlockItem bi) || !(bi.getBlock() instanceof ShulkerBoxBlock)) {
+                    continue;
+                }
+
+                ItemContainerContents component = shulker.get(DataComponents.CONTAINER);
+                if (component == null) continue;
+
+                List<ItemStack> innerStacks = component.allItemsCopyStream().toList();
+                for (int innerSlot = 0; innerSlot < innerStacks.size(); innerSlot++) {
+                    ItemStack inner = innerStacks.get(innerSlot);
+                    if (ItemMatcher.isSameItem(inner, req)) {
+                        return new TakeItOutRequest(shulkerSlot, innerSlot, req.copy(), countItemInPlayerInv(client, req));
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private void doShulkerExtractionPhase(Minecraft client) {
@@ -1082,6 +1530,7 @@ public class AutoFillerStateMachine {
                 }
 
                 borrowedItems.add(new StrictItemStackKey(req));
+                recordOrderlyStoredItem(req, activeShulkerSlot);
                 amountTaken += amountToTake;
 
                 if (amountToTake > partialSpace) {
@@ -1127,7 +1576,7 @@ public class AutoFillerStateMachine {
     }
 
     private void triggerStashOrAbort(Minecraft client) {
-        if (Configs.AUTO_STASH_ITEMS.getBooleanValue()) {
+        if (Configs.STORE_ORDERLY.getBooleanValue()) {
             int[] stashAction = findStashAction(client, currentTask.requiredItems.values());
             if (stashAction != null) {
                 actionQueue.add(() -> client.player.closeContainer());
@@ -1140,13 +1589,14 @@ public class AutoFillerStateMachine {
                 return;
             }
         }
-        abortTask(client, "litematica_container_filler.message.inventory_full_cannot_extract", true, false);
+        abortTask(client, "litematica_container_filler.message.container_full_cannot_extract", true, false);
     }
 
     private void executeBurstFill(Minecraft client, AbstractContainerMenu handler) {
         int syncId = handler.containerId;
         int delay = Configs.ENABLE_SAFETY_DELAY.getBooleanValue() ? Configs.FILL_DELAY.getIntegerValue() : 0;
         boolean dropExtracted = Configs.DROP_EXTRACTED_ITEMS.getBooleanValue();
+        boolean dropEmptySchematicExtras = Configs.DROP_ITEMS_FROM_EMPTY_SCHEMATIC_CONTAINERS.getBooleanValue();
         boolean isCreativeFill = client.player != null && client.player.isCreative() && Configs.ENABLE_CREATIVE_FILL.getBooleanValue();
 
         if (!handler.getCarried().isEmpty()) {
@@ -1176,6 +1626,7 @@ public class AutoFillerStateMachine {
         int containerSize = handler.slots.size() - 36;
         if (handler instanceof CrafterMenu) containerSize = 9;
         if (containerSize <= 0) { finishTaskAndReturn(client); return; }
+        Set<Integer> ignoredSlots = currentIgnoredSlots(client);
 
         boolean movedAny = false;
         boolean stillNeedsAction = false;
@@ -1183,16 +1634,18 @@ public class AutoFillerStateMachine {
         boolean extractedAnyInThisPass = false;
 
         if (handler instanceof CrafterMenu crafterHandler) {
-            AbstractContainerScreen<?> handledScreen = client.screen instanceof AbstractContainerScreen<?> ? (AbstractContainerScreen<?>) client.screen : null;
+            AbstractContainerScreen<?> AbstractContainerScreen = client.screen instanceof AbstractContainerScreen<?> ? (AbstractContainerScreen<?>) client.screen : null;
             Set<Integer> targetDisabled = LitematicaContainerReader.getDisabledSlots(currentTask.targetPos);
             boolean toggledInThisTick = false;
 
             for (int i = 0; i < 9; i++) {
+                if (ignoredSlots.contains(i)) continue;
+
                 boolean shouldBeDisabled = targetDisabled != null && targetDisabled.contains(i);
                 if (shouldBeDisabled != crafterHandler.isSlotDisabled(i)) {
                     if (crafterHandler.getSlot(i).hasItem()) {
-                        if (dropExtracted) simulateSlotClick(handledScreen, crafterHandler.getSlot(i), i, 1, ContainerInput.THROW);
-                        else simulateSlotClick(handledScreen, crafterHandler.getSlot(i), i, 0, ContainerInput.QUICK_MOVE);
+                        if (dropExtracted) simulateSlotClick(AbstractContainerScreen, crafterHandler.getSlot(i), i, 1, ContainerInput.THROW);
+                        else simulateSlotClick(AbstractContainerScreen, crafterHandler.getSlot(i), i, 0, ContainerInput.QUICK_MOVE);
                     } else {
                         setCrafterSlotEnabled(client, crafterHandler, i, !shouldBeDisabled);
                     }
@@ -1205,7 +1658,7 @@ public class AutoFillerStateMachine {
             }
 
             if (toggledInThisTick) {
-                if (delay > 0 || handledScreen == null) {
+                if (delay > 0 || AbstractContainerScreen == null) {
                     actionWaitTicks = Math.max(2, delay);
                     consecutiveFailures = 0;
                     watchdogTimer = 0;
@@ -1215,6 +1668,7 @@ public class AutoFillerStateMachine {
         }
 
         for (int containerSlot = 0; containerSlot < containerSize; containerSlot++) {
+            if (ignoredSlots.contains(containerSlot)) continue;
             if (handler instanceof CrafterMenu ch && ch.isSlotDisabled(containerSlot)) continue;
 
             int allowed = currentTask.fillLedger.getOrDefault(containerSlot, 0);
@@ -1248,6 +1702,7 @@ public class AutoFillerStateMachine {
 
         if (!swappedAnyInThisPass || delay == 0) {
             for (int dst = 0; dst < containerSize; dst++) {
+                if (ignoredSlots.contains(dst)) continue;
                 if (handler instanceof CrafterMenu ch && ch.isSlotDisabled(dst)) continue;
 
                 int allowed = currentTask.fillLedger.getOrDefault(dst, 0);
@@ -1270,6 +1725,7 @@ public class AutoFillerStateMachine {
                     int bestSrc = -1;
                     for (int src = 0; src < containerSize; src++) {
                         if (src == dst) continue;
+                        if (ignoredSlots.contains(src)) continue;
                         if (handler instanceof CrafterMenu ch && ch.isSlotDisabled(src)) continue;
 
                         int uiSrc = currentMapper.getUiSlotForContainer(src);
@@ -1307,6 +1763,7 @@ public class AutoFillerStateMachine {
 
         if (!swappedAnyInThisPass || delay == 0) {
             for (int containerSlot = 0; containerSlot < containerSize; containerSlot++) {
+                if (ignoredSlots.contains(containerSlot)) continue;
                 if (handler instanceof CrafterMenu ch && ch.isSlotDisabled(containerSlot)) continue;
 
                 ItemStack reqStack = currentTask.requiredItems.getOrDefault(containerSlot, ItemStack.EMPTY);
@@ -1322,7 +1779,7 @@ public class AutoFillerStateMachine {
 
                 if (reqStack.isEmpty() || isWrong || isExcess) {
                     stillNeedsAction = true;
-                    if (dropExtracted) client.gameMode.handleContainerInput(syncId, uiSlot, 1, ContainerInput.THROW, client.player);
+                    if (dropExtracted || (dropEmptySchematicExtras && reqStack.isEmpty())) client.gameMode.handleContainerInput(syncId, uiSlot, 1, ContainerInput.THROW, client.player);
                     else {
                         if (!canAbsorb(client, curStack)) {
                             triggerStashOrAbort(client); return;
@@ -1338,6 +1795,7 @@ public class AutoFillerStateMachine {
         boolean printedAny = false;
         if (isCreativeFill && (!swappedAnyInThisPass && !extractedAnyInThisPass)) {
             for (int containerSlot = 0; containerSlot < containerSize; containerSlot++) {
+                if (ignoredSlots.contains(containerSlot)) continue;
                 if (handler instanceof CrafterMenu ch && ch.isSlotDisabled(containerSlot)) continue;
 
                 int allowed = currentTask.fillLedger.getOrDefault(containerSlot, 0);
@@ -1351,11 +1809,13 @@ public class AutoFillerStateMachine {
 
                 ItemStack curStack = handler.slots.get(uiSlot).getItem();
                 int curCount = curStack.isEmpty() ? 0 : curStack.getCount();
+
                 int actualMissing = Math.min(reqStack.getCount() - curCount, allowed);
 
                 if (actualMissing > 0 && (curStack.isEmpty() || ItemMatcher.isSameItem(curStack, reqStack))) {
 
                     int emptySlot = findEmptyPlayerSlot(client);
+
                     if (emptySlot != -1) {
                         ItemStack createStack = reqStack.copy();
                         createStack.setCount(actualMissing);
@@ -1365,7 +1825,9 @@ public class AutoFillerStateMachine {
 
                         if (uiPlayerSlot >= 0 && uiPlayerSlot < handler.slots.size()) {
                             client.gameMode.handleCreativeModeItemAdd(createStack, syncSlot);
+
                             client.gameMode.handleContainerInput(syncId, uiPlayerSlot, 0, ContainerInput.PICKUP, client.player);
+
                             client.gameMode.handleContainerInput(syncId, uiSlot, 0, ContainerInput.PICKUP, client.player);
 
                             currentTask.fillLedger.put(containerSlot, allowed - actualMissing);
@@ -1378,7 +1840,7 @@ public class AutoFillerStateMachine {
                 }
             }
             if (printedAny && delay > 0) {
-                actionWaitTicks = Math.max(1, delay);
+                actionWaitTicks = delay;
                 consecutiveFailures = 0;
                 watchdogTimer = 0;
                 return;
@@ -1387,6 +1849,7 @@ public class AutoFillerStateMachine {
 
         if ((!swappedAnyInThisPass && !extractedAnyInThisPass && !printedAny) || delay == 0) {
             for (int containerSlot = 0; containerSlot < containerSize; containerSlot++) {
+                if (ignoredSlots.contains(containerSlot)) continue;
                 if (handler instanceof CrafterMenu ch && ch.isSlotDisabled(containerSlot)) continue;
 
                 int allowed = currentTask.fillLedger.getOrDefault(containerSlot, 0);
@@ -1484,6 +1947,10 @@ public class AutoFillerStateMachine {
         if (currentHandler != client.player.inventoryMenu) {
             RealContainerCache.updateFromHandler(client, currentHandler);
         }
+        RealContainerCache.putPredicted(currentTask.targetPos, currentTask.requiredItems);
+        lastCompletedTaskPos = currentTask.targetPos;
+        lastCompletedTaskItems = collectRequiredItemTypes(currentTask.requiredItems);
+        recentFillingMarkers.put(currentTask.targetPos.immutable(), Math.max(0, Configs.TASK_OVERLAY_LINGER_TICKS.getIntegerValue()));
 
         sendFeedback(client, Component.translatable("litematica_container_filler.message.fill_completed").getString(), true);
 
@@ -1579,6 +2046,10 @@ public class AutoFillerStateMachine {
         if (client.player != null && client.player.containerMenu == client.player.inventoryMenu) {
             uiWaitTimer++;
             if (uiWaitTimer > 20) {
+                if (activeShulkerSlot >= 0) {
+                    int uiSlot = getPlayerinventoryMenuSlot(client.player.inventoryMenu, client, activeShulkerSlot);
+                    restoreCursorShulkerIfClickWasVanilla(client, client.player.inventoryMenu.containerId, uiSlot);
+                }
                 abortTask(client, "litematica_container_filler.message.container_timeout", false, false);
                 return;
             }
@@ -1590,6 +2061,9 @@ public class AutoFillerStateMachine {
     }
 
     private void reset() {
+        if (currentTask == null && taskQueue.isEmpty() && actionQueue.isEmpty()) {
+            ClickPacketRateLimiter.setOperationActive(false);
+        }
         aborting = false;
         currentTask = null;
         currentMapper = null;
@@ -1599,6 +2073,7 @@ public class AutoFillerStateMachine {
         changePhase(Phase.IDLE);
         actionQueue.clear();
         pendingShulkers.clear();
+        pendingTakeItOutRequest = null;
         actionWaitTicks = 0;
         watchdogTimer = 0;
         movesThisTask = 0;
@@ -1609,15 +2084,161 @@ public class AutoFillerStateMachine {
         activeShulkerSlot = -1;
         stashShulkerSlot = -1;
         stashItemSlot = -1;
+        pendingTakeItOutRequest = null;
         borrowedItems.clear();
         stashedItemCounts.clear();
+        orderlyStoredItems.clear();
         openedShulkerSlots.clear();
         shulkerMisses.clear();
         blacklistedSlots.clear();
     }
 
+    private void cancelContinuousWork(Minecraft client) {
+        taskQueue.clear();
+        if (currentTask != null && !currentTask.forcedManual) {
+            if (client.player != null && client.player.containerMenu != client.player.inventoryMenu) {
+                client.player.closeContainer();
+            }
+            reset();
+        }
+    }
+
+    private void timeoutReset(Minecraft client) {
+        sendFeedback(client, Component.translatable("litematica_container_filler.message.timeout_reset").getString(), true);
+        taskQueue.clear();
+        failedContainers.clear();
+        blacklistedSlots.clear();
+        if (client.player != null && client.player.containerMenu != client.player.inventoryMenu) {
+            client.player.closeContainer();
+        }
+        reset();
+    }
+
+    private void prefetchQueuedTaskData() {
+        int count = 0;
+        for (FillTask task : taskQueue) {
+            if (count++ >= 4) break;
+            RealContainerCache.requestContainerData(task.targetPos, 500L, true);
+        }
+    }
+
+    private FillTask pollBestTask(Minecraft client) {
+        List<FillTask> tasks = new ArrayList<>();
+        FillTask task;
+        while ((task = taskQueue.poll()) != null) {
+            if (shouldDropQueuedTask(client, task)) {
+                AreaScanner.clearAttemptCooldown(task.targetPos);
+            } else {
+                tasks.add(task);
+            }
+        }
+
+        if (tasks.isEmpty()) return null;
+
+        FillTask best = tasks.get(0);
+        double bestScore = scoreTask(client, best);
+        for (FillTask candidate : tasks) {
+            double score = scoreTask(client, candidate);
+            if (score < bestScore) {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        for (FillTask candidate : tasks) {
+            if (candidate != best) taskQueue.add(candidate);
+        }
+        return best;
+    }
+
+    private boolean shouldDropQueuedTask(Minecraft client, FillTask task) {
+        if (task == null || task.forcedManual || client.player == null) return false;
+
+        double reach = client.player.blockInteractionRange();
+        double keepDistance = reach + (isPlayerMovingFast(client) ? 2.0D : 5.0D);
+        return client.player.getEyePosition().distanceToSqr(Vec3.atCenterOf(task.targetPos)) > keepDistance * keepDistance;
+    }
+
+    private boolean ensureQueueSpace(Minecraft client, BlockPos newPos, boolean preferNearby) {
+        if (taskQueue.size() < MAX_TASK_QUEUE_SIZE) return true;
+        return preferNearby && makeRoomForNearbyTask(client, newPos);
+    }
+
+    private boolean makeRoomForNearbyTask(Minecraft client, BlockPos newPos) {
+        if (client.player == null || taskQueue.isEmpty()) return false;
+
+        double newScore = queueDistanceScore(client, newPos);
+        FillTask farthest = null;
+        double farthestScore = newScore;
+
+        for (FillTask task : taskQueue) {
+            if (task.forcedManual) continue;
+            double score = queueDistanceScore(client, task.targetPos);
+            if (score > farthestScore) {
+                farthest = task;
+                farthestScore = score;
+            }
+        }
+
+        if (farthest == null) return false;
+        taskQueue.remove(farthest);
+        AreaScanner.clearAttemptCooldown(farthest.targetPos);
+        return true;
+    }
+
+    private double queueDistanceScore(Minecraft client, BlockPos pos) {
+        return client.player == null ? 0.0D : client.player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos));
+    }
+
+    private double scoreTask(Minecraft client, FillTask task) {
+        double score = queueDistanceScore(client, task.targetPos);
+        boolean movingFast = isPlayerMovingFast(client);
+        if (client.player != null && isTargetReachable(client, task.targetPos)) score -= movingFast ? 512.0D : 128.0D;
+
+        if (!movingFast && lastCompletedTaskPos != null) {
+            score += task.targetPos.distSqr(lastCompletedTaskPos) * 0.25D;
+        }
+
+        Set<Item> itemTypes = collectRequiredItemTypes(task.requiredItems);
+        if (!movingFast && !lastCompletedTaskItems.isEmpty() && !itemTypes.isEmpty()) {
+            int overlap = 0;
+            for (Item item : itemTypes) {
+                if (lastCompletedTaskItems.contains(item)) overlap++;
+            }
+            score -= overlap * 64.0D;
+        }
+
+        if (task.needsInspection) score += 16.0D;
+        return score;
+    }
+
+    private boolean isPlayerMovingFast(Minecraft client) {
+        if (client.player == null) return false;
+        double vx = client.player.getDeltaMovement().x;
+        double vz = client.player.getDeltaMovement().z;
+        return vx * vx + vz * vz > 0.04D;
+    }
+
+    private Set<Item> collectRequiredItemTypes(Map<Integer, ItemStack> requiredItems) {
+        if (requiredItems == null || requiredItems.isEmpty()) return Collections.emptySet();
+
+        Set<Item> itemTypes = new HashSet<>();
+        for (ItemStack stack : requiredItems.values()) {
+            if (!stack.isEmpty()) itemTypes.add(stack.getItem());
+        }
+        return itemTypes;
+    }
+
     private void sendFeedback(Minecraft client, String text, boolean isActionBar) {
-        if (client.player != null) client.gui.setOverlayMessage(Component.literal(text), isActionBar);
+        if (client.player != null) {
+            if (isActionBar) client.player.sendOverlayMessage(Component.literal(text));
+            else client.player.sendSystemMessage(Component.literal(text));
+        }
+    }
+
+    private boolean isPassiveScreenOpen(Minecraft client) {
+        Screen screen = client.screen;
+        return screen != null && !(screen instanceof AbstractContainerScreen<?>);
     }
 
     private boolean hasItemAnywhere(Minecraft client, ItemStack target) {
@@ -1683,6 +2304,7 @@ public class AutoFillerStateMachine {
         ItemStack sourceStack = client.player.getInventory().getItem(playerSlot);
         int countInSlot = sourceStack.getCount();
         int amountToMove = Math.min(needed, countInSlot);
+        touchOrderlyStoredItem(sourceStack);
 
         if (amountToMove == countInSlot) {
             client.gameMode.handleContainerInput(syncId, uiPlayerSlot, 0, ContainerInput.PICKUP, client.player);
@@ -1699,13 +2321,42 @@ public class AutoFillerStateMachine {
     }
 
     public BlockPos getCurrentTaskPos() { return currentTask != null ? currentTask.targetPos : null; }
-    public boolean isIdle() { return this.currentTask == null && this.actionQueue.isEmpty(); }
+
+    public Set<BlockPos> getQueuedTaskPositions() {
+        Set<BlockPos> positions = new LinkedHashSet<>();
+        for (FillTask task : taskQueue) {
+            if (task != null && task.targetPos != null) {
+                positions.add(task.targetPos.immutable());
+            }
+        }
+        return positions;
+    }
+
+    public Set<BlockPos> getMissingMaterialPositions() {
+        return new LinkedHashSet<>(missingMaterialMarkers.keySet());
+    }
+
+    public Set<BlockPos> getRecentFillingPositions() {
+        return new LinkedHashSet<>(recentFillingMarkers.keySet());
+    }
+
+    public boolean hasRenderableTaskMarkers() {
+        return currentTask != null || !taskQueue.isEmpty() || !missingMaterialMarkers.isEmpty() || !recentFillingMarkers.isEmpty();
+    }
+
+    public boolean isIdle() { return this.currentTask == null && this.actionQueue.isEmpty() && this.taskQueue.isEmpty(); }
 
     public boolean isWorking() { return !isIdle(); }
+
+    public boolean canQueueMoreTasks() {
+        return taskQueue.size() < MAX_TASK_QUEUE_SIZE;
+    }
 
     public boolean shouldBlockScreens() {
         return isWorking() && currentPhase != Phase.IDLE && !aborting;
     }
+
+    private boolean aborting = false;
 
     private void setCrafterSlotEnabled(Minecraft client, CrafterMenu handler, int slotId, boolean enabled) {
         handler.setSlotState(slotId, enabled);

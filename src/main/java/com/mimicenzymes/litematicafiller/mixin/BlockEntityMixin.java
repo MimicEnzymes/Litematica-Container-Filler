@@ -22,7 +22,7 @@ public class BlockEntityMixin {
         if (world != null && world.isClientSide() && world.getClass().getSimpleName().contains("Schematic")) {
             CompoundTag nbt = cir.getReturnValue();
             if (nbt != null && nbt.contains("Items")) {
-                com.mimicenzymes.litematicafiller.core.MaterialReplacer.replaceInNbtList((ListTag) nbt.get("Items"), registries);
+                com.mimicenzymes.litematicafiller.core.MaterialReplacer.replaceInListTag((ListTag) nbt.get("Items"), registries);
             }
         }
     }

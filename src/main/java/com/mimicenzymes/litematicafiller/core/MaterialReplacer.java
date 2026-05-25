@@ -7,9 +7,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
-import net.minecraft.world.item.Items;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -65,7 +65,7 @@ public class MaterialReplacer {
                 ItemRule source = parseRule(parts[0].trim());
                 ItemRule target = parseRule(parts[1].trim());
 
-                if (source.item != net.minecraft.world.item.Items.AIR && target.item != net.minecraft.world.item.Items.AIR) {
+                if (source.item != net.minecraft.world.item.Items.AIR) {
                     REPLACEMENTS.add(new Replacement(source, target));
                 }
             }
@@ -89,7 +89,7 @@ public class MaterialReplacer {
         }
 
         Identifier id = Identifier.tryParse(idStr);
-        Item item = Items.AIR;
+        Item item = net.minecraft.world.item.Items.AIR;
         if (id != null && BuiltInRegistries.ITEM.containsKey(id)) {
             item = BuiltInRegistries.ITEM.getValue(id);
         }
@@ -104,6 +104,10 @@ public class MaterialReplacer {
 
         for (Replacement rep : REPLACEMENTS) {
             if (rep.source.matches(original)) {
+                if (rep.target.item == net.minecraft.world.item.Items.AIR) {
+                    return ItemStack.EMPTY;
+                }
+
                 ItemStack newStack = new ItemStack(rep.target.item, original.getCount());
 
                 if (rep.target.name != null) {
@@ -116,26 +120,50 @@ public class MaterialReplacer {
         return original;
     }
 
+    public static boolean isIgnored(ItemStack original) {
+        if (original == null || original.isEmpty()) return false;
+        checkReload();
+        if (REPLACEMENTS.isEmpty()) return false;
+
+        for (Replacement rep : REPLACEMENTS) {
+            if (rep.source.matches(original) && rep.target.item == net.minecraft.world.item.Items.AIR) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static void replaceInMap(Map<Integer, ItemStack> inventory) {
         if (inventory == null || inventory.isEmpty()) return;
         checkReload();
         if (REPLACEMENTS.isEmpty()) return;
-        for (Map.Entry<Integer, ItemStack> entry : inventory.entrySet()) {
+        Iterator<Map.Entry<Integer, ItemStack>> iterator = inventory.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<Integer, ItemStack> entry = iterator.next();
             ItemStack replaced = replaceSingleStack(entry.getValue());
             if (replaced != entry.getValue()) {
-                entry.setValue(replaced);
+                if (replaced == null || replaced.isEmpty()) {
+                    iterator.remove();
+                } else {
+                    entry.setValue(replaced);
+                }
             }
         }
     }
 
-    public static void replaceInNbtList(net.minecraft.nbt.ListTag itemsList, net.minecraft.core.HolderLookup.Provider registries) {
+    public static void replaceInListTag(net.minecraft.nbt.ListTag itemsList, net.minecraft.core.HolderLookup.Provider registries) {
         for (int i = 0; i < itemsList.size(); i++) {
             if (itemsList.get(i) instanceof net.minecraft.nbt.CompoundTag itemTag) {
-                ItemStack original = ItemStack.OPTIONAL_CODEC.parse(registries.createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE), itemTag).resultOrPartial().orElse(ItemStack.EMPTY);
+                ItemStack original = ItemStack.OPTIONAL_CODEC.parse(net.minecraft.nbt.NbtOps.INSTANCE, itemTag).resultOrPartial().orElse(ItemStack.EMPTY);
                 if (!original.isEmpty()) {
                     ItemStack replaced = replaceSingleStack(original);
                     if (replaced != original) {
-                        net.minecraft.nbt.Tag newTag = ItemStack.OPTIONAL_CODEC.encodeStart(registries.createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE), replaced).resultOrPartial().orElse(null);
+                        if (replaced == null || replaced.isEmpty()) {
+                            itemsList.remove(i);
+                            i--;
+                            continue;
+                        }
+                        net.minecraft.nbt.Tag newTag = ItemStack.OPTIONAL_CODEC.encodeStart(net.minecraft.nbt.NbtOps.INSTANCE, replaced).resultOrPartial().orElse(null);
                         if (newTag instanceof net.minecraft.nbt.CompoundTag newCompound) {
                             if (itemTag.contains("Slot")) {
                                 newCompound.put("Slot", itemTag.get("Slot"));
