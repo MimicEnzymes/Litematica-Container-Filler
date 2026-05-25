@@ -5,7 +5,8 @@ import fi.dy.masa.malilib.util.StringUtils;
 
 public enum ContainerClearOutputMode implements IConfigOptionListEntry {
     DROP("drop", "litematica_container_filler.config.option.containerClearOutputMode.drop"),
-    INVENTORY("inventory", "litematica_container_filler.config.option.containerClearOutputMode.inventory");
+    INVENTORY("inventory", "litematica_container_filler.config.option.containerClearOutputMode.inventory"),
+    INVENTORY_THEN_DROP("inventory_then_drop", "litematica_container_filler.config.option.containerClearOutputMode.inventory_then_drop");
 
     private final String configString;
     private final String translationKey;
