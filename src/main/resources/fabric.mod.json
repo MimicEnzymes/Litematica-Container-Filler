@@ -5,7 +5,11 @@
   "name": "Litematica Container Filler",
   "description": "Auto-fill containers from Litematica schematics with material lists, highlights, and configurable filling helpers.",
   "authors": ["MimicEnzymes"],
-  "contact": {},
+  "contact": {
+    "homepage": "https://modrinth.com/mod/litematica-container-filler",
+    "sources": "https://github.com/MimicEnzymes/Litematica-Container-Filler",
+    "issues": "https://github.com/MimicEnzymes/Litematica-Container-Filler/issues"
+  },
   "license": "LGPL-3.0-only",
   "icon": "assets/litematica_container_filler/icon.png",
   "environment": "client",

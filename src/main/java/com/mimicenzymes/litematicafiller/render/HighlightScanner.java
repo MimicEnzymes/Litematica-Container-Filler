@@ -292,7 +292,7 @@ public class HighlightScanner {
                 if (isRealContainerMissing(client, checkPos, halves)) {
                     observeRealContainerStates(client, checkPos, halves);
                     clearRealContainerCache(checkPos, halves);
-                    if (Configs.HIGHLIGHT_UNPLACED_CONTAINERS.getBooleanValue()) {
+                    if (Configs.HIGHLIGHT_UNPLACED_CONTAINERS.getBooleanValue() && hasJob) {
                         nextMap.put(pos.toImmutable(), HighlightState.UNPLACED);
                     }
                     continue;
