@@ -1,4 +1,4 @@
-package com.mimicenzymes.litematicafiller.core;
+package com.mimicenzymes.litematicafiller.tool;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.config.QuickShulkerOpenMode;

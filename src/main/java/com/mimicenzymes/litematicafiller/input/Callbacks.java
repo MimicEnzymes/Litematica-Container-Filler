@@ -1,11 +1,11 @@
 package com.mimicenzymes.litematicafiller.input;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
-import com.mimicenzymes.litematicafiller.config.GuiConfigs;
+import com.mimicenzymes.litematicafiller.gui.GuiConfigs;
 import com.mimicenzymes.litematicafiller.config.Hotkeys;
 import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
-import com.mimicenzymes.litematicafiller.core.ContainerToolStateMachine;
-import com.mimicenzymes.litematicafiller.core.ContainerBlockFilter;
+import com.mimicenzymes.litematicafiller.tool.ContainerToolStateMachine;
+import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
 import fi.dy.masa.malilib.gui.GuiBase;

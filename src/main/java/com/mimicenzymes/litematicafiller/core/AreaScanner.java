@@ -1,6 +1,7 @@
 package com.mimicenzymes.litematicafiller.core;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
+import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.render.HighlightScanner;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import net.minecraft.block.BlockState;

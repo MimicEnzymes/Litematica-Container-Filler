@@ -2,7 +2,7 @@ package com.mimicenzymes.litematicafiller.mixin;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
-import com.mimicenzymes.litematicafiller.core.ContainerToolStateMachine;
+import com.mimicenzymes.litematicafiller.tool.ContainerToolStateMachine;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;

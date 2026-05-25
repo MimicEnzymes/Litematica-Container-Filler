@@ -1,6 +1,8 @@
-package com.mimicenzymes.litematicafiller.config;
+package com.mimicenzymes.litematicafiller.gui;
 
 import com.mimicenzymes.litematicafiller.Reference;
+import com.mimicenzymes.litematicafiller.config.Configs;
+import com.mimicenzymes.litematicafiller.config.Hotkeys;
 import fi.dy.masa.malilib.gui.GuiBase;
 import fi.dy.masa.malilib.gui.GuiConfigsBase;
 import fi.dy.masa.malilib.gui.button.ButtonBase;

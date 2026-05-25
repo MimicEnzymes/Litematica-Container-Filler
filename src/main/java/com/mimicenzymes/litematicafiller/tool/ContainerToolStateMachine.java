@@ -1,8 +1,11 @@
-package com.mimicenzymes.litematicafiller.core;
+package com.mimicenzymes.litematicafiller.tool;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
-import com.mimicenzymes.litematicafiller.config.ContainerClearOutputMode;
 import com.mimicenzymes.litematicafiller.config.QuickShulkerOpenMode;
+import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
+import com.mimicenzymes.litematicafiller.core.ItemMatcher;
+import com.mimicenzymes.litematicafiller.core.RealContainerCache;
+import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.dependency.DependencyChecker;
 import com.mimicenzymes.litematicafiller.dependency.DummyExtractor;
 import com.mimicenzymes.litematicafiller.dependency.IShulkerExtractor;

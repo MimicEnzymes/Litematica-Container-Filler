@@ -2,8 +2,8 @@ package com.mimicenzymes.litematicafiller.render;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.config.Hotkeys;
-import com.mimicenzymes.litematicafiller.core.ContainerToolMode;
-import com.mimicenzymes.litematicafiller.core.ContainerToolStateMachine;
+import com.mimicenzymes.litematicafiller.tool.ContainerToolMode;
+import com.mimicenzymes.litematicafiller.tool.ContainerToolStateMachine;
 import fi.dy.masa.malilib.util.StringUtils;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;

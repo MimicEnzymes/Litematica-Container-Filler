@@ -1,6 +1,7 @@
-package com.mimicenzymes.litematicafiller.config;
+package com.mimicenzymes.litematicafiller.gui;
 
 import com.google.common.collect.ImmutableList;
+import com.mimicenzymes.litematicafiller.config.Configs;
 import fi.dy.masa.malilib.gui.GuiBase;
 import fi.dy.masa.malilib.gui.button.ButtonBase;
 import fi.dy.masa.malilib.gui.button.ButtonGeneric;

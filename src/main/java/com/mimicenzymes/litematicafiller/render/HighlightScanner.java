@@ -2,8 +2,8 @@ package com.mimicenzymes.litematicafiller.render;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
-import com.mimicenzymes.litematicafiller.core.ContainerBlockFilter;
-import com.mimicenzymes.litematicafiller.core.ContainerToolStateMachine;
+import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
+import com.mimicenzymes.litematicafiller.tool.ContainerToolStateMachine;
 import com.mimicenzymes.litematicafiller.core.ItemMatcher;
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;

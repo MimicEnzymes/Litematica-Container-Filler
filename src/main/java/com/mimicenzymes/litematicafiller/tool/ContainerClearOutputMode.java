@@ -1,4 +1,4 @@
-package com.mimicenzymes.litematicafiller.config;
+package com.mimicenzymes.litematicafiller.tool;
 
 import fi.dy.masa.malilib.config.IConfigOptionListEntry;
 import fi.dy.masa.malilib.util.StringUtils;

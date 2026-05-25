@@ -4,8 +4,12 @@ import com.google.common.collect.ImmutableList;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mimicenzymes.litematicafiller.Reference;
-import com.mimicenzymes.litematicafiller.core.ContainerToolMode;
+import com.mimicenzymes.litematicafiller.filter.ContainerFilterMode;
+import com.mimicenzymes.litematicafiller.filter.ContainerFilterScope;
+import com.mimicenzymes.litematicafiller.gui.GuiConfigs;
 import com.mimicenzymes.litematicafiller.input.InputHandler;
+import com.mimicenzymes.litematicafiller.tool.ContainerClearOutputMode;
+import com.mimicenzymes.litematicafiller.tool.ContainerToolMode;
 import fi.dy.masa.malilib.config.ConfigManager;
 import fi.dy.masa.malilib.config.ConfigUtils;
 import fi.dy.masa.malilib.config.IConfigBase;
@@ -72,7 +76,7 @@ public class Configs implements IConfigHandler {
     public static final ConfigInteger TOOL_HUD_OFFSET               = new ConfigInteger("litematica_container_filler.config.name.toolHudOffset", 34, 12, 120, "litematica_container_filler.config.comment.toolHudOffset");
     public static final ConfigInteger TOOL_HUD_SCALE                = new ConfigInteger("litematica_container_filler.config.name.toolHudScale", 100, 70, 150, "litematica_container_filler.config.comment.toolHudScale");
 
-    //瀹瑰櫒宸ュ叿璁剧疆
+    // Container tool hotkeys
     public static final ConfigBooleanHotkeyed TOOL_CLEAR_MODE        = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.toolClearMode", false, "", "litematica_container_filler.config.comment.toolClearMode");
     public static final ConfigBooleanHotkeyed TOOL_FILL_FULL_MODE    = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.toolFillFullMode", false, "", "litematica_container_filler.config.comment.toolFillFullMode");
     public static final ConfigBooleanHotkeyed TOOL_COPY_MODE         = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.toolCopyMode", false, "", "litematica_container_filler.config.comment.toolCopyMode");

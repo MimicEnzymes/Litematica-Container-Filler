@@ -1,8 +1,6 @@
-package com.mimicenzymes.litematicafiller.core;
+package com.mimicenzymes.litematicafiller.filter;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
-import com.mimicenzymes.litematicafiller.config.ContainerFilterMode;
-import com.mimicenzymes.litematicafiller.config.ContainerFilterScope;
 import net.minecraft.block.BarrelBlock;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;

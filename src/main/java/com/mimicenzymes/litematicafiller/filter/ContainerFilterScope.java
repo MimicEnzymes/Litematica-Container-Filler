@@ -1,17 +1,17 @@
-package com.mimicenzymes.litematicafiller.config;
+package com.mimicenzymes.litematicafiller.filter;
 
 import fi.dy.masa.malilib.config.IConfigOptionListEntry;
 import fi.dy.masa.malilib.util.StringUtils;
 
-public enum ContainerFilterMode implements IConfigOptionListEntry {
-    DISABLED("disabled", "litematica_container_filler.config.option.containerFilterMode.disabled"),
-    WHITELIST("whitelist", "litematica_container_filler.config.option.containerFilterMode.whitelist"),
-    BLACKLIST("blacklist", "litematica_container_filler.config.option.containerFilterMode.blacklist");
+public enum ContainerFilterScope implements IConfigOptionListEntry {
+    SCHEMATIC_FILL("schematic_fill", "litematica_container_filler.config.option.containerFilterScope.schematicFill"),
+    TOOLS("tools", "litematica_container_filler.config.option.containerFilterScope.tools"),
+    BOTH("both", "litematica_container_filler.config.option.containerFilterScope.both");
 
     private final String configString;
     private final String translationKey;
 
-    ContainerFilterMode(String configString, String translationKey) {
+    ContainerFilterScope(String configString, String translationKey) {
         this.configString = configString;
         this.translationKey = translationKey;
     }
@@ -28,7 +28,7 @@ public enum ContainerFilterMode implements IConfigOptionListEntry {
 
     @Override
     public IConfigOptionListEntry cycle(boolean forward) {
-        ContainerFilterMode[] values = values();
+        ContainerFilterScope[] values = values();
         int index = this.ordinal() + (forward ? 1 : -1);
         if (index < 0) {
             index = values.length - 1;
@@ -40,11 +40,11 @@ public enum ContainerFilterMode implements IConfigOptionListEntry {
 
     @Override
     public IConfigOptionListEntry fromString(String value) {
-        for (ContainerFilterMode mode : values()) {
-            if (mode.configString.equalsIgnoreCase(value)) {
-                return mode;
+        for (ContainerFilterScope scope : values()) {
+            if (scope.configString.equalsIgnoreCase(value)) {
+                return scope;
             }
         }
-        return DISABLED;
+        return BOTH;
     }
 }
