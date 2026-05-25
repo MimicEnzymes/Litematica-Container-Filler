@@ -1,6 +1,7 @@
 package com.mimicenzymes.litematicafiller.tool;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
+import com.mimicenzymes.litematicafiller.config.Hotkeys;
 import com.mimicenzymes.litematicafiller.config.QuickShulkerOpenMode;
 import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
 import com.mimicenzymes.litematicafiller.core.ItemMatcher;
@@ -56,6 +57,7 @@ public class ContainerToolStateMachine {
     }
 
     private static final ContainerToolStateMachine INSTANCE = new ContainerToolStateMachine();
+    private static final int CONTINUOUS_TRIGGER_HOLD_THRESHOLD_TICKS = 6;
 
     private final Map<Integer, ItemStack> syncTemplate = new LinkedHashMap<>();
 
@@ -79,6 +81,14 @@ public class ContainerToolStateMachine {
     private int syncTakeItOutWaitTicks = 0;
     private TakeItOutRequest syncPendingTakeItOutRequest = null;
     private boolean syncTakeItOutBlocked = false;
+    private boolean triggerKeyHeldLastTick = false;
+    private int triggerKeyHeldTicks = 0;
+    private boolean continuousTriggerReady = false;
+    private boolean continuousTriggerSuppressedUntilRelease = false;
+    private int continuousSameTargetCooldownTicks = 0;
+    private BlockPos continuousLastTarget = null;
+    private ContainerToolMode continuousLastMode = null;
+    private boolean currentOperationContinuous = false;
 
     private final IShulkerExtractor shulkerExtractor;
 
@@ -153,13 +163,13 @@ public class ContainerToolStateMachine {
             return;
         }
         if (toolMode == ContainerToolMode.COPY) {
-            triggerSync(client);
+            triggerSync(client, false);
         } else {
-            startSingleTarget(client, toolMode);
+            startSingleTarget(client, toolMode, false);
         }
     }
 
-    private void triggerSync(MinecraftClient client) {
+    private void triggerSync(MinecraftClient client, boolean continuous) {
         if (client.player == null || client.world == null) return;
 
         BlockPos looked = getLookedContainerPos(client);
@@ -169,40 +179,58 @@ public class ContainerToolStateMachine {
         }
 
         if (isWorking()) {
+            continuousTriggerSuppressedUntilRelease = Configs.ENABLE_TOOL_HOLD_REPEAT.getBooleanValue();
             reset(client, true, false);
             send(client, "litematica_container_filler.message.tool_cancelled");
             return;
         }
 
         Identifier lookedBlockId = Registries.BLOCK.getId(client.world.getBlockState(looked).getBlock());
-        boolean updateTemplate = syncTemplate.isEmpty() || looked.equals(syncTemplatePos) || !lookedBlockId.equals(syncTemplateBlockId);
+        boolean updateTemplate = syncTemplate.isEmpty() || (!continuous && (looked.equals(syncTemplatePos) || !lookedBlockId.equals(syncTemplateBlockId)));
+        if (continuous && !syncTemplate.isEmpty()) {
+            if (looked.equals(syncTemplatePos) || (syncTemplateBlockId != null && !lookedBlockId.equals(syncTemplateBlockId))) {
+                return;
+            }
+            updateTemplate = false;
+        }
         mode = ContainerToolMode.COPY;
         currentPos = looked.toImmutable();
         openedByTool = false;
         uiWaitTicks = 0;
+        currentOperationContinuous = continuous;
 
         if (updateTemplate) {
             phase = Phase.OPENING_TEMPLATE;
-            send(client, "litematica_container_filler.message.tool_sync_template_started");
+            if (!continuous) send(client, "litematica_container_filler.message.tool_sync_template_started");
         } else {
             phase = Phase.OPENING_TARGET;
-            send(client, "litematica_container_filler.message.tool_sync_started");
+            if (!continuous) send(client, "litematica_container_filler.message.tool_sync_started");
         }
     }
 
     public void tick(MinecraftClient client) {
         if (client.player == null || client.world == null) {
             reset(client, false, false);
+            resetContinuousTriggerState();
             return;
         }
 
         if (!Configs.ENABLE_MOD.getBooleanValue()) {
             reset(client, true, true);
+            resetContinuousTriggerState();
             return;
+        }
+
+        tickContinuousToolTrigger(client);
+        if (continuousSameTargetCooldownTicks > 0) {
+            continuousSameTargetCooldownTicks--;
         }
 
         if (phase == Phase.IDLE) {
             ClickPacketRateLimiter.setOperationActive(AutoFillerStateMachine.getInstance().isWorking());
+            if (!ClickPacketRateLimiter.hasPendingPackets()) {
+                tryStartContinuousTool(client);
+            }
             return;
         }
         ClickPacketRateLimiter.setOperationActive(true);
@@ -376,7 +404,7 @@ public class ContainerToolStateMachine {
         }
     }
 
-    private void startSingleTarget(MinecraftClient client, ContainerToolMode toolMode) {
+    private void startSingleTarget(MinecraftClient client, ContainerToolMode toolMode, boolean continuous) {
         if (client.player == null || client.world == null) return;
 
         if (!toolMode.isAvailable()) {
@@ -387,6 +415,7 @@ public class ContainerToolStateMachine {
         }
 
         if (isWorking()) {
+            continuousTriggerSuppressedUntilRelease = Configs.ENABLE_TOOL_HOLD_REPEAT.getBooleanValue();
             reset(client, true, false);
             send(client, "litematica_container_filler.message.tool_cancelled");
             return;
@@ -407,13 +436,67 @@ public class ContainerToolStateMachine {
         currentPos = looked.toImmutable();
         openedByTool = false;
         uiWaitTicks = 0;
+        currentOperationContinuous = continuous;
         phase = Phase.OPENING_TARGET;
-        send(client, switch (toolMode) {
-            case CLEAR -> "litematica_container_filler.message.tool_clear_started";
-            case FILL_FULL -> "litematica_container_filler.message.tool_fill_full_started";
-            case PACK -> "litematica_container_filler.message.tool_pack_started";
-            case COPY -> "litematica_container_filler.message.tool_sync_started";
-        });
+        if (!continuous) {
+            send(client, switch (toolMode) {
+                case CLEAR -> "litematica_container_filler.message.tool_clear_started";
+                case FILL_FULL -> "litematica_container_filler.message.tool_fill_full_started";
+                case PACK -> "litematica_container_filler.message.tool_pack_started";
+                case COPY -> "litematica_container_filler.message.tool_sync_started";
+            });
+        }
+    }
+
+    private void tickContinuousToolTrigger(MinecraftClient client) {
+        if (!Configs.ENABLE_TOOL_HOLD_REPEAT.getBooleanValue()) {
+            resetContinuousTriggerState();
+            return;
+        }
+
+        boolean held = Hotkeys.TOOL_TRIGGER.getKeybind().isKeybindHeld();
+        if (!held) {
+            resetContinuousTriggerState();
+            return;
+        }
+
+        if (!triggerKeyHeldLastTick) {
+            triggerKeyHeldTicks = 1;
+            continuousTriggerReady = false;
+        } else if (triggerKeyHeldTicks < Integer.MAX_VALUE) {
+            triggerKeyHeldTicks++;
+        }
+
+        if (triggerKeyHeldTicks >= CONTINUOUS_TRIGGER_HOLD_THRESHOLD_TICKS && !continuousTriggerSuppressedUntilRelease) {
+            continuousTriggerReady = true;
+        }
+        triggerKeyHeldLastTick = true;
+    }
+
+    private void resetContinuousTriggerState() {
+        triggerKeyHeldLastTick = false;
+        triggerKeyHeldTicks = 0;
+        continuousTriggerReady = false;
+        continuousTriggerSuppressedUntilRelease = false;
+    }
+
+    private void tryStartContinuousTool(MinecraftClient client) {
+        if (!continuousTriggerReady || continuousTriggerSuppressedUntilRelease || !isToolEnabled()) return;
+
+        ContainerToolMode toolMode = getActiveMode();
+        if (toolMode == ContainerToolMode.PACK || !toolMode.isAvailable()) return;
+
+        BlockPos looked = getLookedContainerPos(client);
+        if (looked == null) return;
+        if (continuousSameTargetCooldownTicks > 0 && toolMode == continuousLastMode && looked.equals(continuousLastTarget)) {
+            return;
+        }
+
+        if (toolMode == ContainerToolMode.COPY) {
+            triggerSync(client, true);
+        } else {
+            startSingleTarget(client, toolMode, true);
+        }
     }
 
     private BlockPos getLookedContainerPos(MinecraftClient client) {
@@ -1312,12 +1395,16 @@ public class ContainerToolStateMachine {
     }
 
     private void finish(MinecraftClient client) {
-        send(client, "litematica_container_filler.message.tool_done");
+        if (!currentOperationContinuous) {
+            send(client, "litematica_container_filler.message.tool_done");
+        }
         reset(client, false, true);
     }
 
     private void fail(MinecraftClient client, String messageKey) {
-        send(client, messageKey);
+        if (!currentOperationContinuous) {
+            send(client, messageKey);
+        }
         reset(client, true, true);
     }
 
@@ -1332,6 +1419,7 @@ public class ContainerToolStateMachine {
             client.player.closeHandledScreen();
         }
 
+        scheduleContinuousCooldown();
         phase = Phase.IDLE;
         mode = null;
         currentPos = null;
@@ -1350,6 +1438,7 @@ public class ContainerToolStateMachine {
         syncTakeItOutWaitTicks = 0;
         syncPendingTakeItOutRequest = null;
         syncTakeItOutBlocked = false;
+        currentOperationContinuous = false;
         ClickPacketRateLimiter.setOperationActive(AutoFillerStateMachine.getInstance().isWorking());
         if (!keepTemplate) {
             syncTemplate.clear();
@@ -1358,13 +1447,23 @@ public class ContainerToolStateMachine {
         }
     }
 
+    private void scheduleContinuousCooldown() {
+        if (currentOperationContinuous && currentPos != null && mode != null) {
+            continuousLastTarget = currentPos.toImmutable();
+            continuousLastMode = mode;
+            continuousSameTargetCooldownTicks = Math.max(0, Configs.TOOL_REPEAT_SAME_CONTAINER_COOLDOWN.getIntegerValue());
+        }
+    }
+
     private void send(MinecraftClient client, String key) {
+        if (currentOperationContinuous) return;
         if (client != null && client.player != null) {
             client.player.sendMessage(Text.translatable(key), true);
         }
     }
 
     private void send(MinecraftClient client, String key, Object... args) {
+        if (currentOperationContinuous) return;
         if (client != null && client.player != null) {
             client.player.sendMessage(Text.translatable(key, args), true);
         }
