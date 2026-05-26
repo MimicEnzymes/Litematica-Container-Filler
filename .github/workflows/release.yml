@@ -181,11 +181,14 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew build --stacktrace
 
+      - name: Remove sources jar from release artifacts
+        run: find build/libs -type f -name '*-sources.jar' -delete
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.branch }}-build
-          path: build/libs/
+          path: build/libs/*.jar
           if-no-files-found: warn
 
   release:
@@ -217,7 +220,7 @@ jobs:
           github-name: ${{ github.event.inputs.releaseTag }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           github-generate-changelog: true
-          files: all-jars/*.jar
+          files: all-jars/!(*-sources).jar
 
   publish_modrinth:
     needs: [matrix_prepare, build]
