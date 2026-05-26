@@ -155,47 +155,90 @@ public class HighlightRenderer {
 
     private ChunkRenderCache buildChunkCache(Map<BlockPos, HighlightState> highlights, boolean xray, Vec3d cameraPos) {
         RenderContext fillCtx = null;
+        RenderContext lineCtx = null;
         BuiltBuffer fillMeshData = null;
+        BuiltBuffer lineMeshData = null;
 
         try {
-            fillCtx = new RenderContext(
-                    () -> "litematica_filler_glass",
-                    xray ? MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL : MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_LEQUAL_DEPTH_OFFSET_2
-            );
+            if (Configs.RENDER_STATE_GLASS.getBooleanValue() || Configs.RENDER_STATE_TOP_PLATE.getBooleanValue()) {
+                fillCtx = new RenderContext(
+                        () -> "litematica_filler_glass",
+                        xray ? MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL : MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_LEQUAL_DEPTH_OFFSET_2
+                );
 
-            var fillBuffer = fillCtx.getBuilder();
-            if (fillBuffer == null) return null;
+                var fillBuffer = fillCtx.getBuilder();
+                if (fillBuffer == null) {
+                    closeContext(fillCtx);
+                    fillCtx = null;
+                } else {
+                    for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
+                        Color4f c = getColor(entry.getValue());
+                        float alphaMultiplier = (float) Configs.HIGHLIGHT_GLASS_ALPHA_MULTIPLIER.getDoubleValue();
+                        Color4f glass = new Color4f(c.r, c.g, c.b, Math.min(0.24f, Math.max(0.04f, c.a * alphaMultiplier)));
+                        Color4f crown = new Color4f(c.r, c.g, c.b, Math.min(0.34f, Math.max(0.12f, c.a * 0.36f)));
+                        HighlightBox box = getHighlightBox(entry.getKey());
 
-            for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
-                Color4f c = getColor(entry.getValue());
-                float alphaMultiplier = (float) Configs.HIGHLIGHT_GLASS_ALPHA_MULTIPLIER.getDoubleValue();
-                Color4f glass = new Color4f(c.r, c.g, c.b, Math.min(0.24f, Math.max(0.04f, c.a * alphaMultiplier)));
-                Color4f crown = new Color4f(c.r, c.g, c.b, Math.min(0.34f, Math.max(0.12f, c.a * 0.36f)));
-                HighlightBox box = getHighlightBox(entry.getKey());
+                        if (Configs.RENDER_STATE_GLASS.getBooleanValue()) {
+                            drawInflatedWorldBox(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(), 0.012f, glass, cameraPos, fillBuffer);
+                        }
+                        if (Configs.RENDER_STATE_TOP_PLATE.getBooleanValue()) {
+                            float inset = Math.max(0.02f, (1.0f - (float) Configs.HIGHLIGHT_TOP_PLATE_SIZE.getDoubleValue()) * 0.5f);
+                            drawWorldBox(
+                                    box.minX() + inset, box.maxY() + 0.035f, box.minZ() + inset,
+                                    box.maxX() - inset, box.maxY() + 0.095f, box.maxZ() - inset,
+                                    crown, cameraPos, fillBuffer
+                            );
+                        }
+                    }
 
-                if (Configs.RENDER_STATE_GLASS.getBooleanValue()) {
-                    drawInflatedWorldBox(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(), 0.012f, glass, cameraPos, fillBuffer);
-                }
-                if (Configs.RENDER_STATE_TOP_PLATE.getBooleanValue()) {
-                    float inset = Math.max(0.02f, (1.0f - (float) Configs.HIGHLIGHT_TOP_PLATE_SIZE.getDoubleValue()) * 0.5f);
-                    drawWorldBox(
-                            box.minX() + inset, box.maxY() + 0.035f, box.minZ() + inset,
-                            box.maxX() - inset, box.maxY() + 0.095f, box.maxZ() - inset,
-                            crown, cameraPos, fillBuffer
-                    );
+                    fillMeshData = fillBuffer.endNullable();
+                    if (fillMeshData != null) {
+                        fillCtx.upload(fillMeshData, false);
+                    } else {
+                        closeContext(fillCtx);
+                        fillCtx = null;
+                    }
                 }
             }
 
-            fillMeshData = fillBuffer.endNullable();
-            if (fillMeshData == null) return null;
+            if (Configs.RENDER_STATE_GLASS.getBooleanValue() || Configs.RENDER_STATE_TOP_PLATE.getBooleanValue()) {
+                lineCtx = new RenderContext(
+                        () -> "litematica_filler_edges",
+                        xray ? MaLiLibPipelines.DEBUG_LINES_TRANSLUCENT_NO_DEPTH_NO_CULL : MaLiLibPipelines.DEBUG_LINES_TRANSLUCENT_OFFSET_2
+                );
+                lineCtx.lineWidth(getHighlightLineWidth());
 
-            fillCtx.upload(fillMeshData, false);
-            ChunkRenderCache cache = new ChunkRenderCache(null, fillCtx, cameraPos.x, cameraPos.y, cameraPos.z);
+                var lineBuffer = lineCtx.getBuilder();
+                if (lineBuffer == null) {
+                    closeContext(lineCtx);
+                    lineCtx = null;
+                } else {
+                    for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
+                        Color4f color = getOutlineColor(getColor(entry.getValue()));
+                        drawOutlineBox(getHighlightBox(entry.getKey()), color, cameraPos, lineBuffer);
+                    }
+
+                    lineMeshData = lineBuffer.endNullable();
+                    if (lineMeshData != null) {
+                        lineCtx.upload(lineMeshData, false);
+                    } else {
+                        closeContext(lineCtx);
+                        lineCtx = null;
+                    }
+                }
+            }
+
+            if (fillCtx == null && lineCtx == null) return null;
+
+            ChunkRenderCache cache = new ChunkRenderCache(lineCtx, fillCtx, cameraPos.x, cameraPos.y, cameraPos.z);
             fillCtx = null;
+            lineCtx = null;
             return cache;
         } finally {
             if (fillMeshData != null) fillMeshData.close();
+            if (lineMeshData != null) lineMeshData.close();
             closeContext(fillCtx);
+            closeContext(lineCtx);
         }
     }
 
@@ -308,6 +351,30 @@ public class HighlightRenderer {
             if (meshData != null) meshData.close();
             closeContext(ctx);
         }
+    }
+
+    private Color4f getOutlineColor(Color4f base) {
+        return new Color4f(base.r, base.g, base.b, Math.min(0.62f, Math.max(0.24f, base.a * 0.55f)));
+    }
+
+    private float getHighlightLineWidth() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        int width = client == null ? 1920 : client.getWindow().getFramebufferWidth();
+        return Math.max(1.2F, width / 1920.0F * 1.45F);
+    }
+
+    private void drawOutlineBox(HighlightBox box, Color4f color, Vec3d cameraPos, net.minecraft.client.render.BufferBuilder buffer) {
+        float inflate = 0.018f;
+        RenderUtils.drawBoxAllEdgesBatchedLines(
+                (float)(box.minX() - cameraPos.x - inflate),
+                (float)(box.minY() - cameraPos.y - inflate),
+                (float)(box.minZ() - cameraPos.z - inflate),
+                (float)(box.maxX() - cameraPos.x + inflate),
+                (float)(box.maxY() - cameraPos.y + inflate),
+                (float)(box.maxZ() - cameraPos.z + inflate),
+                color,
+                buffer
+        );
     }
 
     private void drawFillingArrow(HighlightBox box, Vec3d cameraPos, double time, net.minecraft.client.render.BufferBuilder buffer) {

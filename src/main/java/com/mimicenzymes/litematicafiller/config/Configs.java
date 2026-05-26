@@ -75,6 +75,7 @@ public class Configs implements IConfigHandler {
     public static final ConfigOptionList CONTAINER_CLEAR_OUTPUT_MODE = new ConfigOptionList("litematica_container_filler.config.name.containerClearOutputMode", ContainerClearOutputMode.DROP, "litematica_container_filler.config.comment.containerClearOutputMode");
     public static final ConfigBoolean HIDE_TOOL_GUI                 = new ConfigBoolean("litematica_container_filler.config.name.hideToolGui", true, "litematica_container_filler.config.comment.hideToolGui");
     public static final ConfigBooleanHotkeyed ENABLE_TOOL_HUD       = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.enableToolHud", false, "", "litematica_container_filler.config.comment.enableToolHud");
+    public static final ConfigBoolean TOOL_HUD_BORDER               = new ConfigBoolean("litematica_container_filler.config.name.toolHudBorder", true, "litematica_container_filler.config.comment.toolHudBorder");
     public static final ConfigOptionList TOOL_HUD_STYLE             = new ConfigOptionList("litematica_container_filler.config.name.toolHudStyle", ToolHudStyle.FIXED_CARD, "litematica_container_filler.config.comment.toolHudStyle");
     public static final ConfigDouble TOOL_HUD_OPACITY               = new ConfigDouble("litematica_container_filler.config.name.toolHudOpacity", 0.52D, 0.1D, 1.0D, "litematica_container_filler.config.comment.toolHudOpacity");
     public static final ConfigDouble TOOL_HUD_SMOOTHING             = new ConfigDouble("litematica_container_filler.config.name.toolHudSmoothing", 0.22D, 0.05D, 0.8D, "litematica_container_filler.config.comment.toolHudSmoothing");
@@ -183,6 +184,7 @@ public class Configs implements IConfigHandler {
                 CONTAINER_CLEAR_OUTPUT_MODE,
                 HIDE_TOOL_GUI,
                 ENABLE_TOOL_HUD,
+                TOOL_HUD_BORDER,
                 TOOL_HUD_STYLE,
                 TOOL_HUD_OPACITY,
                 TOOL_HUD_SMOOTHING,

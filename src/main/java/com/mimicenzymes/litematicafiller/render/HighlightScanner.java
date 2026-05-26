@@ -28,6 +28,9 @@ public class HighlightScanner {
     private static final int BOOSTED_UPDATE_INTERVAL_TICKS = 2;
     private static final int BOOST_DURATION_TICKS = 60;
     private static final int MAX_DATA_REQUESTS_PER_TICK = 128;
+    private static final int FALLBACK_WORLD_SCAN_RADIUS = 16;
+    private static final int FALLBACK_WORLD_SCAN_SECTION_SIZE = 8;
+    private static final long FALLBACK_WORLD_SCAN_CACHE_MS = 1500L;
     private static final long UNKNOWN_REQUEST_INTERVAL_MS = 100L;
     private static final long ACTIVE_REQUEST_INTERVAL_MS = 750L;
     private static final long SATISFIED_REQUEST_INTERVAL_MS = 4000L;
@@ -48,6 +51,7 @@ public class HighlightScanner {
     });
     private static volatile Set<BlockPos> SCHEMATIC_CONTAINERS = Collections.emptySet();
     private static volatile Map<BucketKey, Set<BlockPos>> SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
+    private static volatile FallbackScanCache fallbackScanCache = FallbackScanCache.empty();
     private static volatile long lastIndexTime = 0;
     private static volatile boolean isIndexing = false;
 
@@ -71,7 +75,9 @@ public class HighlightScanner {
 
         Map<BucketKey, Set<BlockPos>> buckets = SCHEMATIC_CONTAINER_BUCKETS;
         if (radius <= 0 || buckets.isEmpty()) {
-            return collectSnapshot(SCHEMATIC_CONTAINERS, cursor, limit);
+            Collection<BlockPos> indexed = SCHEMATIC_CONTAINERS;
+            if (!indexed.isEmpty()) return collectSnapshot(indexed, cursor, limit);
+            return collectSnapshot(getFallbackSchematicWorldContainers(center, radius), cursor, limit);
         }
 
         int minX = (center.getX() - radius) >> 4;
@@ -94,7 +100,9 @@ public class HighlightScanner {
             }
         }
 
-        if (totalCount == 0) return new ContainerSnapshot(Collections.emptyList(), 0, 0);
+        if (totalCount == 0) {
+            return collectSnapshot(getFallbackSchematicWorldContainers(center, radius), cursor, limit);
+        }
 
         int start = Math.floorMod(cursor, totalCount);
         int targetCount = Math.min(limit, totalCount);
@@ -169,6 +177,7 @@ public class HighlightScanner {
         QUEUED_DATA_REQUESTS.clear();
         SCHEMATIC_CONTAINERS = Collections.emptySet();
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
+        clearFallbackScanCache();
         lastIndexTime = 0;
         boostedTicks = 0;
     }
@@ -184,6 +193,7 @@ public class HighlightScanner {
         QUEUED_DATA_REQUESTS.clear();
         triggerBoost(BOOST_DURATION_TICKS);
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
+        clearFallbackScanCache();
     }
 
     private static Map<Integer, ItemStack> getCachedSchematicReq(BlockPos pos, MinecraftClient client) {
@@ -227,6 +237,7 @@ public class HighlightScanner {
             if (!HIGHLIGHT_REQUEST_TIME.isEmpty()) HIGHLIGHT_REQUEST_TIME.clear();
             if (!SCHEMATIC_CONTAINERS.isEmpty()) SCHEMATIC_CONTAINERS = Collections.emptySet();
             if (!SCHEMATIC_CONTAINER_BUCKETS.isEmpty()) SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
+            clearFallbackScanCache();
             return;
         }
 
@@ -456,7 +467,11 @@ public class HighlightScanner {
 
     private static Collection<BlockPos> getNearbySchematicContainers(BlockPos center, int radius) {
         Map<BucketKey, Set<BlockPos>> buckets = SCHEMATIC_CONTAINER_BUCKETS;
-        if (radius <= 0 || buckets.isEmpty()) return SCHEMATIC_CONTAINERS;
+        if (radius <= 0 || buckets.isEmpty()) {
+            Collection<BlockPos> indexed = SCHEMATIC_CONTAINERS;
+            if (!indexed.isEmpty()) return indexed;
+            return getFallbackSchematicWorldContainers(center, radius);
+        }
 
         int minX = (center.getX() - radius) >> 4;
         int maxX = (center.getX() + radius) >> 4;
@@ -473,6 +488,49 @@ public class HighlightScanner {
                     if (bucket != null) {
                         nearby.addAll(bucket);
                     }
+                }
+            }
+        }
+
+        return nearby;
+    }
+
+    private static Collection<BlockPos> getFallbackSchematicWorldContainers(BlockPos center, int radius) {
+        if (!shouldUseFallbackWorldScan()) return Collections.emptyList();
+
+        int scanRadius = radius <= 0 ? FALLBACK_WORLD_SCAN_RADIUS : Math.min(radius, FALLBACK_WORLD_SCAN_RADIUS);
+        FallbackScanKey key = FallbackScanKey.from(center, scanRadius);
+        long now = System.currentTimeMillis();
+        FallbackScanCache cached = fallbackScanCache;
+        if (cached.matches(key, now)) return cached.positions();
+
+        List<BlockPos> positions = scanNearbySchematicWorldContainers(center, scanRadius);
+        fallbackScanCache = new FallbackScanCache(key, now, positions);
+        return positions;
+    }
+
+    private static boolean shouldUseFallbackWorldScan() {
+        return !isIndexing && lastIndexTime > 0 && SCHEMATIC_CONTAINERS.isEmpty();
+    }
+
+    private static void clearFallbackScanCache() {
+        fallbackScanCache = FallbackScanCache.empty();
+    }
+
+    private static List<BlockPos> scanNearbySchematicWorldContainers(BlockPos center, int scanRadius) {
+        var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
+        if (schematicWorld == null) return Collections.emptyList();
+
+        List<BlockPos> nearby = new ArrayList<>();
+
+        for (int x = center.getX() - scanRadius; x <= center.getX() + scanRadius; x++) {
+            for (int y = center.getY() - scanRadius; y <= center.getY() + scanRadius; y++) {
+                for (int z = center.getZ() - scanRadius; z <= center.getZ() + scanRadius; z++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = schematicWorld.getBlockState(pos);
+                    if (state == null || state.isAir() || !state.hasBlockEntity()) continue;
+                    if (!ContainerBlockFilter.isAllowedForSchematicFill(state, schematicWorld, pos)) continue;
+                    nearby.add(pos);
                 }
             }
         }
@@ -659,6 +717,27 @@ public class HighlightScanner {
     private record BucketKey(int x, int y, int z) {
         static BucketKey from(BlockPos pos) {
             return new BucketKey(pos.getX() >> 4, pos.getY() >> 4, pos.getZ() >> 4);
+        }
+    }
+
+    private record FallbackScanKey(int x, int y, int z, int radius) {
+        static FallbackScanKey from(BlockPos center, int radius) {
+            return new FallbackScanKey(
+                    Math.floorDiv(center.getX(), FALLBACK_WORLD_SCAN_SECTION_SIZE),
+                    Math.floorDiv(center.getY(), FALLBACK_WORLD_SCAN_SECTION_SIZE),
+                    Math.floorDiv(center.getZ(), FALLBACK_WORLD_SCAN_SECTION_SIZE),
+                    radius
+            );
+        }
+    }
+
+    private record FallbackScanCache(FallbackScanKey key, long timeMs, List<BlockPos> positions) {
+        static FallbackScanCache empty() {
+            return new FallbackScanCache(null, 0L, Collections.emptyList());
+        }
+
+        boolean matches(FallbackScanKey queryKey, long now) {
+            return key != null && key.equals(queryKey) && now - timeMs <= FALLBACK_WORLD_SCAN_CACHE_MS;
         }
     }
 }
