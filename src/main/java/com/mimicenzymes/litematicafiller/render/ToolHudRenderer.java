@@ -384,8 +384,10 @@ public class ToolHudRenderer {
         int textX = x + pad + Math.round(36.0f * scale);
 
         drawRoundedInfoCard(context, x + 2, y + 3, width, height, withAlpha(0xFF000000, shadowAlpha));
-        drawRoundedInfoCard(context, x, y, width, height, withAlpha(FIXED_PANEL_EDGE, borderAlpha));
-        drawRoundedInfoCard(context, x + 2, y + 2, width - 4, height - 4, withAlpha(FIXED_PANEL_INNER, panelAlpha));
+        drawRoundedInfoCard(context, x, y, width, height, withAlpha(FIXED_PANEL_INNER, panelAlpha));
+        if (Configs.TOOL_HUD_BORDER.getBooleanValue()) {
+            drawRoundedInfoCardOutline(context, x, y, width, height, withAlpha(FIXED_PANEL_EDGE, borderAlpha));
+        }
         context.fill(x + 5, y + 5, x + width - 5, y + headerHeight + 5, withAlpha(FIXED_PANEL_HEADER, Math.round(alpha * 0.46f)));
         drawScaledText(context, client, StringUtils.translate("litematica_container_filler.hud.fixed.title"),
                 x + pad, y + 8, scale, withAlpha(TEXT, alpha));
@@ -528,6 +530,49 @@ public class ToolHudRenderer {
         context.fill(x + 4, y, x + width - 4, y + height, color);
         context.fill(x, y + 4, x + width, y + height - 4, color);
         context.fill(x + 2, y + 2, x + width - 2, y + height - 2, color);
+    }
+
+    private static void drawRoundedInfoCardOutline(DrawContext context, int x, int y, int width, int height, int color) {
+        if (width <= 2 || height <= 2) {
+            return;
+        }
+
+        for (int row = 0; row < height; row++) {
+            int outerInset = Math.min(infoCardInset(row, height), Math.max(0, (width - 1) / 2));
+            int outerLeft = x + outerInset;
+            int outerRight = x + width - outerInset;
+            if (outerLeft >= outerRight) {
+                continue;
+            }
+
+            if (row == 0 || row == height - 1) {
+                context.fill(outerLeft, y + row, outerRight, y + row + 1, color);
+                continue;
+            }
+
+            int innerWidth = width - 2;
+            int innerHeight = height - 2;
+            int innerInset = Math.min(infoCardInset(row - 1, innerHeight), Math.max(0, (innerWidth - 1) / 2));
+            int innerLeft = x + 1 + innerInset;
+            int innerRight = x + width - 1 - innerInset;
+            if (outerLeft < innerLeft) {
+                context.fill(outerLeft, y + row, Math.min(innerLeft, outerRight), y + row + 1, color);
+            }
+            if (innerRight < outerRight) {
+                context.fill(Math.max(innerRight, outerLeft), y + row, outerRight, y + row + 1, color);
+            }
+        }
+    }
+
+    private static int infoCardInset(int row, int height) {
+        int edgeDistance = Math.min(row, height - row - 1);
+        if (edgeDistance <= 1) {
+            return 4;
+        }
+        if (edgeDistance <= 3) {
+            return 2;
+        }
+        return 0;
     }
 
     private static void drawLine(DrawContext context, int x1, int y1, int x2, int y2, int color) {
