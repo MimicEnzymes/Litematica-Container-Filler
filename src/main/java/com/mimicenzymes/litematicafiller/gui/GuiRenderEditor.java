@@ -132,6 +132,7 @@ public class GuiRenderEditor extends GuiBase {
             }
             case HUD -> {
                 controls.add(booleanControl(Configs.ENABLE_TOOL_HUD));
+                controls.add(booleanControl(Configs.TOOL_HUD_BORDER));
                 controls.add(optionControl(Configs.TOOL_HUD_STYLE));
                 controls.add(doubleStepperControl(Configs.TOOL_HUD_OPACITY, 0.05D));
                 controls.add(doubleStepperControl(Configs.TOOL_HUD_SMOOTHING, 0.05D));
@@ -199,14 +200,14 @@ public class GuiRenderEditor extends GuiBase {
 
     private ControlSpec resetHudPositionControl() {
         return new ControlSpec(rect -> {
-            ButtonGeneric button = new ButtonGeneric(rect.x, rect.y, rect.width, 20, tr("litematica_container_filler.gui.button.reset_hud_position"));
+            ButtonGeneric button = new ButtonGeneric(rect.x, rect.y, rect.width, 20, "");
             button.setHoverStrings(tr("litematica_container_filler.gui.label.hud_position_hint"));
             this.addButton(button, (clickedButton, mouseButton) -> resetHudPosition());
         }, () -> tr("litematica_container_filler.gui.button.reset_hud_position"), () -> "litematica_container_filler.gui.label.hud_position_hint", ControlKind.BUTTON, null);
     }
 
     private int addBooleanButton(int x, int y, int width, ConfigBoolean config) {
-        ButtonGeneric button = new ButtonGeneric(x, y, width, 20, booleanLabel(config));
+        ButtonGeneric button = new ButtonGeneric(x, y, width, 20, "");
         button.setHoverStrings(tr(config.getComment()));
         this.addButton(button, (clickedButton, mouseButton) -> {
             config.setBooleanValue(!config.getBooleanValue());
@@ -217,7 +218,7 @@ public class GuiRenderEditor extends GuiBase {
     }
 
     private int addOptionButton(int x, int y, int width, ConfigOptionList config) {
-        ButtonGeneric button = new ButtonGeneric(x, y, width, 20, optionLabel(config));
+        ButtonGeneric button = new ButtonGeneric(x, y, width, 20, "");
         button.setHoverStrings(tr(config.getComment()));
         this.addButton(button, (clickedButton, mouseButton) -> {
             config.setOptionListValue(config.getOptionListValue().cycle(mouseButton == 0));
@@ -230,20 +231,20 @@ public class GuiRenderEditor extends GuiBase {
     private int addStepper(int x, int y, int width, ConfigInteger config, int step) {
         int resetW = Math.min(54, Math.max(44, width / 4));
         int valueW = Math.max(70, width - resetW - 86);
-        this.addButton(new ButtonGeneric(x, y, 24, 20, "-"), (button, mouseButton) -> {
+        this.addButton(new ButtonGeneric(x, y, 24, 20, ""), (button, mouseButton) -> {
             config.setIntegerValue(config.getIntegerValue() - step);
             Configs.saveToFile();
             this.initGui();
         });
-        ButtonGeneric value = new ButtonGeneric(x + 28, y, valueW, 20, integerLabel(config));
+        ButtonGeneric value = new ButtonGeneric(x + 28, y, valueW, 20, "");
         value.setHoverStrings(tr(config.getComment()));
         this.addButton(value, (button, mouseButton) -> {});
-        this.addButton(new ButtonGeneric(x + 32 + valueW, y, 24, 20, "+"), (button, mouseButton) -> {
+        this.addButton(new ButtonGeneric(x + 32 + valueW, y, 24, 20, ""), (button, mouseButton) -> {
             config.setIntegerValue(config.getIntegerValue() + step);
             Configs.saveToFile();
             this.initGui();
         });
-        this.addButton(new ButtonGeneric(x + width - resetW, y, resetW, 20, tr("litematica_container_filler.gui.button.reset")), (button, mouseButton) -> {
+        this.addButton(new ButtonGeneric(x + width - resetW, y, resetW, 20, ""), (button, mouseButton) -> {
             config.resetToDefault();
             Configs.saveToFile();
             this.initGui();
@@ -254,20 +255,20 @@ public class GuiRenderEditor extends GuiBase {
     private int addStepper(int x, int y, int width, ConfigDouble config, double step) {
         int resetW = Math.min(54, Math.max(44, width / 4));
         int valueW = Math.max(70, width - resetW - 86);
-        this.addButton(new ButtonGeneric(x, y, 24, 20, "-"), (button, mouseButton) -> {
+        this.addButton(new ButtonGeneric(x, y, 24, 20, ""), (button, mouseButton) -> {
             config.setDoubleValue(config.getDoubleValue() - step);
             Configs.saveToFile();
             this.initGui();
         });
-        ButtonGeneric value = new ButtonGeneric(x + 28, y, valueW, 20, doubleLabel(config));
+        ButtonGeneric value = new ButtonGeneric(x + 28, y, valueW, 20, "");
         value.setHoverStrings(tr(config.getComment()));
         this.addButton(value, (button, mouseButton) -> {});
-        this.addButton(new ButtonGeneric(x + 32 + valueW, y, 24, 20, "+"), (button, mouseButton) -> {
+        this.addButton(new ButtonGeneric(x + 32 + valueW, y, 24, 20, ""), (button, mouseButton) -> {
             config.setDoubleValue(config.getDoubleValue() + step);
             Configs.saveToFile();
             this.initGui();
         });
-        this.addButton(new ButtonGeneric(x + width - resetW, y, resetW, 20, tr("litematica_container_filler.gui.button.reset")), (button, mouseButton) -> {
+        this.addButton(new ButtonGeneric(x + width - resetW, y, resetW, 20, ""), (button, mouseButton) -> {
             config.resetToDefault();
             Configs.saveToFile();
             this.initGui();
@@ -284,7 +285,7 @@ public class GuiRenderEditor extends GuiBase {
         field.setBordered(false);
         field.setHoverTooltip(tr(config.getComment()));
         this.colorInputs.add(new ColorInputBinding(config, field));
-        this.addButton(new ButtonGeneric(layout.resetX, y, layout.resetW, 20, tr("litematica_container_filler.gui.button.reset")), (button, mouseButton) -> {
+        this.addButton(new ButtonGeneric(layout.resetX, y, layout.resetW, 20, ""), (button, mouseButton) -> {
             config.resetToDefault();
             Configs.saveToFile();
             this.initGui();
@@ -877,8 +878,10 @@ public class GuiRenderEditor extends GuiBase {
 
     private void drawHudCard(GuiContext context, int panelX, int panelY, int panelW, int panelH, int alpha) {
         drawSoftRect(context, panelX + 2, panelY + 3, panelW, panelH, withAlpha(0xFF000000, (int)(alpha * 0.32D)));
-        drawSoftRect(context, panelX, panelY, panelW, panelH, withAlpha(0xFF2E3642, (int)(alpha * 0.88D)));
-        drawSoftRect(context, panelX + 1, panelY + 1, panelW - 2, panelH - 2, withAlpha(0xFF10151C, (int)(alpha * 0.92D)));
+        drawRoundedPreviewCard(context, panelX, panelY, panelW, panelH, withAlpha(0xFF050708, (int)(alpha * 0.92D)));
+        if (Configs.TOOL_HUD_BORDER.getBooleanValue()) {
+            drawRoundedPreviewCardOutline(context, panelX, panelY, panelW, panelH, withAlpha(0xFFE6F2E8, (int)(alpha * 0.88D)));
+        }
         float scale = Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f;
         float iconScale = scale * clampFloat(Configs.TOOL_HUD_ICON_SCALE.getIntegerValue() / 100.0f, 0.5f, 1.5f);
         int headerH = Math.max(15, Math.min(20, panelH / 4));
@@ -895,6 +898,55 @@ public class GuiRenderEditor extends GuiBase {
         drawScaledString(context, fit(mode.getDisplayName(), Math.max(8, panelW / 8)), textX, labelY, scale, withAlpha(MUTED, alpha));
         drawScaledString(context, fit(tr("litematica_container_filler.hud.tool_action", "V"), Math.max(8, panelW / 8)), textX, labelY + Math.round(12.0f * scale), scale, withAlpha(0xFF55FF68, alpha));
         drawScaledString(context, fit(tr("litematica_container_filler.hud.tool_switch_close", "G", "H"), Math.max(8, panelW / 7)), textX, labelY + Math.round(24.0f * scale), scale, withAlpha(MUTED, (int)(alpha * 0.78D)));
+    }
+
+    private void drawRoundedPreviewCard(GuiContext context, int x, int y, int width, int height, int color) {
+        context.fill(x + 4, y, x + width - 4, y + height, color);
+        context.fill(x, y + 4, x + width, y + height - 4, color);
+        context.fill(x + 2, y + 2, x + width - 2, y + height - 2, color);
+    }
+
+    private void drawRoundedPreviewCardOutline(GuiContext context, int x, int y, int width, int height, int color) {
+        if (width <= 2 || height <= 2) {
+            return;
+        }
+
+        for (int row = 0; row < height; row++) {
+            int outerInset = Math.min(previewCardInset(row, height), Math.max(0, (width - 1) / 2));
+            int outerLeft = x + outerInset;
+            int outerRight = x + width - outerInset;
+            if (outerLeft >= outerRight) {
+                continue;
+            }
+
+            if (row == 0 || row == height - 1) {
+                context.fill(outerLeft, y + row, outerRight, y + row + 1, color);
+                continue;
+            }
+
+            int innerWidth = width - 2;
+            int innerHeight = height - 2;
+            int innerInset = Math.min(previewCardInset(row - 1, innerHeight), Math.max(0, (innerWidth - 1) / 2));
+            int innerLeft = x + 1 + innerInset;
+            int innerRight = x + width - 1 - innerInset;
+            if (outerLeft < innerLeft) {
+                context.fill(outerLeft, y + row, Math.min(innerLeft, outerRight), y + row + 1, color);
+            }
+            if (innerRight < outerRight) {
+                context.fill(Math.max(innerRight, outerLeft), y + row, outerRight, y + row + 1, color);
+            }
+        }
+    }
+
+    private int previewCardInset(int row, int height) {
+        int edgeDistance = Math.min(row, height - row - 1);
+        if (edgeDistance <= 1) {
+            return 4;
+        }
+        if (edgeDistance <= 3) {
+            return 2;
+        }
+        return 0;
     }
 
     private void drawMiniHudToolIcon(GuiContext context, int cx, int cy, int alpha, float scale, ContainerToolMode mode) {
