@@ -15,6 +15,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
+import fi.dy.masa.malilib.util.LayerRange;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -49,6 +50,9 @@ public class HighlightScanner {
     private static volatile Map<BucketKey, Set<BlockPos>> SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
     private static volatile long lastIndexTime = 0;
     private static volatile boolean isIndexing = false;
+    private static long lastRenderLayerSignature = Long.MIN_VALUE;
+    private static boolean pendingRenderLayerRefresh = false;
+    private static long lastRenderLayerRefreshTick = Long.MIN_VALUE;
 
     private static int tickCounter = 0;
     private static int boostedTicks = 0;
@@ -206,6 +210,9 @@ public class HighlightScanner {
         SCHEMATIC_CONTAINERS = Collections.emptySet();
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
         lastIndexTime = 0;
+        lastRenderLayerSignature = Long.MIN_VALUE;
+        pendingRenderLayerRefresh = false;
+        lastRenderLayerRefreshTick = Long.MIN_VALUE;
         boostedTicks = 0;
     }
 
@@ -222,6 +229,9 @@ public class HighlightScanner {
         ManualContainerOverrideManager.clearForCurrentContext();
         triggerBoost(BOOST_DURATION_TICKS);
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
+        lastRenderLayerSignature = Long.MIN_VALUE;
+        pendingRenderLayerRefresh = false;
+        lastRenderLayerRefreshTick = Long.MIN_VALUE;
     }
 
     private static Map<Integer, ItemStack> getCachedSchematicReq(BlockPos pos, MinecraftClient client) {
@@ -281,17 +291,30 @@ public class HighlightScanner {
 
         startIndexingIfIdle(now);
 
+        boolean syncLayer = Configs.SYNC_LITE_LAYER.getBooleanValue();
+        boolean layerChanged = updateRenderLayerSignature(syncLayer);
+        if (layerChanged) {
+            pendingRenderLayerRefresh = true;
+            triggerBoost(BOOST_DURATION_TICKS);
+        }
+
         boolean fillWorkEnabled = Configs.WORKING_STATE.getBooleanValue();
         int updateInterval = boostedTicks > 0
                 ? BOOSTED_UPDATE_INTERVAL_TICKS
                 : (modOperating || fillWorkEnabled ? NORMAL_UPDATE_INTERVAL_TICKS : IDLE_UPDATE_INTERVAL_TICKS);
-        if (tickCounter % updateInterval != 0) {
+        boolean layerRefreshDue = pendingRenderLayerRefresh &&
+                (lastRenderLayerRefreshTick == Long.MIN_VALUE ||
+                        tickCounter - lastRenderLayerRefreshTick >= BOOSTED_UPDATE_INTERVAL_TICKS);
+        if (!layerRefreshDue && tickCounter % updateInterval != 0) {
             if (boostedTicks > 0) boostedTicks--;
             return;
         }
+        if (pendingRenderLayerRefresh) {
+            pendingRenderLayerRefresh = false;
+            lastRenderLayerRefreshTick = tickCounter;
+        }
 
         boolean hideCompleted = Configs.HIDE_COMPLETED_CONTAINERS.getBooleanValue();
-        boolean syncLayer = Configs.SYNC_LITE_LAYER.getBooleanValue();
 
         int currentRadius = Configs.RENDER_RADIUS.getIntegerValue();
         double radiusSq = currentRadius * currentRadius;
@@ -442,6 +465,44 @@ public class HighlightScanner {
 
     private static void triggerBoost(int ticks) {
         boostedTicks = Math.max(boostedTicks, ticks);
+    }
+
+    private static boolean updateRenderLayerSignature(boolean syncLayer) {
+        long signature = syncLayer ? computeRenderLayerSignature() : Long.MIN_VALUE + 1L;
+        if (signature == lastRenderLayerSignature) {
+            return false;
+        }
+
+        boolean changed = lastRenderLayerSignature != Long.MIN_VALUE;
+        lastRenderLayerSignature = signature;
+        return changed;
+    }
+
+    private static long computeRenderLayerSignature() {
+        try {
+            LayerRange range = fi.dy.masa.litematica.data.DataManager.getRenderLayerRange();
+            if (range == null) return 0L;
+
+            long value = 0x6a09e667f3bcc909L;
+            value = mix64(value ^ range.getLayerMode().ordinal());
+            value = mix64(value ^ ((long) range.getAxis().ordinal() << 8));
+            value = mix64(value ^ ((long) range.getLayerSingle() << 16));
+            value = mix64(value ^ ((long) range.getLayerAbove() << 24));
+            value = mix64(value ^ ((long) range.getLayerBelow() << 32));
+            value = mix64(value ^ ((long) range.getLayerRangeMin() << 40));
+            value = mix64(value ^ ((long) range.getLayerRangeMax() << 48));
+            value = mix64(value ^ (range.getMoveLayerRangeMin() ? 0x100000001b3L : 0L));
+            value = mix64(value ^ (range.getMoveLayerRangeMax() ? 0x9e3779b97f4a7c15L : 0L));
+            return value;
+        } catch (Throwable ignored) {
+            return 0L;
+        }
+    }
+
+    private static long mix64(long value) {
+        value = (value ^ (value >>> 30)) * 0xbf58476d1ce4e5b9L;
+        value = (value ^ (value >>> 27)) * 0x94d049bb133111ebL;
+        return value ^ (value >>> 31);
     }
 
     private static synchronized void startIndexingIfIdle(long now) {
