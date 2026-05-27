@@ -134,6 +134,9 @@ public class LitematicaContainerReader {
 
     private static Map<Integer, ItemStack> getSingleContainerItems(net.minecraft.world.World schematicWorld, BlockPos pos, RegistryWrapper.WrapperLookup registries) {
         Map<Integer, ItemStack> items = new HashMap<>();
+        items.putAll(LitematicaPlacementContainerData.getItems(pos, registries));
+        if (!items.isEmpty()) return items;
+
         BlockEntity blockEntity = schematicWorld.getBlockEntity(pos);
         if (blockEntity == null) return items;
 
@@ -173,6 +176,11 @@ public class LitematicaContainerReader {
     public static Set<Integer> getDisabledSlots(BlockPos worldPos) {
         var schematicWorld = SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld == null) return Collections.emptySet();
+
+        var placementNbt = LitematicaPlacementContainerData.getNbt(worldPos);
+        if (placementNbt.isPresent()) {
+            return parseDisabledSlots(placementNbt.get());
+        }
 
         BlockEntity blockEntity = schematicWorld.getBlockEntity(worldPos);
         if (blockEntity == null) return Collections.emptySet();

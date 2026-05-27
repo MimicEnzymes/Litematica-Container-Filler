@@ -35,6 +35,12 @@ public class ToolHudRenderer {
     private static final float PANEL_SNAP_EPSILON = 0.5f;
     private static final float ANGLE_SNAP_EPSILON = 0.006f;
     private static final int PANEL_ANGLE_SEARCH_STEPS = 96;
+    private static final float[] PROJECTED_TARGET = new float[2];
+    private static final int[] REL_XS = new int[8];
+    private static final int[] REL_YS = new int[8];
+    private static final int[] SCRATCH_XS = new int[8];
+    private static final int[] SCRATCH_YS = new int[8];
+    private static final int[] SCRATCH_INTERSECTIONS = new int[16];
 
     private static float visibility = 0.0f;
     private static float centerX = -1.0f;
@@ -111,7 +117,7 @@ public class ToolHudRenderer {
         int alpha = Math.round(255.0f * opacity * eased);
 
         if (style == ToolHudStyle.FIXED_CARD) {
-            drawToolCard(context, client, Math.round(fixedPanelX), Math.round(fixedPanelY), panelW, panelH, scale, alpha, eased, tools.isWorking());
+            drawToolCard(context, client, Math.round(fixedPanelX), Math.round(fixedPanelY), panelW, panelH, scale, alpha, eased, tools.isWorking(), now);
             return;
         }
 
@@ -125,7 +131,7 @@ public class ToolHudRenderer {
 
         drawLeader(context, startX, startY, endX, endY, alpha);
         drawAnchor(context, startX, startY, alpha);
-        drawToolCard(context, client, panelLeft, panelTop, panelW, panelH, scale, alpha, eased, tools.isWorking());
+        drawToolCard(context, client, panelLeft, panelTop, panelW, panelH, scale, alpha, eased, tools.isWorking(), now);
     }
 
     private static ToolHudStyle getHudStyle() {
@@ -152,9 +158,9 @@ public class ToolHudRenderer {
 
     private static void updateLayout(MinecraftClient client, BlockPos target, int width, int height, int panelW, int panelH,
                                      int offset, float scale, float smoothing) {
-        float[] projected = projectTarget(client, target, width, height);
-        float targetCenterX = projected[0];
-        float targetCenterY = projected[1];
+        projectTarget(client, target, width, height);
+        float targetCenterX = PROJECTED_TARGET[0];
+        float targetCenterY = PROJECTED_TARGET[1];
 
         if (centerX < 0.0f || centerY < 0.0f) {
             centerX = targetCenterX;
@@ -282,7 +288,7 @@ public class ToolHudRenderer {
         panelAngle = wrapRadians(panelAngle);
     }
 
-    private static float[] projectTarget(MinecraftClient client, BlockPos target, int width, int height) {
+    private static void projectTarget(MinecraftClient client, BlockPos target, int width, int height) {
         Vec3d eye = client.player.getEyePos();
         Vec3d targetCenter = Vec3d.ofCenter(target).add(0.0D, 0.16D, 0.0D);
         Vec3d toTarget = targetCenter.subtract(eye);
@@ -302,10 +308,8 @@ public class ToolHudRenderer {
 
         float x = width * 0.5f + (float) horizontal * width * 0.42f;
         float y = height * 0.5f - (float) vertical * height * 0.42f;
-        return new float[] {
-                quantize(clamp(x, 18.0f, width - 18.0f), 0.25f),
-                quantize(clamp(y, 18.0f, height - 18.0f), 0.25f)
-        };
+        PROJECTED_TARGET[0] = quantize(clamp(x, 18.0f, width - 18.0f), 0.25f);
+        PROJECTED_TARGET[1] = quantize(clamp(y, 18.0f, height - 18.0f), 0.25f);
     }
 
     private static void updateTextCache(MinecraftClient client, ContainerToolMode mode) {
@@ -368,14 +372,14 @@ public class ToolHudRenderer {
         drawBentLine(context, x1, y1, corner[0], corner[1], x2, y2, withAlpha(ACCENT, Math.round(alpha * 0.66f)));
     }
 
-    private static void drawToolCard(DrawContext context, MinecraftClient client, int x, int y, int width, int height, float scale, int alpha, float eased, boolean showProgress) {
+    private static void drawToolCard(DrawContext context, MinecraftClient client, int x, int y, int width, int height, float scale, int alpha, float eased, boolean showProgress, long nowNanos) {
         int panelAlpha = Math.round(alpha * 0.92f);
         int borderAlpha = Math.round(alpha * 0.88f);
         int shadowAlpha = Math.round(alpha * 0.34f);
         int pad = Math.max(8, Math.round(9.0f * scale));
         int headerHeight = Math.max(15, Math.round(17.0f * scale));
         int barHeight = Math.max(2, Math.round(2.0f * scale));
-        int breathe = Math.round((float)Math.sin(System.nanoTime() / 260_000_000.0D) * 2.0f * eased);
+        int breathe = Math.round((float)Math.sin(nowNanos / 260_000_000.0D) * 2.0f * eased);
         int lineGap = Math.max(10, Math.round(11.0f * scale));
         int iconBaseX = x + pad + Math.round(12.0f * scale);
         int iconBaseY = y + headerHeight + Math.round(27.0f * scale);
@@ -394,7 +398,7 @@ public class ToolHudRenderer {
                 x + pad, y + 8, scale, withAlpha(TEXT, alpha));
 
         int labelY = y + headerHeight + 9;
-        drawHudToolIcon(context, iconCenterX, iconCenterY, iconScale, alpha, eased, cachedMode);
+        drawHudToolIcon(context, iconCenterX, iconCenterY, iconScale, alpha, eased, cachedMode, nowNanos);
         drawScaledText(context, client, cachedLabel, textX, labelY, scale, withAlpha(MUTED_TEXT, Math.round(alpha * 0.88f)));
         drawScaledText(context, client, cachedHint, textX, labelY + lineGap, scale, withAlpha(0xFF55FF68, alpha));
         if (!cachedSecondaryHint.isEmpty()) {
@@ -411,7 +415,7 @@ public class ToolHudRenderer {
         }
     }
 
-    private static void drawHudToolIcon(DrawContext context, int cx, int cy, float scale, int alpha, float eased, ContainerToolMode mode) {
+    private static void drawHudToolIcon(DrawContext context, int cx, int cy, float scale, int alpha, float eased, ContainerToolMode mode, long nowNanos) {
         ArrowDirection direction = switch (mode) {
             case CLEAR -> ArrowDirection.UP;
             case COPY -> ArrowDirection.RIGHT;
@@ -431,7 +435,7 @@ public class ToolHudRenderer {
             context.fill(boxX, boxY + 3, boxX + 2, boxY + boxH, edge);
             context.fill(boxX + boxW - 2, boxY + 3, boxX + boxW, boxY + boxH, edge);
             context.fill(boxX + Math.round(5.0f * scale), boxY + Math.round(7.0f * scale), boxX + boxW - Math.round(5.0f * scale), boxY + Math.round(9.0f * scale), dark);
-            int arrowBounce = Math.round((float)Math.sin(System.nanoTime() / 250_000_000.0D) * 1.8f * eased);
+            int arrowBounce = Math.round((float)Math.sin(nowNanos / 250_000_000.0D) * 1.8f * eased);
             drawHudArrowIcon(context, cx, cy - Math.round(13.0f * scale) + arrowBounce, scale * 0.52f, alpha, direction);
             return;
         }
@@ -450,9 +454,21 @@ public class ToolHudRenderer {
         int shoulderY = cy + Math.round(1.0f * scale);
         int tailY = cy + Math.round(15.0f * scale);
 
-        fillRotatedPolygon(context, cx, cy, direction, body,
-                new int[]{-shaft, shaft, shaft, halfW, 0, -halfW, -shaft},
-                new int[]{top - cy, top - cy, headY - cy, shoulderY - cy, tailY - cy, shoulderY - cy, headY - cy});
+        REL_XS[0] = -shaft;
+        REL_XS[1] = shaft;
+        REL_XS[2] = shaft;
+        REL_XS[3] = halfW;
+        REL_XS[4] = 0;
+        REL_XS[5] = -halfW;
+        REL_XS[6] = -shaft;
+        REL_YS[0] = top - cy;
+        REL_YS[1] = top - cy;
+        REL_YS[2] = headY - cy;
+        REL_YS[3] = shoulderY - cy;
+        REL_YS[4] = tailY - cy;
+        REL_YS[5] = shoulderY - cy;
+        REL_YS[6] = headY - cy;
+        fillRotatedPolygon(context, cx, cy, direction, body, REL_XS, REL_YS, 7);
         fillRotatedRect(context, cx, cy, -1, top - cy + 2, 2, tailY - cy - 3, shine, direction);
     }
 
@@ -471,53 +487,72 @@ public class ToolHudRenderer {
     }
 
     private static void fillRotatedRect(DrawContext context, int cx, int cy, int relX1, int relY1, int relX2, int relY2, int color, ArrowDirection direction) {
-        int[] a = rotate(cx, cy, relX1, relY1, direction);
-        int[] b = rotate(cx, cy, relX2, relY2, direction);
-        context.fill(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1]), color);
+        int ax = rotateX(cx, cy, relX1, relY1, direction);
+        int ay = rotateY(cx, cy, relX1, relY1, direction);
+        int bx = rotateX(cx, cy, relX2, relY2, direction);
+        int by = rotateY(cx, cy, relX2, relY2, direction);
+        context.fill(Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by), color);
     }
 
-    private static void fillRotatedPolygon(DrawContext context, int cx, int cy, ArrowDirection direction, int color, int[] relXs, int[] relYs) {
-        int[] xs = new int[relXs.length];
-        int[] ys = new int[relYs.length];
-        for (int i = 0; i < relXs.length; i++) {
-            int[] point = rotate(cx, cy, relXs[i], relYs[i], direction);
-            xs[i] = point[0];
-            ys[i] = point[1];
+    private static void fillRotatedPolygon(DrawContext context, int cx, int cy, ArrowDirection direction, int color, int[] relXs, int[] relYs, int count) {
+        for (int i = 0; i < count; i++) {
+            SCRATCH_XS[i] = rotateX(cx, cy, relXs[i], relYs[i], direction);
+            SCRATCH_YS[i] = rotateY(cx, cy, relXs[i], relYs[i], direction);
         }
-        fillPolygon(context, xs, ys, color);
+        fillPolygon(context, SCRATCH_XS, SCRATCH_YS, count, color);
     }
 
-    private static void fillPolygon(DrawContext context, int[] xs, int[] ys, int color) {
+    private static void fillPolygon(DrawContext context, int[] xs, int[] ys, int count, int color) {
         int minY = Integer.MAX_VALUE;
         int maxY = Integer.MIN_VALUE;
-        for (int y : ys) {
-            minY = Math.min(minY, y);
-            maxY = Math.max(maxY, y);
+        for (int i = 0; i < count; i++) {
+            minY = Math.min(minY, ys[i]);
+            maxY = Math.max(maxY, ys[i]);
         }
 
         for (int y = minY; y <= maxY; y++) {
-            java.util.ArrayList<Integer> intersections = new java.util.ArrayList<>();
-            for (int i = 0; i < xs.length; i++) {
-                int next = (i + 1) % xs.length;
+            int intersectionCount = 0;
+            for (int i = 0; i < count; i++) {
+                int next = (i + 1) % count;
                 int y1 = ys[i];
                 int y2 = ys[next];
                 if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
                     double t = (y - y1) / (double)(y2 - y1);
-                    intersections.add((int)Math.round(xs[i] + (xs[next] - xs[i]) * t));
+                    SCRATCH_INTERSECTIONS[intersectionCount++] = (int)Math.round(xs[i] + (xs[next] - xs[i]) * t);
                 }
             }
-            java.util.Collections.sort(intersections);
-            for (int i = 0; i + 1 < intersections.size(); i += 2) {
-                context.fill(intersections.get(i), y, intersections.get(i + 1) + 1, y + 1, color);
+            sortScratchIntersections(intersectionCount);
+            for (int i = 0; i + 1 < intersectionCount; i += 2) {
+                context.fill(SCRATCH_INTERSECTIONS[i], y, SCRATCH_INTERSECTIONS[i + 1] + 1, y + 1, color);
             }
         }
     }
 
-    private static int[] rotate(int cx, int cy, int x, int y, ArrowDirection direction) {
+    private static void sortScratchIntersections(int count) {
+        for (int i = 1; i < count; i++) {
+            int value = SCRATCH_INTERSECTIONS[i];
+            int j = i - 1;
+            while (j >= 0 && SCRATCH_INTERSECTIONS[j] > value) {
+                SCRATCH_INTERSECTIONS[j + 1] = SCRATCH_INTERSECTIONS[j];
+                j--;
+            }
+            SCRATCH_INTERSECTIONS[j + 1] = value;
+        }
+    }
+
+    private static int rotateX(int cx, int cy, int x, int y, ArrowDirection direction) {
         return switch (direction) {
-            case DOWN -> new int[]{cx + x, cy + y};
-            case UP -> new int[]{cx - x, cy - y};
-            case RIGHT -> new int[]{cx + y, cy - x};
+            case DOWN -> cx + x;
+            case UP -> cx - x;
+            case RIGHT -> cx + y;
+        };
+    }
+
+    private static int rotateY(int cx, int cy, int x, int y, ArrowDirection direction) {
+        return switch (direction) {
+            case DOWN -> cy + y;
+            case UP -> cy - y;
+            case RIGHT -> cy - x;
         };
     }
 
