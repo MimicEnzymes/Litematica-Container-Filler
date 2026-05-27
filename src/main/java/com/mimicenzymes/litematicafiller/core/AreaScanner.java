@@ -139,6 +139,7 @@ public class AreaScanner {
         BlockPos taskPos = halves != null ? halves[0] : rawPos;
 
         if (!processedPositions.add(taskPos)) return;
+        if (ManualContainerOverrideManager.isCompleted(taskPos)) return;
         if (eyePos.squaredDistanceTo(Vec3d.ofCenter(taskPos)) > reachSq) return;
         if (isLoadedRealContainerMissing(mc, taskPos, halves)) return;
 
@@ -151,7 +152,8 @@ public class AreaScanner {
         Map<Integer, ItemStack> required = HighlightScanner.getCachedSchematicRequirement(taskPos, mc);
         boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
         boolean needsLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(taskPos, mc);
-        boolean hasItems = required != null && !required.isEmpty() && !RealContainerCache.isSatisfied(taskPos, required);
+        boolean manualNeedsFill = ManualContainerOverrideManager.isNeedsFill(taskPos);
+        boolean hasItems = required != null && !required.isEmpty() && (manualNeedsFill || !RealContainerCache.isSatisfied(taskPos, required));
 
         if (!hasItems && !needsLocking) return;
 

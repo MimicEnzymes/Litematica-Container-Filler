@@ -24,6 +24,12 @@ public class HighlightRenderer {
     private static final long EMPTY_SIGNATURE = Long.MIN_VALUE;
     private static final int RENDER_CACHE_REGION_SHIFT = 6;
     private static final int MAX_CHUNK_REBUILDS_PER_FRAME = 1;
+    private static final float TOP_PLATE_MIN_INSET = 0.02f;
+    private static final float TOP_PLATE_BOTTOM_OFFSET = 0.035f;
+    private static final float TOP_PLATE_TOP_OFFSET = 0.095f;
+    private static final float MANUAL_BADGE_GAP = 0.014f;
+    private static final float MANUAL_BADGE_SIZE = 0.44f;
+    private static final float MANUAL_BADGE_THICKNESS = 0.034f;
 
     private final Map<ChunkKey, ChunkRenderCache> chunkCaches = new HashMap<>();
     private final Map<ChunkKey, Map<BlockPos, HighlightState>> desiredChunks = new HashMap<>();
@@ -95,7 +101,6 @@ public class HighlightRenderer {
 
     private void updateDesiredChunks(Map<BlockPos, HighlightState> highlights) {
         Map<ChunkKey, Map<BlockPos, HighlightState>> nextChunks = new HashMap<>();
-
         for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
             if (!shouldRenderState(entry.getValue())) continue;
             ChunkKey key = ChunkKey.from(entry.getKey());
@@ -180,12 +185,16 @@ public class HighlightRenderer {
                             drawInflatedWorldBox(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(), 0.012f, glass, cameraPos, fillBuffer);
                         }
                         if (Configs.RENDER_STATE_TOP_PLATE.getBooleanValue()) {
-                            float inset = Math.max(0.02f, (1.0f - (float) Configs.HIGHLIGHT_TOP_PLATE_SIZE.getDoubleValue()) * 0.5f);
+                            float inset = Math.max(TOP_PLATE_MIN_INSET, (1.0f - (float) Configs.HIGHLIGHT_TOP_PLATE_SIZE.getDoubleValue()) * 0.5f);
                             drawWorldBox(
-                                    box.minX() + inset, box.maxY() + 0.035f, box.minZ() + inset,
-                                    box.maxX() - inset, box.maxY() + 0.095f, box.maxZ() - inset,
+                                    box.minX() + inset, box.maxY() + TOP_PLATE_BOTTOM_OFFSET, box.minZ() + inset,
+                                    box.maxX() - inset, box.maxY() + TOP_PLATE_TOP_OFFSET, box.maxZ() - inset,
                                     crown, cameraPos, fillBuffer
                             );
+                        }
+
+                        if (isManualState(entry.getValue())) {
+                            drawManualOverrideBadge(box, entry.getValue(), cameraPos, fillBuffer);
                         }
                     }
 
@@ -449,6 +458,14 @@ public class HighlightRenderer {
         sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_SATISFIED.getColor().getIntValue());
         sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_UNKNOWN.getColor().getIntValue());
         sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_UNPLACED.getColor().getIntValue());
+        sum = mix64(sum ^ 0x4d414e55414c4f4bL);
+        sum = mix64(sum ^ (Configs.RENDER_STATE_UNFILLED.getBooleanValue() ? 0x11L : 0L));
+        sum = mix64(sum ^ (Configs.RENDER_STATE_PARTIAL.getBooleanValue() ? 0x22L : 0L));
+        sum = mix64(sum ^ (Configs.RENDER_STATE_OVERFILLED.getBooleanValue() ? 0x44L : 0L));
+        sum = mix64(sum ^ (Configs.RENDER_STATE_WRONG.getBooleanValue() ? 0x88L : 0L));
+        sum = mix64(sum ^ (Configs.RENDER_STATE_SATISFIED.getBooleanValue() ? 0x101L : 0L));
+        sum = mix64(sum ^ (Configs.RENDER_STATE_UNKNOWN.getBooleanValue() ? 0x202L : 0L));
+        sum = mix64(sum ^ (Configs.HIGHLIGHT_UNPLACED_CONTAINERS.getBooleanValue() ? 0x404L : 0L));
         sum = mix64(sum ^ (Configs.RENDER_STATE_GLASS.getBooleanValue() ? 1L : 0L));
         sum = mix64(sum ^ (Configs.RENDER_STATE_TOP_PLATE.getBooleanValue() ? 2L : 0L));
         sum = mix64(sum ^ Double.doubleToLongBits(Configs.HIGHLIGHT_GLASS_ALPHA_MULTIPLIER.getDoubleValue()));
@@ -533,11 +550,11 @@ public class HighlightRenderer {
 
     private Color4f getColor(HighlightState type) {
         return switch (type) {
-            case UNFILLED -> Configs.HIGHLIGHT_COLOR_UNFILLED.getColor();
+            case UNFILLED, MANUAL_NEEDS_FILL -> Configs.HIGHLIGHT_COLOR_UNFILLED.getColor();
             case PARTIAL -> Configs.HIGHLIGHT_COLOR_PARTIAL.getColor();
             case OVERFILLED -> Configs.HIGHLIGHT_COLOR_OVERFILLED.getColor();
             case WRONG_ITEM -> Configs.HIGHLIGHT_COLOR_WRONG.getColor();
-            case SATISFIED -> Configs.HIGHLIGHT_COLOR_SATISFIED.getColor();
+            case SATISFIED, MANUAL_COMPLETED -> Configs.HIGHLIGHT_COLOR_SATISFIED.getColor();
             case UNPLACED -> Configs.HIGHLIGHT_COLOR_UNPLACED.getColor();
             default -> Configs.HIGHLIGHT_COLOR_UNKNOWN.getColor();
         };
@@ -545,14 +562,46 @@ public class HighlightRenderer {
 
     private boolean shouldRenderState(HighlightState state) {
         return switch (state) {
-            case UNFILLED -> Configs.RENDER_STATE_UNFILLED.getBooleanValue();
+            case UNFILLED, MANUAL_NEEDS_FILL -> Configs.RENDER_STATE_UNFILLED.getBooleanValue();
             case PARTIAL -> Configs.RENDER_STATE_PARTIAL.getBooleanValue();
             case OVERFILLED -> Configs.RENDER_STATE_OVERFILLED.getBooleanValue();
             case WRONG_ITEM -> Configs.RENDER_STATE_WRONG.getBooleanValue();
-            case SATISFIED -> Configs.RENDER_STATE_SATISFIED.getBooleanValue();
+            case SATISFIED, MANUAL_COMPLETED -> Configs.RENDER_STATE_SATISFIED.getBooleanValue();
             case UNPLACED -> Configs.HIGHLIGHT_UNPLACED_CONTAINERS.getBooleanValue();
             default -> Configs.RENDER_STATE_UNKNOWN.getBooleanValue();
         };
+    }
+
+    private boolean isManualState(HighlightState state) {
+        return state == HighlightState.MANUAL_COMPLETED || state == HighlightState.MANUAL_NEEDS_FILL;
+    }
+
+    private void drawManualOverrideBadge(HighlightBox box, HighlightState state, Vec3d cameraPos, net.minecraft.client.render.BufferBuilder buffer) {
+        float size = Math.min(box.maxX() - box.minX(), box.maxZ() - box.minZ());
+        float cx = box.centerX();
+        float cz = box.centerZ();
+        float thickness = Math.max(0.022f, size * MANUAL_BADGE_THICKNESS);
+        float y = box.maxY() + TOP_PLATE_TOP_OFFSET + MANUAL_BADGE_GAP;
+        float half = size * MANUAL_BADGE_SIZE * 0.5f;
+        Color4f ring = state == HighlightState.MANUAL_COMPLETED
+                ? new Color4f(0.88f, 1.0f, 0.95f, 0.76f)
+                : new Color4f(1.0f, 0.86f, 0.34f, 0.76f);
+        Color4f accent = state == HighlightState.MANUAL_COMPLETED
+                ? new Color4f(0.16f, 1.0f, 0.62f, 0.90f)
+                : new Color4f(1.0f, 0.52f, 0.12f, 0.90f);
+
+        drawWorldBox(cx - half, y, cz - half, cx + half, y + thickness, cz - half + thickness, ring, cameraPos, buffer);
+        drawWorldBox(cx - half, y, cz + half - thickness, cx + half, y + thickness, cz + half, ring, cameraPos, buffer);
+        drawWorldBox(cx - half, y, cz - half, cx - half + thickness, y + thickness, cz + half, ring, cameraPos, buffer);
+        drawWorldBox(cx + half - thickness, y, cz - half, cx + half, y + thickness, cz + half, ring, cameraPos, buffer);
+
+        if (state == HighlightState.MANUAL_COMPLETED) {
+            drawWorldBox(cx - half * 0.48f, y + thickness, cz - thickness * 0.5f, cx - half * 0.08f, y + thickness * 2.0f, cz + thickness * 0.5f, accent, cameraPos, buffer);
+            drawWorldBox(cx - half * 0.12f, y + thickness, cz - thickness * 0.5f, cx + half * 0.56f, y + thickness * 2.0f, cz + thickness * 0.5f, accent, cameraPos, buffer);
+        } else {
+            drawWorldBox(cx - thickness * 0.5f, y + thickness, cz - half * 0.58f, cx + thickness * 0.5f, y + thickness * 2.0f, cz + half * 0.22f, accent, cameraPos, buffer);
+            drawWorldBox(cx - thickness * 0.6f, y + thickness, cz + half * 0.42f, cx + thickness * 0.6f, y + thickness * 2.0f, cz + half * 0.56f, accent, cameraPos, buffer);
+        }
     }
 
     private HighlightBox getHighlightBox(BlockPos pos) {

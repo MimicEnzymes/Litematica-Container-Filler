@@ -99,7 +99,9 @@ public class ToolHudRenderer {
         updateTextCache(client, mode);
 
         float scale = clamp(Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f, 0.7f, 1.5f);
-        int panelW = Math.round(cachedPanelWidth * scale);
+        int maxPanelW = Math.max(72, Math.round(width - EDGE_MARGIN * 2.0f));
+        int minPanelW = Math.min(Math.round(MIN_PANEL_WIDTH * scale), maxPanelW);
+        int panelW = clamp(Math.round(cachedPanelWidth * scale), minPanelW, maxPanelW);
         ToolHudStyle style = getHudStyle();
         int panelH = Math.round((style == ToolHudStyle.FIXED_CARD ? FIXED_PANEL_BASE_HEIGHT : ANCHORED_PANEL_BASE_HEIGHT) * scale);
         int offset = Math.round(Configs.TOOL_HUD_OFFSET.getIntegerValue() * scale);
@@ -379,8 +381,9 @@ public class ToolHudRenderer {
         int pad = Math.max(8, Math.round(9.0f * scale));
         int headerHeight = Math.max(15, Math.round(17.0f * scale));
         int barHeight = Math.max(2, Math.round(2.0f * scale));
+        int textHeight = Math.max(1, (int)Math.ceil(client.textRenderer.fontHeight * scale));
         int breathe = Math.round((float)Math.sin(nowNanos / 260_000_000.0D) * 2.0f * eased);
-        int lineGap = Math.max(10, Math.round(11.0f * scale));
+        int lineGap = Math.max(textHeight + 1, Math.round(11.0f * scale));
         int iconBaseX = x + pad + Math.round(12.0f * scale);
         int iconBaseY = y + headerHeight + Math.round(27.0f * scale);
         int iconCenterX = iconBaseX + (cachedMode == ContainerToolMode.COPY ? breathe : 0);
@@ -394,15 +397,25 @@ public class ToolHudRenderer {
             drawRoundedInfoCardOutline(context, x, y, width, height, withAlpha(FIXED_PANEL_EDGE, borderAlpha));
         }
         context.fill(x + 5, y + 5, x + width - 5, y + headerHeight + 5, withAlpha(FIXED_PANEL_HEADER, Math.round(alpha * 0.46f)));
-        drawScaledText(context, client, StringUtils.translate("litematica_container_filler.hud.fixed.title"),
+        int titleMaxWidth = Math.max(0, width - pad * 2);
+        drawScaledText(context, client, ellipsize(client, StringUtils.translate("litematica_container_filler.hud.fixed.title"), unscaledWidth(titleMaxWidth, scale)),
                 x + pad, y + 8, scale, withAlpha(TEXT, alpha));
 
         int labelY = y + headerHeight + 9;
+        int textMaxWidth = Math.max(0, width - (textX - x) - pad);
+        int textMaxUnscaled = unscaledWidth(textMaxWidth, scale);
+        int progressReserve = showProgress ? barHeight + Math.max(3, Math.round(3.0f * scale)) : 0;
+        int contentBottom = y + height - Math.max(5, Math.round(5.0f * scale)) - progressReserve;
+        int maxLines = countFittingLines(labelY, lineGap, textHeight, contentBottom, cachedSecondaryHint.isEmpty() ? 2 : 3);
         drawHudToolIcon(context, iconCenterX, iconCenterY, iconScale, alpha, eased, cachedMode, nowNanos);
-        drawScaledText(context, client, cachedLabel, textX, labelY, scale, withAlpha(MUTED_TEXT, Math.round(alpha * 0.88f)));
-        drawScaledText(context, client, cachedHint, textX, labelY + lineGap, scale, withAlpha(0xFF55FF68, alpha));
-        if (!cachedSecondaryHint.isEmpty()) {
-            drawScaledText(context, client, cachedSecondaryHint, textX, labelY + lineGap * 2, scale, withAlpha(MUTED_TEXT, Math.round(alpha * 0.78f)));
+        if (maxLines <= 1) {
+            drawScaledText(context, client, ellipsize(client, cachedHint, textMaxUnscaled), textX, Math.min(labelY, Math.max(y + headerHeight + 2, contentBottom - textHeight)), scale, withAlpha(0xFF55FF68, alpha));
+        } else {
+            drawScaledText(context, client, ellipsize(client, cachedLabel, textMaxUnscaled), textX, labelY, scale, withAlpha(MUTED_TEXT, Math.round(alpha * 0.88f)));
+            drawScaledText(context, client, ellipsize(client, cachedHint, textMaxUnscaled), textX, labelY + lineGap, scale, withAlpha(0xFF55FF68, alpha));
+        }
+        if (maxLines >= 3 && !cachedSecondaryHint.isEmpty()) {
+            drawScaledText(context, client, ellipsize(client, cachedSecondaryHint, textMaxUnscaled), textX, labelY + lineGap * 2, scale, withAlpha(MUTED_TEXT, Math.round(alpha * 0.78f)));
         }
 
         if (showProgress) {
@@ -413,6 +426,16 @@ public class ToolHudRenderer {
             context.fill(barX, barY, barX + barW, barY + barHeight, withAlpha(FIXED_PANEL_BAR_BG, Math.round(alpha * 0.58f)));
             context.fill(barX, barY, barX + fillW, barY + barHeight, withAlpha(FIXED_PANEL_BAR, Math.round(alpha * 0.95f)));
         }
+    }
+
+    private static int countFittingLines(int firstY, int lineGap, int textHeight, int bottom, int requestedLines) {
+        int lines = 0;
+        for (int i = 0; i < requestedLines; i++) {
+            if (firstY + lineGap * i + textHeight <= bottom) {
+                lines++;
+            }
+        }
+        return lines;
     }
 
     private static void drawHudToolIcon(DrawContext context, int cx, int cy, float scale, int alpha, float eased, ContainerToolMode mode, long nowNanos) {
@@ -473,6 +496,9 @@ public class ToolHudRenderer {
     }
 
     private static void drawScaledText(DrawContext context, MinecraftClient client, String text, int x, int y, float scale, int color) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
         if (Math.abs(scale - 1.0f) < 0.01f) {
             context.drawTextWithShadow(client.textRenderer, text, x, y, color);
             return;
@@ -484,6 +510,34 @@ public class ToolHudRenderer {
         matrices.scale(scale, scale);
         context.drawTextWithShadow(client.textRenderer, text, 0, 0, color);
         matrices.popMatrix();
+    }
+
+    private static int unscaledWidth(int scaledWidth, float scale) {
+        if (scaledWidth <= 0 || scale <= 0.01f) {
+            return 0;
+        }
+        return Math.max(0, (int)Math.floor(scaledWidth / scale));
+    }
+
+    private static String ellipsize(MinecraftClient client, String text, int maxWidth) {
+        if (text == null || text.isEmpty() || maxWidth <= 0) {
+            return "";
+        }
+        if (client.textRenderer.getWidth(text) <= maxWidth) {
+            return text;
+        }
+
+        String suffix = "...";
+        int suffixWidth = client.textRenderer.getWidth(suffix);
+        if (suffixWidth > maxWidth) {
+            return "";
+        }
+
+        int end = text.length();
+        while (end > 0 && client.textRenderer.getWidth(text.substring(0, end)) + suffixWidth > maxWidth) {
+            end--;
+        }
+        return end <= 0 ? suffix : text.substring(0, end) + suffix;
     }
 
     private static void fillRotatedRect(DrawContext context, int cx, int cy, int relX1, int relY1, int relX2, int relY2, int color, ArrowDirection direction) {

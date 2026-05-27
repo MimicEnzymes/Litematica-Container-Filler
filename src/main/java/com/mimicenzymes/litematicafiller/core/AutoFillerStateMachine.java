@@ -212,12 +212,7 @@ public class AutoFillerStateMachine {
                             inventoryData = getSingleBlockEntityInventory(serverWorld, finalPos);
                         }
                         if (inventoryData != null) {
-                            if (halves != null) {
-                                RealContainerCache.put(halves[0].toImmutable(), inventoryData);
-                                RealContainerCache.put(halves[1].toImmutable(), inventoryData);
-                            } else {
-                                RealContainerCache.put(finalPos, inventoryData);
-                            }
+                            RealContainerCache.put(halves != null ? halves[0].toImmutable() : finalPos, inventoryData);
                         }
                         if (state.getBlock() instanceof net.minecraft.block.CrafterBlock) {
                             net.minecraft.block.entity.BlockEntity be = serverWorld.getBlockEntity(finalPos);
@@ -267,6 +262,7 @@ public class AutoFillerStateMachine {
     public boolean addTask(BlockPos pos, Map<Integer, ItemStack> requiredItems, boolean preferNearby) {
         if (requiredItems == null) return false;
         pos = pos.toImmutable();
+        if (ManualContainerOverrideManager.isCompleted(pos)) return false;
         if (failedContainers.containsKey(pos)) return false;
         if (currentTask != null && currentTask.targetPos.equals(pos)) return false;
 
@@ -331,7 +327,7 @@ public class AutoFillerStateMachine {
         }
 
         if (needsCrafterLocking) needsAction = true;
-        if (!needsAction) return false;
+        if (!needsAction && !ManualContainerOverrideManager.isNeedsFill(pos)) return false;
 
         Set<Item> unavailable = getUnavailableMissingTypes(client, pos, requiredItems, missingItems);
         if (!unavailable.isEmpty() && !needsCrafterLocking && !hasExtractableGarbage(pos, requiredItems, trueData, isCrafter, ignoredSlots)) {

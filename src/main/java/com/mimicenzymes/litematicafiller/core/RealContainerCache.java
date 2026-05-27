@@ -1,12 +1,14 @@
 package com.mimicenzymes.litematicafiller.core;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
+import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.network.ServuxSyncHandler;
 import com.mimicenzymes.litematicafiller.tool.ContainerToolStateMachine;
 import fi.dy.masa.litematica.data.EntitiesDataStorage;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtElement;
@@ -80,13 +82,12 @@ public class RealContainerCache {
             lastLookedPos = bhr.getBlockPos();
         }
 
-        if (client.currentScreen instanceof HandledScreen<?> screen) {
+        if (isPlayerInventoryScreen(client.currentScreen)) {
+            resetObservedHandler();
+        } else if (client.currentScreen instanceof HandledScreen<?> screen) {
             updateFromHandlerIfNeeded(client, screen.getScreenHandler());
         } else {
-            lastObservedHandler = null;
-            lastObservedSyncId = Integer.MIN_VALUE;
-            lastObservedSignature = Long.MIN_VALUE;
-            lastObservedTick = Long.MIN_VALUE;
+            resetObservedHandler();
         }
     }
 
@@ -99,7 +100,7 @@ public class RealContainerCache {
     public static void updateFromHandler(MinecraftClient client, ScreenHandler handler) {
         if (handler == null) return;
 
-        if (shouldIgnoreHandler(handler)) {
+        if (shouldIgnoreHandler(client, handler)) {
             return;
         }
 
@@ -107,22 +108,30 @@ public class RealContainerCache {
         if (pos == null) pos = lastLookedPos;
         if (pos == null) return;
 
-        Map<Integer, ItemStack> items = new HashMap<>();
-
-        net.minecraft.inventory.Inventory primaryInv = null;
-        if (!handler.slots.isEmpty()) {
-            primaryInv = handler.slots.get(0).inventory;
+        if (!isCacheableTargetContainer(client, pos)) {
+            return;
         }
 
+        Inventory containerInv = findPrimaryContainerInventory(client, handler);
+        if (containerInv == null) {
+            return;
+        }
+
+        int slotCount = containerInv.size();
+        if (!isPlausibleSlotCountForTarget(client, pos, slotCount)) {
+            return;
+        }
+
+        Map<Integer, ItemStack> items = new HashMap<>();
+
         for (Slot slot : handler.slots) {
-            if (slot.inventory != null && slot.inventory == primaryInv) {
+            if (slot.inventory != null && slot.inventory == containerInv && slot.isEnabled()) {
                 if (!slot.getStack().isEmpty()) {
                     items.put(slot.getIndex(), slot.getStack().copy());
                 }
             }
         }
 
-        int slotCount = primaryInv != null ? primaryInv.size() : inferSlotCount(items);
         BlockState state = client.world.getBlockState(pos);
         BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.world, pos, state, slotCount);
 
@@ -155,11 +164,8 @@ public class RealContainerCache {
 
     private static void updateFromHandlerIfNeeded(MinecraftClient client, ScreenHandler handler) {
         if (handler == null || client.world == null) return;
-        if (shouldIgnoreHandler(handler)) {
-            lastObservedHandler = null;
-            lastObservedSyncId = Integer.MIN_VALUE;
-            lastObservedSignature = Long.MIN_VALUE;
-            lastObservedTick = Long.MIN_VALUE;
+        if (shouldIgnoreHandler(client, handler)) {
+            resetObservedHandler();
             return;
         }
 
@@ -184,18 +190,104 @@ public class RealContainerCache {
         updateFromHandler(client, handler);
     }
 
-    private static boolean shouldIgnoreHandler(ScreenHandler handler) {
+    private static boolean shouldIgnoreHandler(MinecraftClient client, ScreenHandler handler) {
+        if (client == null || client.player == null || handler == null) return true;
+        if (handler == client.player.playerScreenHandler) return true;
         return handler instanceof net.minecraft.screen.PlayerScreenHandler ||
-                handler.getClass().getSimpleName().contains("CreativeScreenHandler");
+                handler.getClass().getSimpleName().contains("CreativeScreenHandler") ||
+                findPrimaryContainerInventory(client, handler) == null;
+    }
+
+    private static boolean isPlayerInventoryScreen(Object screen) {
+        if (screen == null) return false;
+        String name = screen.getClass().getSimpleName();
+        return name.equals("InventoryScreen") ||
+                name.equals("CreativeInventoryScreen") ||
+                name.contains("PlayerInventory") ||
+                name.contains("InventoryScreen");
+    }
+
+    private static boolean isCacheableTargetContainer(MinecraftClient client, BlockPos pos) {
+        if (client == null || client.world == null || pos == null) return false;
+        return ContainerBlockFilter.isContainerLike(client.world.getBlockState(pos), client.world, pos);
+    }
+
+    private static boolean isPlausibleSlotCountForTarget(MinecraftClient client, BlockPos pos, int slotCount) {
+        if (client == null || client.world == null || pos == null || slotCount <= 0) return false;
+
+        BlockState state = client.world.getBlockState(pos);
+        if (state.getBlock() instanceof net.minecraft.block.ChestBlock ||
+                state.getBlock() instanceof net.minecraft.block.BarrelBlock ||
+                state.getBlock() instanceof net.minecraft.block.ShulkerBoxBlock ||
+                state.isOf(net.minecraft.block.Blocks.ENDER_CHEST)) {
+            return slotCount == 27 || slotCount == 54;
+        }
+        if (state.isOf(net.minecraft.block.Blocks.HOPPER) ||
+                state.isOf(net.minecraft.block.Blocks.BREWING_STAND)) {
+            return slotCount == 5;
+        }
+        if (state.isOf(net.minecraft.block.Blocks.FURNACE) ||
+                state.isOf(net.minecraft.block.Blocks.BLAST_FURNACE) ||
+                state.isOf(net.minecraft.block.Blocks.SMOKER)) {
+            return slotCount == 3;
+        }
+        if (state.isOf(net.minecraft.block.Blocks.DISPENSER) ||
+                state.isOf(net.minecraft.block.Blocks.DROPPER) ||
+                state.getBlock() instanceof net.minecraft.block.CrafterBlock) {
+            return slotCount == 9;
+        }
+
+        if (client.world.getBlockEntity(pos) instanceof Inventory blockInventory) {
+            int expected = blockInventory.size();
+            return slotCount == expected || (expected == 27 && slotCount == 54);
+        }
+
+        return slotCount >= 5;
+    }
+
+    private static Inventory findPrimaryContainerInventory(MinecraftClient client, ScreenHandler handler) {
+        if (client == null || client.player == null || handler == null) return null;
+
+        Inventory playerInventory = client.player.getInventory();
+        Inventory bestInventory = null;
+        int bestCount = 0;
+
+        for (Slot slot : handler.slots) {
+            if (slot.inventory == null || slot.inventory == playerInventory || !slot.isEnabled()) continue;
+
+            Inventory inventory = slot.inventory;
+            int count = countEnabledSlotsForInventory(handler, inventory);
+            if (count > bestCount) {
+                bestInventory = inventory;
+                bestCount = count;
+            }
+        }
+
+        return bestCount > 0 ? bestInventory : null;
+    }
+
+    private static int countEnabledSlotsForInventory(ScreenHandler handler, Inventory inventory) {
+        int count = 0;
+        for (Slot slot : handler.slots) {
+            if (slot.inventory == inventory && slot.isEnabled()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static void resetObservedHandler() {
+        lastObservedHandler = null;
+        lastObservedSyncId = Integer.MIN_VALUE;
+        lastObservedSignature = Long.MIN_VALUE;
+        lastObservedTick = Long.MIN_VALUE;
     }
 
     private static long computeHandlerSignature(ScreenHandler handler, MinecraftClient client) {
         if (handler == null) return 0L;
 
-        net.minecraft.inventory.Inventory primaryInv = null;
-        if (!handler.slots.isEmpty()) {
-            primaryInv = handler.slots.get(0).inventory;
-        }
+        Inventory primaryInv = findPrimaryContainerInventory(client, handler);
+        if (primaryInv == null) return 0L;
 
         long hash = 0xcbf29ce484222325L;
         if (primaryInv != null) {

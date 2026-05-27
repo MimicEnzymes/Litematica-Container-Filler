@@ -7,14 +7,13 @@ import com.mimicenzymes.litematicafiller.tool.ContainerToolStateMachine;
 import com.mimicenzymes.litematicafiller.core.ItemMatcher;
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
 import com.mimicenzymes.litematicafiller.core.LitematicaPlacementContainerData;
+import com.mimicenzymes.litematicafiller.core.ManualContainerOverrideManager;
+import com.mimicenzymes.litematicafiller.core.ManualContainerOverrideState;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtList;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.*;
@@ -33,7 +32,6 @@ public class HighlightScanner {
     private static final long ACTIVE_REQUEST_INTERVAL_MS = 750L;
     private static final long SATISFIED_REQUEST_INTERVAL_MS = 4000L;
     private static final long EMPTY_SYNC_CONFIRMATION_MS = 5000L;
-
     private static final Map<BlockPos, HighlightState> HIGHLIGHT_MAP = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Map<Integer, ItemStack>> SCHEMATIC_REQ_CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Set<Integer>> SCHEMATIC_IGNORED_SLOT_CACHE = new ConcurrentHashMap<>();
@@ -61,6 +59,38 @@ public class HighlightScanner {
 
     public static int getHighlightVersion() {
         return highlightVersion;
+    }
+
+    public static void onManualOverrideChanged(BlockPos pos, ManualContainerOverrideState state) {
+        if (pos == null) return;
+
+        if (state == ManualContainerOverrideState.AUTO) {
+            BlockPos key = pos.toImmutable();
+            RealContainerCache.remove(key);
+            HIGHLIGHT_REQUEST_TIME.remove(key);
+            HIGHLIGHT_REQUEST_INTERVALS.remove(key);
+            DATA_REQUEST_QUEUE.remove(key);
+            QUEUED_DATA_REQUESTS.remove(key);
+            if (HIGHLIGHT_MAP.remove(key) != null) {
+                highlightVersion++;
+            }
+            triggerBoost(BOOST_DURATION_TICKS);
+        } else {
+            triggerBoost(BOOST_DURATION_TICKS);
+        }
+    }
+
+    public static void onManualOverridesCleared() {
+        boolean changed = false;
+        for (Map.Entry<BlockPos, HighlightState> entry : HIGHLIGHT_MAP.entrySet()) {
+            HighlightState state = entry.getValue();
+            if ((state == HighlightState.MANUAL_COMPLETED || state == HighlightState.MANUAL_NEEDS_FILL) &&
+                    HIGHLIGHT_MAP.remove(entry.getKey(), state)) {
+                changed = true;
+            }
+        }
+        if (changed) highlightVersion++;
+        triggerBoost(BOOST_DURATION_TICKS);
     }
 
     public record ContainerSnapshot(List<BlockPos> positions, int nextCursor, int totalCount) {
@@ -172,6 +202,7 @@ public class HighlightScanner {
         DATA_REQUEST_QUEUE.clear();
         QUEUED_DATA_REQUESTS.clear();
         LitematicaPlacementContainerData.clear();
+        ManualContainerOverrideManager.clearForCurrentContext();
         SCHEMATIC_CONTAINERS = Collections.emptySet();
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
         lastIndexTime = 0;
@@ -188,6 +219,7 @@ public class HighlightScanner {
         DATA_REQUEST_QUEUE.clear();
         QUEUED_DATA_REQUESTS.clear();
         LitematicaPlacementContainerData.clear();
+        ManualContainerOverrideManager.clearForCurrentContext();
         triggerBoost(BOOST_DURATION_TICKS);
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
     }
@@ -266,23 +298,36 @@ public class HighlightScanner {
 
         Map<BlockPos, HighlightState> nextMap = new HashMap<>();
 
-        for (BlockPos pos : getNearbySchematicContainers(currentCenter, currentRadius)) {
+        for (BlockPos pos : getNearbyHighlightCandidates(currentCenter, currentRadius)) {
             if (currentRadius > 0 && pos.getSquaredDistance(currentCenter) > radiusSq) continue;
 
-            if (syncLayer && !fi.dy.masa.litematica.data.DataManager.getRenderLayerRange().isPositionWithinRange(pos)) continue;
-
             BlockState state = schematicWorld.getBlockState(pos);
-            if (state == null || state.isAir() || !state.hasBlockEntity()) continue;
-            if (!ContainerBlockFilter.isAllowedForSchematicFill(state, schematicWorld, pos)) continue;
+            boolean schematicContainer = state != null && !state.isAir() && state.hasBlockEntity() &&
+                    ContainerBlockFilter.isAllowedForSchematicFill(state, schematicWorld, pos);
+            boolean manualMarked = ManualContainerOverrideManager.isCompleted(pos) || ManualContainerOverrideManager.isNeedsFill(pos);
+
+            if (syncLayer && schematicContainer && !fi.dy.masa.litematica.data.DataManager.getRenderLayerRange().isPositionWithinRange(pos)) continue;
+            if (!schematicContainer && !manualMarked) continue;
+
+            if (!schematicContainer) {
+                BlockState realState = client.world.getBlockState(pos);
+                if (!ContainerBlockFilter.isAllowedForSchematicFill(realState, client.world, pos)) continue;
+                nextMap.put(pos.toImmutable(), ManualContainerOverrideManager.isCompleted(pos)
+                        ? HighlightState.MANUAL_COMPLETED
+                        : HighlightState.MANUAL_NEEDS_FILL);
+                continue;
+            }
 
             BlockPos checkPos = pos;
             BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
             if (halves != null) checkPos = halves[0];
             if (!checkPos.equals(pos)) continue;
+            boolean manualCompleted = ManualContainerOverrideManager.isCompleted(checkPos);
 
             Map<Integer, ItemStack> required = getCachedSchematicReq(checkPos, client);
             Set<Integer> ignoredSlots = getCachedIgnoredSlots(checkPos, client);
             boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
+            boolean manualNeedsFill = ManualContainerOverrideManager.isNeedsFill(checkPos);
 
             boolean hasRequiredItems = required != null && !required.isEmpty();
             boolean hasJob = hasRequiredItems;
@@ -291,6 +336,8 @@ public class HighlightScanner {
                 Set<Integer> schematicLocks = LitematicaContainerReader.getDisabledSlots(checkPos);
                 hasJob = hasJob || !schematicLocks.isEmpty() || LitematicaContainerReader.doesCrafterNeedLocking(checkPos, client);
             }
+
+            if (manualCompleted || manualNeedsFill) hasJob = true;
 
             if (!hasJob && !shouldCheckEmptySchematicContainer) continue;
 
@@ -308,7 +355,11 @@ public class HighlightScanner {
                 Map<Integer, ItemStack> cached = RealContainerCache.getCachedItems(checkPos);
                 HighlightState type;
 
-                if (cached == null) {
+                if (manualCompleted) {
+                    type = HighlightState.MANUAL_COMPLETED;
+                } else if (manualNeedsFill) {
+                    type = HighlightState.MANUAL_NEEDS_FILL;
+                } else if (cached == null) {
                     type = HighlightState.UNKNOWN;
                     queueHighlightRefresh(checkPos, UNKNOWN_REQUEST_INTERVAL_MS, now);
                 } else {
@@ -325,8 +376,12 @@ public class HighlightScanner {
                     nextMap.put(pos.toImmutable(), type);
                 }
             } else {
-                if (hasJob && !hideCompleted) {
-                    nextMap.put(pos.toImmutable(), HighlightState.UNKNOWN);
+                if (hasJob) {
+                    if (manualCompleted) {
+                        nextMap.put(pos.toImmutable(), HighlightState.MANUAL_COMPLETED);
+                    } else if (manualNeedsFill || !hideCompleted) {
+                        nextMap.put(pos.toImmutable(), manualNeedsFill ? HighlightState.MANUAL_NEEDS_FILL : HighlightState.UNKNOWN);
+                    }
                 }
             }
         }
@@ -396,9 +451,6 @@ public class HighlightScanner {
         CompletableFuture.runAsync(() -> {
             try {
                 Set<BlockPos> found = LitematicaPlacementContainerData.rebuildIndex();
-                if (found.isEmpty()) {
-                    found = extractAllContainersFromSchematic();
-                }
                 if (!found.equals(SCHEMATIC_CONTAINERS)) {
                     SCHEMATIC_REQ_CACHE.clear();
                     SCHEMATIC_IGNORED_SLOT_CACHE.clear();
@@ -521,6 +573,22 @@ public class HighlightScanner {
         };
     }
 
+    private static Iterable<BlockPos> getNearbyHighlightCandidates(BlockPos center, int radius) {
+        LinkedHashSet<BlockPos> candidates = new LinkedHashSet<>();
+        for (BlockPos pos : getNearbySchematicContainers(center, radius)) {
+            candidates.add(pos);
+        }
+
+        double radiusSq = radius * radius;
+        for (BlockPos pos : ManualContainerOverrideManager.getCurrentContextPositions()) {
+            if (radius <= 0 || pos.getSquaredDistance(center) <= radiusSq) {
+                candidates.add(pos.toImmutable());
+            }
+        }
+
+        return candidates;
+    }
+
     private static Map<BucketKey, Set<BlockPos>> buildContainerBuckets(Set<BlockPos> containers) {
         Map<BucketKey, Set<BlockPos>> buckets = new HashMap<>();
 
@@ -566,135 +634,6 @@ public class HighlightScanner {
         if (hasExtra) return HighlightState.OVERFILLED;
 
         return HighlightState.SATISFIED;
-    }
-
-    private static Set<BlockPos> extractAllContainersFromSchematic() {
-        Set<BlockPos> newSet = new HashSet<>();
-        try {
-            Object manager = fi.dy.masa.litematica.data.DataManager.getSchematicPlacementManager();
-            Collection<?> all = (Collection<?>) manager.getClass().getMethod("getAllSchematicsPlacements").invoke(manager);
-            if (all != null) {
-                var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
-
-                for (Object p : all) {
-                    Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-                    boolean enabled = true;
-                    try { enabled = (boolean) p.getClass().getMethod("isEnabled").invoke(p); } catch (Exception e) {}
-                    if (!enabled) continue;
-
-                    BlockPos origin = null;
-                    try {
-                        for (java.lang.reflect.Method m : p.getClass().getMethods()) {
-                            if (m.getParameterCount() == 0 && m.getReturnType() == BlockPos.class) {
-                                String name = m.getName().toLowerCase();
-                                if (name.contains("origin") || name.contains("pos")) {
-                                    origin = (BlockPos) m.invoke(p);
-                                    break;
-                                }
-                            }
-                        }
-                    } catch (Exception e) {}
-                    if (origin == null) origin = BlockPos.ORIGIN;
-
-                    List<NbtCompound> nbts = new ArrayList<>();
-                    extractNbts(p, nbts, visited, 0);
-
-                    for (NbtCompound nbt : nbts) {
-                        if (nbt.contains("x") && nbt.contains("y") && nbt.contains("z")) {
-                            int nx = getInt(nbt.get("x"));
-                            int ny = getInt(nbt.get("y"));
-                            int nz = getInt(nbt.get("z"));
-
-                            BlockPos directPos = new BlockPos(nx, ny, nz);
-                            BlockPos offsetPos = origin.add(nx, ny, nz);
-
-                            BlockPos worldPos = null;
-
-                            if (schematicWorld != null) {
-                                if (schematicWorld.getBlockState(offsetPos).hasBlockEntity()) {
-                                    worldPos = offsetPos;
-                                } else if (schematicWorld.getBlockState(directPos).hasBlockEntity()) {
-                                    worldPos = directPos;
-                                }
-                            }
-
-                            if (worldPos == null) {
-                                double distDirect = directPos.getSquaredDistance(origin);
-                                double distOffset = offsetPos.getSquaredDistance(origin);
-                                worldPos = (distDirect < distOffset) ? directPos : offsetPos;
-                            }
-
-                            newSet.add(worldPos);
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {}
-        return newSet;
-    }
-
-    private static void extractNbts(Object obj, List<NbtCompound> results, Set<Object> visited, int depth) {
-        if (obj == null || depth > 100 || !visited.add(obj)) return;
-
-        if (obj instanceof NbtCompound c) {
-            if (c.contains("x") && c.contains("y") && c.contains("z") && (c.contains("Items") || c.contains("id"))) {
-                results.add(c);
-            }
-            for (String key : c.getKeys()) {
-                NbtElement el = c.get(key);
-                if (el instanceof NbtCompound child) extractNbts(child, results, visited, depth + 1);
-                else if (el instanceof NbtList list) {
-                    for (int i = 0; i < list.size(); i++) extractNbts(list.get(i), results, visited, depth + 1);
-                }
-            }
-            return;
-        }
-
-        if (obj instanceof net.minecraft.block.entity.BlockEntity be) {
-            MinecraftClient client = MinecraftClient.getInstance();
-            if (client.world != null) {
-                try {
-                    NbtCompound c = be.createNbt(client.world.getRegistryManager());
-                    if (c != null && c.contains("x")) results.add(c);
-                } catch (Exception ignored) {}
-            }
-            return;
-        }
-
-        if (obj instanceof Map<?, ?> map) {
-            for (Object val : map.values()) extractNbts(val, results, visited, depth + 1);
-            return;
-        }
-        if (obj instanceof Iterable<?> iter) {
-            for (Object val : iter) extractNbts(val, results, visited, depth + 1);
-            return;
-        }
-        if (obj.getClass().isArray() && !obj.getClass().getComponentType().isPrimitive()) {
-            for (Object val : (Object[]) obj) extractNbts(val, results, visited, depth + 1);
-            return;
-        }
-
-        String pkg = obj.getClass().getPackage() != null ? obj.getClass().getPackage().getName() : "";
-        if (!pkg.startsWith("fi.dy.masa")) return;
-
-        Class<?> clazz = obj.getClass();
-        while (clazz != null && clazz != Object.class) {
-            for (java.lang.reflect.Field f : clazz.getDeclaredFields()) {
-                if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType().isPrimitive()) continue;
-                String fname = f.getName().toLowerCase();
-                if (fname.contains("parent") || fname.contains("screen") || fname.contains("gui") || fname.contains("client") || fname.contains("world") || fname.contains("manager")) continue;
-                try {
-                    f.setAccessible(true);
-                    extractNbts(f.get(obj), results, visited, depth + 1);
-                } catch (Exception ignored) {}
-            }
-            clazz = clazz.getSuperclass();
-        }
-    }
-
-    private static int getInt(NbtElement elem) {
-        if (elem instanceof net.minecraft.nbt.AbstractNbtNumber num) return num.intValue();
-        return 0;
     }
 
     private record BucketKey(int x, int y, int z) {
