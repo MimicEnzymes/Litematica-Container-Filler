@@ -53,6 +53,14 @@ public class HighlightScanner {
     private static long lastRenderLayerSignature = Long.MIN_VALUE;
     private static boolean pendingRenderLayerRefresh = false;
     private static long lastRenderLayerRefreshTick = Long.MIN_VALUE;
+    private static Map<BucketKey, Set<BlockPos>> cachedNearbyBucketSource = Collections.emptyMap();
+    private static List<Set<BlockPos>> cachedNearbyBucketSets = Collections.emptyList();
+    private static int cachedNearbyMinX = Integer.MIN_VALUE;
+    private static int cachedNearbyMaxX = Integer.MIN_VALUE;
+    private static int cachedNearbyMinY = Integer.MIN_VALUE;
+    private static int cachedNearbyMaxY = Integer.MIN_VALUE;
+    private static int cachedNearbyMinZ = Integer.MIN_VALUE;
+    private static int cachedNearbyMaxZ = Integer.MIN_VALUE;
 
     private static int tickCounter = 0;
     private static int boostedTicks = 0;
@@ -110,24 +118,10 @@ public class HighlightScanner {
             return collectSnapshot(indexed, cursor, limit);
         }
 
-        int minX = (center.getX() - radius) >> 4;
-        int maxX = (center.getX() + radius) >> 4;
-        int minY = (center.getY() - radius) >> 4;
-        int maxY = (center.getY() + radius) >> 4;
-        int minZ = (center.getZ() - radius) >> 4;
-        int maxZ = (center.getZ() + radius) >> 4;
-        List<Set<BlockPos>> bucketSets = new ArrayList<>();
+        List<Set<BlockPos>> bucketSets = getNearbyBucketSets(buckets, center, radius);
         int totalCount = 0;
-
-        for (int x = minX; x <= maxX; x++) {
-            for (int y = minY; y <= maxY; y++) {
-                for (int z = minZ; z <= maxZ; z++) {
-                    Set<BlockPos> bucket = buckets.get(new BucketKey(x, y, z));
-                    if (bucket == null || bucket.isEmpty()) continue;
-                    bucketSets.add(bucket);
-                    totalCount += bucket.size();
-                }
-            }
+        for (Set<BlockPos> bucket : bucketSets) {
+            totalCount += bucket.size();
         }
 
         if (totalCount == 0) {
@@ -209,6 +203,7 @@ public class HighlightScanner {
         ManualContainerOverrideManager.clearForCurrentContext();
         SCHEMATIC_CONTAINERS = Collections.emptySet();
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
+        invalidateNearbyBucketCache();
         lastIndexTime = 0;
         lastRenderLayerSignature = Long.MIN_VALUE;
         pendingRenderLayerRefresh = false;
@@ -229,6 +224,7 @@ public class HighlightScanner {
         ManualContainerOverrideManager.clearForCurrentContext();
         triggerBoost(BOOST_DURATION_TICKS);
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
+        invalidateNearbyBucketCache();
         lastRenderLayerSignature = Long.MIN_VALUE;
         pendingRenderLayerRefresh = false;
         lastRenderLayerRefreshTick = Long.MIN_VALUE;
@@ -520,6 +516,7 @@ public class HighlightScanner {
                 SCHEMATIC_CONTAINER_BUCKETS = buildContainerBuckets(found);
             } catch (Exception e) {} finally {
                 lastIndexTime = System.currentTimeMillis();
+                invalidateNearbyBucketCache();
                 isIndexing = false;
             }
         }, INDEX_EXECUTOR);
@@ -583,55 +580,80 @@ public class HighlightScanner {
             return indexed;
         }
 
-        int minX = (center.getX() - radius) >> 4;
-        int maxX = (center.getX() + radius) >> 4;
-        int minY = (center.getY() - radius) >> 4;
-        int maxY = (center.getY() + radius) >> 4;
-        int minZ = (center.getZ() - radius) >> 4;
-        int maxZ = (center.getZ() + radius) >> 4;
+        List<Set<BlockPos>> bucketSets = getNearbyBucketSets(buckets, center, radius);
         return () -> new Iterator<>() {
-            private int x = minX;
-            private int y = minY;
-            private int z = minZ;
+            private int bucketIndex = 0;
             private Iterator<BlockPos> current = Collections.emptyIterator();
-            private boolean finished = false;
 
             @Override
             public boolean hasNext() {
                 advance();
-                return !finished && current.hasNext();
+                return current.hasNext();
             }
 
             @Override
             public BlockPos next() {
                 advance();
-                if (finished || !current.hasNext()) {
+                if (!current.hasNext()) {
                     throw new NoSuchElementException();
                 }
                 return current.next();
             }
 
             private void advance() {
-                while (!finished && !current.hasNext()) {
-                    if (x > maxX) {
-                        finished = true;
-                        return;
-                    }
-
-                    Set<BlockPos> bucket = buckets.get(new BucketKey(x, y, z));
-                    current = bucket == null ? Collections.emptyIterator() : bucket.iterator();
-                    z++;
-                    if (z > maxZ) {
-                        z = minZ;
-                        y++;
-                        if (y > maxY) {
-                            y = minY;
-                            x++;
-                        }
-                    }
+                while (!current.hasNext() && bucketIndex < bucketSets.size()) {
+                    current = bucketSets.get(bucketIndex++).iterator();
                 }
             }
         };
+    }
+
+    private static List<Set<BlockPos>> getNearbyBucketSets(Map<BucketKey, Set<BlockPos>> buckets, BlockPos center, int radius) {
+        int minX = (center.getX() - radius) >> 4;
+        int maxX = (center.getX() + radius) >> 4;
+        int minY = (center.getY() - radius) >> 4;
+        int maxY = (center.getY() + radius) >> 4;
+        int minZ = (center.getZ() - radius) >> 4;
+        int maxZ = (center.getZ() + radius) >> 4;
+
+        if (buckets == cachedNearbyBucketSource &&
+                minX == cachedNearbyMinX && maxX == cachedNearbyMaxX &&
+                minY == cachedNearbyMinY && maxY == cachedNearbyMaxY &&
+                minZ == cachedNearbyMinZ && maxZ == cachedNearbyMaxZ) {
+            return cachedNearbyBucketSets;
+        }
+
+        List<Set<BlockPos>> bucketSets = new ArrayList<>();
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    Set<BlockPos> bucket = buckets.get(new BucketKey(x, y, z));
+                    if (bucket == null || bucket.isEmpty()) continue;
+                    bucketSets.add(bucket);
+                }
+            }
+        }
+
+        cachedNearbyBucketSource = buckets;
+        cachedNearbyBucketSets = bucketSets;
+        cachedNearbyMinX = minX;
+        cachedNearbyMaxX = maxX;
+        cachedNearbyMinY = minY;
+        cachedNearbyMaxY = maxY;
+        cachedNearbyMinZ = minZ;
+        cachedNearbyMaxZ = maxZ;
+        return bucketSets;
+    }
+
+    private static void invalidateNearbyBucketCache() {
+        cachedNearbyBucketSource = Collections.emptyMap();
+        cachedNearbyBucketSets = Collections.emptyList();
+        cachedNearbyMinX = Integer.MIN_VALUE;
+        cachedNearbyMaxX = Integer.MIN_VALUE;
+        cachedNearbyMinY = Integer.MIN_VALUE;
+        cachedNearbyMaxY = Integer.MIN_VALUE;
+        cachedNearbyMinZ = Integer.MIN_VALUE;
+        cachedNearbyMaxZ = Integer.MIN_VALUE;
     }
 
     private static Iterable<BlockPos> getNearbyHighlightCandidates(BlockPos center, int radius) {
