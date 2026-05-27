@@ -3,6 +3,7 @@ package com.mimicenzymes.litematicafiller.core;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.render.HighlightScanner;
+import com.mimicenzymes.litematicafiller.render.HighlightState;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
@@ -172,6 +173,8 @@ public class AreaScanner {
 
         if (!processedPositions.add(taskPos)) return;
         if (ManualContainerOverrideManager.isCompleted(taskPos)) return;
+        HighlightState highlightState = HighlightScanner.getHighlights().get(taskPos);
+        if (highlightState == HighlightState.SATISFIED || highlightState == HighlightState.MANUAL_COMPLETED) return;
         if (eyePos.squaredDistanceTo(Vec3d.ofCenter(taskPos)) > reachSq) return;
         if (isLoadedRealContainerMissing(mc, taskPos, halves)) return;
 

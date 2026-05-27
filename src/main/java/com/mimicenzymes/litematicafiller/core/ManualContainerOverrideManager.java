@@ -54,6 +54,10 @@ public class ManualContainerOverrideManager {
         return count;
     }
 
+    public static boolean hasOverrides() {
+        return !OVERRIDES.isEmpty();
+    }
+
     public static Set<BlockPos> getCurrentContextPositions() {
         Set<BlockPos> positions = new HashSet<>();
         for (BlockPos pos : iterateCurrentContextPositions()) {

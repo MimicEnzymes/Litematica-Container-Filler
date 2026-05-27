@@ -96,6 +96,21 @@ public class ContainerToolStateMachine {
         this.shulkerExtractor = DependencyChecker.HAS_QUICK_SHULKER ? new QuickShulkerWrapper() : new DummyExtractor();
     }
 
+    private static Iterable<ItemStack> containerStacks(ContainerComponent component) {
+        return () -> component.stream().iterator();
+    }
+
+    private static ItemStack getContainerStackAt(ContainerComponent component, int targetIndex) {
+        if (component == null || targetIndex < 0) return ItemStack.EMPTY;
+
+        int index = 0;
+        for (ItemStack stack : containerStacks(component)) {
+            if (index == targetIndex) return stack;
+            index++;
+        }
+        return ItemStack.EMPTY;
+    }
+
     public static ContainerToolStateMachine getInstance() {
         return INSTANCE;
     }
@@ -982,7 +997,7 @@ public class ContainerToolStateMachine {
                 ContainerComponent component = shulker.get(DataComponentTypes.CONTAINER);
                 if (component == null) continue;
 
-                for (ItemStack inner : component.stream().toList()) {
+                for (ItemStack inner : containerStacks(component)) {
                     if (ItemMatcher.isSameItem(inner, req)) {
                         slots.add(i);
                         amountToFind -= inner.getCount();
@@ -1330,10 +1345,7 @@ public class ContainerToolStateMachine {
         ContainerComponent component = shulker.get(DataComponentTypes.CONTAINER);
         if (component == null) return true;
 
-        List<ItemStack> innerStacks = component.stream().toList();
-        if (request.innerSlot() < 0 || request.innerSlot() >= innerStacks.size()) return true;
-
-        ItemStack inner = innerStacks.get(request.innerSlot());
+        ItemStack inner = getContainerStackAt(component, request.innerSlot());
         return inner.isEmpty() || !ItemMatcher.isSameItem(inner, request.requestedStack());
     }
 
@@ -1346,12 +1358,12 @@ public class ContainerToolStateMachine {
                 ContainerComponent component = shulker.get(DataComponentTypes.CONTAINER);
                 if (component == null) continue;
 
-                List<ItemStack> innerStacks = component.stream().toList();
-                for (int innerSlot = 0; innerSlot < innerStacks.size(); innerSlot++) {
-                    ItemStack inner = innerStacks.get(innerSlot);
+                int innerSlot = 0;
+                for (ItemStack inner : containerStacks(component)) {
                     if (ItemMatcher.isSameItem(inner, req)) {
                         return new TakeItOutRequest(shulkerSlot, innerSlot, req.copy(), countItemInPlayerInv(client, req));
                     }
+                    innerSlot++;
                 }
             }
         }

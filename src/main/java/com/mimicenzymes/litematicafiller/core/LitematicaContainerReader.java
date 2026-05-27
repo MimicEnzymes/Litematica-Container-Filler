@@ -38,6 +38,26 @@ public class LitematicaContainerReader {
         return getContainerHalves(world, pos, state, true, knownSlotCount);
     }
 
+    public static BlockPos[] getLargeBarrelConfirmationPair(net.minecraft.world.World world, BlockPos pos, BlockState state) {
+        if (Configs.getCarpetLargeBarrelMode() != CarpetLargeBarrelMode.AUTO) return null;
+        BlockPos[] pair = getPotentialLargeBarrelPair(world, pos, state);
+        if (pair == null) return null;
+        if (RealContainerCache.isConfirmedLargeBarrel(pair[0]) || RealContainerCache.isConfirmedLargeBarrel(pair[1])) {
+            return null;
+        }
+        int firstSlots = RealContainerCache.getCachedKnownSlotCount(pair[0]);
+        if (firstSlots > 0 && firstSlots < 54) return null;
+        int secondSlots = RealContainerCache.getCachedKnownSlotCount(pair[1]);
+        if (secondSlots > 0 && secondSlots < 54) return null;
+        return pair;
+    }
+
+    public static BlockPos[] getPotentialLargeBarrelPair(net.minecraft.world.World world, BlockPos pos, BlockState state) {
+        if (world == null || pos == null || state == null || !state.isOf(net.minecraft.block.Blocks.BARREL)) return null;
+        Direction facing = state.get(net.minecraft.block.BarrelBlock.FACING);
+        return getLargeBarrelPair(world, pos, facing, pos.offset(facing.getOpposite()));
+    }
+
     private static BlockPos[] getContainerHalves(net.minecraft.world.World world, BlockPos pos, BlockState state, boolean renderOnly, int knownSlotCount) {
         if (state.getBlock() instanceof ChestBlock) {
             ChestType type = state.get(ChestBlock.CHEST_TYPE);
@@ -49,8 +69,7 @@ public class LitematicaContainerReader {
                 return new BlockPos[]{rightPos, leftPos};
             }
         } else if (state.isOf(net.minecraft.block.Blocks.BARREL)) {
-            Direction facing = state.get(net.minecraft.block.BarrelBlock.FACING);
-            BlockPos[] pair = getLargeBarrelPair(world, pos, facing, pos.offset(facing.getOpposite()));
+            BlockPos[] pair = getPotentialLargeBarrelPair(world, pos, state);
             if (pair == null) return null;
 
             return shouldUseLargeBarrels(world, pos, state, pair, renderOnly, knownSlotCount) ? pair : null;
@@ -66,6 +85,7 @@ public class LitematicaContainerReader {
         BlockPos mate = pair[0].equals(pos) ? pair[1] : pair[0];
 
         if (knownSlotCount >= 54) return true;
+        if (RealContainerCache.isConfirmedLargeBarrel(pair[0]) || RealContainerCache.isConfirmedLargeBarrel(pair[1])) return true;
         if (knownSlotCount > 0) return false;
 
         int cachedSlotCount = RealContainerCache.getKnownSlotCount(pos);
@@ -117,12 +137,8 @@ public class LitematicaContainerReader {
         if (halves != null) {
             Map<Integer, ItemStack> rightHalf = getSingleContainerItems(schematicWorld, halves[0], registries);
             Map<Integer, ItemStack> leftHalf = getSingleContainerItems(schematicWorld, halves[1], registries);
-
-            items.putAll(rightHalf);
-
-            for (Map.Entry<Integer, ItemStack> entry : leftHalf.entrySet()) {
-                items.put(entry.getKey() + 27, entry.getValue());
-            }
+            Map<Integer, ItemStack> combined = RealContainerCache.combineDoubleContainerItems(rightHalf, leftHalf);
+            if (combined != null) items.putAll(combined);
         } else {
             items.putAll(getSingleContainerItems(schematicWorld, worldPos, registries));
         }
@@ -156,19 +172,22 @@ public class LitematicaContainerReader {
         BlockPos[] halves = getDoubleContainerHalves(schematicWorld, worldPos, state);
 
         if (halves != null) {
-            collectIgnoredSlots(getSingleContainerItems(schematicWorld, halves[0], registries), 0, ignoredSlots);
-            collectIgnoredSlots(getSingleContainerItems(schematicWorld, halves[1], registries), 27, ignoredSlots);
+            Map<Integer, ItemStack> combined = RealContainerCache.combineDoubleContainerItems(
+                    getSingleContainerItems(schematicWorld, halves[0], registries),
+                    getSingleContainerItems(schematicWorld, halves[1], registries));
+            collectIgnoredSlots(combined, ignoredSlots);
         } else {
-            collectIgnoredSlots(getSingleContainerItems(schematicWorld, worldPos, registries), 0, ignoredSlots);
+            collectIgnoredSlots(getSingleContainerItems(schematicWorld, worldPos, registries), ignoredSlots);
         }
 
         return ignoredSlots;
     }
 
-    private static void collectIgnoredSlots(Map<Integer, ItemStack> items, int offset, Set<Integer> ignoredSlots) {
+    private static void collectIgnoredSlots(Map<Integer, ItemStack> items, Set<Integer> ignoredSlots) {
+        if (items == null) return;
         for (Map.Entry<Integer, ItemStack> entry : items.entrySet()) {
             if (MaterialReplacer.isIgnored(entry.getValue())) {
-                ignoredSlots.add(entry.getKey() + offset);
+                ignoredSlots.add(entry.getKey());
             }
         }
     }

@@ -58,19 +58,21 @@ public class HighlightRenderer {
 
         AutoFillerStateMachine filler = AutoFillerStateMachine.getInstance();
         Map<BlockPos, HighlightState> highlights = HighlightScanner.getHighlights();
-        if (highlights.isEmpty() && !filler.hasRenderableTaskMarkers()) {
+        boolean renderFilling = Configs.RENDER_FILLING_ARROW.getBooleanValue();
+        boolean renderQueued = Configs.RENDER_QUEUED_SPINNER.getBooleanValue();
+        boolean renderMissing = Configs.RENDER_MISSING_MATERIAL_MARKER.getBooleanValue();
+        if (highlights.isEmpty() && !filler.hasRenderableTaskMarkers(renderFilling, renderQueued, renderMissing)) {
             clearRenderCache();
             return;
         }
 
-        BlockPos currentTaskPos = filler.getCurrentTaskPos();
-        Set<BlockPos> queuedTaskPositions = filler.getQueuedTaskPositions();
-        Set<BlockPos> missingMaterialPositions = filler.getMissingMaterialPositions();
-        Set<BlockPos> recentFillingPositions = filler.getRecentFillingPositions();
+        BlockPos currentTaskPos = renderFilling ? filler.getCurrentTaskPos() : null;
+        Set<BlockPos> queuedTaskPositions = renderQueued ? filler.getQueuedTaskPositions() : Collections.emptySet();
+        Set<BlockPos> missingMaterialPositions = renderMissing ? filler.getMissingMaterialPositions() : Collections.emptySet();
         if (highlights.isEmpty()) {
             clearRenderCache();
-            if (hasTaskOverlay(currentTaskPos, queuedTaskPositions, missingMaterialPositions, recentFillingPositions)) {
-                drawTaskOverlays(RenderUtils.camPos(), Configs.HIGHLIGHT_XRAY.getBooleanValue(), currentTaskPos, queuedTaskPositions, missingMaterialPositions, recentFillingPositions);
+            if (hasTaskOverlay(currentTaskPos, queuedTaskPositions, missingMaterialPositions)) {
+                drawTaskOverlays(RenderUtils.camPos(), Configs.HIGHLIGHT_XRAY.getBooleanValue(), currentTaskPos, queuedTaskPositions, missingMaterialPositions);
             }
             return;
         }
@@ -93,7 +95,7 @@ public class HighlightRenderer {
 
             rebuildDirtyChunks(xray, cameraPos);
             drawChunkCaches(cameraPos);
-            drawTaskOverlays(cameraPos, xray, currentTaskPos, queuedTaskPositions, missingMaterialPositions, recentFillingPositions);
+            drawTaskOverlays(cameraPos, xray, currentTaskPos, queuedTaskPositions, missingMaterialPositions);
         } catch (Exception e) {
             clearRenderCache();
             LOGGER.warn("Failed to render container highlights", e);
@@ -258,14 +260,12 @@ public class HighlightRenderer {
         }
     }
 
-    private boolean hasTaskOverlay(BlockPos currentTaskPos, Set<BlockPos> queuedTaskPositions, Set<BlockPos> missingMaterialPositions, Set<BlockPos> recentFillingPositions) {
-        return (Configs.RENDER_FILLING_ARROW.getBooleanValue() && currentTaskPos != null)
-                || (Configs.RENDER_QUEUED_SPINNER.getBooleanValue() && !queuedTaskPositions.isEmpty())
-                || (Configs.RENDER_MISSING_MATERIAL_MARKER.getBooleanValue() && !missingMaterialPositions.isEmpty());
+    private boolean hasTaskOverlay(BlockPos currentTaskPos, Set<BlockPos> queuedTaskPositions, Set<BlockPos> missingMaterialPositions) {
+        return currentTaskPos != null || !queuedTaskPositions.isEmpty() || !missingMaterialPositions.isEmpty();
     }
 
-    private void drawTaskOverlays(Vec3d cameraPos, boolean xray, BlockPos currentTaskPos, Set<BlockPos> queuedTaskPositions, Set<BlockPos> missingMaterialPositions, Set<BlockPos> recentFillingPositions) {
-        if (!hasTaskOverlay(currentTaskPos, queuedTaskPositions, missingMaterialPositions, recentFillingPositions)) {
+    private void drawTaskOverlays(Vec3d cameraPos, boolean xray, BlockPos currentTaskPos, Set<BlockPos> queuedTaskPositions, Set<BlockPos> missingMaterialPositions) {
+        if (!hasTaskOverlay(currentTaskPos, queuedTaskPositions, missingMaterialPositions)) {
             clearTaskOverlayCache();
             return;
         }
@@ -274,8 +274,9 @@ public class HighlightRenderer {
         BuiltBuffer meshData = null;
         try {
             int fpsLimit = Configs.TASK_MARKER_ANIMATION_FPS.getIntegerValue();
-            double rawTime = System.nanoTime() / 1_000_000_000.0D;
-            long frame = fpsLimit <= 0 ? System.nanoTime() : (long)Math.floor(rawTime * fpsLimit);
+            long nanoTime = System.nanoTime();
+            double rawTime = nanoTime / 1_000_000_000.0D;
+            long frame = fpsLimit <= 0 ? nanoTime : (long)Math.floor(rawTime * fpsLimit);
             double time = fpsLimit <= 0 ? rawTime : frame / (double)fpsLimit;
             long signature = computeTaskOverlaySignature(xray, currentTaskPos, queuedTaskPositions, missingMaterialPositions);
             if (taskOverlayCache != null && taskOverlaySignature == signature && taskOverlayFrame == frame) {
@@ -294,13 +295,11 @@ public class HighlightRenderer {
             var buffer = ctx.getBuilder();
             if (buffer == null) return;
 
-            if (Configs.RENDER_FILLING_ARROW.getBooleanValue()) {
-                if (currentTaskPos != null) {
-                    drawFillingArrow(getHighlightBox(currentTaskPos), cameraPos, time, buffer);
-                }
+            if (currentTaskPos != null) {
+                drawFillingArrow(getHighlightBox(currentTaskPos), cameraPos, time, buffer);
             }
 
-            if (Configs.RENDER_QUEUED_SPINNER.getBooleanValue()) {
+            if (!queuedTaskPositions.isEmpty()) {
                 int count = 0;
                 int maxQueued = Configs.MAX_QUEUED_RENDER_OVERLAYS.getIntegerValue();
                 for (BlockPos pos : queuedTaskPositions) {
@@ -310,7 +309,7 @@ public class HighlightRenderer {
                 }
             }
 
-            if (Configs.RENDER_MISSING_MATERIAL_MARKER.getBooleanValue()) {
+            if (!missingMaterialPositions.isEmpty()) {
                 int count = 0;
                 int maxMissing = Configs.MAX_QUEUED_RENDER_OVERLAYS.getIntegerValue();
                 for (BlockPos pos : missingMaterialPositions) {
