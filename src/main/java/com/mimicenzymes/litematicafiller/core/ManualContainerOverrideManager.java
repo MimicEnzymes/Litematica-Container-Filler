@@ -5,9 +5,11 @@ import net.minecraft.registry.RegistryKey;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ManualContainerOverrideManager {
@@ -53,15 +55,58 @@ public class ManualContainerOverrideManager {
     }
 
     public static Set<BlockPos> getCurrentContextPositions() {
+        Set<BlockPos> positions = new HashSet<>();
+        for (BlockPos pos : iterateCurrentContextPositions()) {
+            positions.add(pos);
+        }
+        return positions;
+    }
+
+    public static Iterable<BlockPos> iterateCurrentContextPositions() {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.world == null) return Set.of();
 
         RegistryKey<World> dimension = client.world.getRegistryKey();
-        return OVERRIDES.entrySet().stream()
-                .filter(entry -> entry.getKey().dimension != null && entry.getKey().dimension.equals(dimension))
-                .filter(entry -> entry.getValue() != ManualContainerOverrideState.AUTO)
-                .map(entry -> entry.getKey().pos)
-                .collect(Collectors.toSet());
+        return () -> new Iterator<>() {
+            private final Iterator<Map.Entry<Key, ManualContainerOverrideState>> iterator = OVERRIDES.entrySet().iterator();
+            private BlockPos next;
+            private boolean prepared;
+
+            @Override
+            public boolean hasNext() {
+                prepare();
+                return next != null;
+            }
+
+            @Override
+            public BlockPos next() {
+                prepare();
+                if (next == null) {
+                    throw new NoSuchElementException();
+                }
+                BlockPos result = next;
+                next = null;
+                prepared = false;
+                return result;
+            }
+
+            private void prepare() {
+                if (prepared) return;
+                prepared = true;
+
+                while (iterator.hasNext()) {
+                    Map.Entry<Key, ManualContainerOverrideState> entry = iterator.next();
+                    Key key = entry.getKey();
+                    if (key.dimension != null && key.dimension.equals(dimension) &&
+                            entry.getValue() != ManualContainerOverrideState.AUTO) {
+                        next = key.pos;
+                        return;
+                    }
+                }
+
+                next = null;
+            }
+        };
     }
 
     public static void clearForCurrentContext() {

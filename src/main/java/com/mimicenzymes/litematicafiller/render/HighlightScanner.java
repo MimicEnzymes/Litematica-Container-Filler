@@ -574,19 +574,56 @@ public class HighlightScanner {
     }
 
     private static Iterable<BlockPos> getNearbyHighlightCandidates(BlockPos center, int radius) {
-        LinkedHashSet<BlockPos> candidates = new LinkedHashSet<>();
-        for (BlockPos pos : getNearbySchematicContainers(center, radius)) {
-            candidates.add(pos);
-        }
-
+        Iterable<BlockPos> schematicCandidates = getNearbySchematicContainers(center, radius);
         double radiusSq = radius * radius;
-        for (BlockPos pos : ManualContainerOverrideManager.getCurrentContextPositions()) {
-            if (radius <= 0 || pos.getSquaredDistance(center) <= radiusSq) {
-                candidates.add(pos.toImmutable());
-            }
-        }
+        return () -> new Iterator<>() {
+            private final Iterator<BlockPos> schematicIterator = schematicCandidates.iterator();
+            private final Iterator<BlockPos> manualIterator = ManualContainerOverrideManager.iterateCurrentContextPositions().iterator();
+            private BlockPos nextManual;
+            private boolean schematicDone;
+            private boolean manualPrepared;
 
-        return candidates;
+            @Override
+            public boolean hasNext() {
+                if (!schematicDone && schematicIterator.hasNext()) {
+                    return true;
+                }
+                schematicDone = true;
+                prepareManual();
+                return nextManual != null;
+            }
+
+            @Override
+            public BlockPos next() {
+                if (!schematicDone && schematicIterator.hasNext()) {
+                    return schematicIterator.next();
+                }
+                schematicDone = true;
+                prepareManual();
+                if (nextManual == null) {
+                    throw new NoSuchElementException();
+                }
+                BlockPos result = nextManual;
+                nextManual = null;
+                manualPrepared = false;
+                return result;
+            }
+
+            private void prepareManual() {
+                if (manualPrepared) return;
+                manualPrepared = true;
+
+                while (manualIterator.hasNext()) {
+                    BlockPos pos = manualIterator.next();
+                    if (radius > 0 && pos.getSquaredDistance(center) > radiusSq) continue;
+                    if (SCHEMATIC_CONTAINERS.contains(pos)) continue;
+                    nextManual = pos.toImmutable();
+                    return;
+                }
+
+                nextManual = null;
+            }
+        };
     }
 
     private static Map<BucketKey, Set<BlockPos>> buildContainerBuckets(Set<BlockPos> containers) {
