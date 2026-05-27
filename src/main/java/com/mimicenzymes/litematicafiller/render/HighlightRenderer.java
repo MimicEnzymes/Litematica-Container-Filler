@@ -33,6 +33,7 @@ public class HighlightRenderer {
 
     private final Map<ChunkKey, ChunkRenderCache> chunkCaches = new HashMap<>();
     private final Map<ChunkKey, Map<BlockPos, HighlightState>> desiredChunks = new HashMap<>();
+    private final Map<ChunkKey, ChunkFingerprint> desiredChunkFingerprints = new HashMap<>();
     private final Set<ChunkKey> dirtyChunks = new LinkedHashSet<>();
     private final float[] renderOffset = new float[3];
     private int cachedHighlightVersion = -1;
@@ -100,11 +101,19 @@ public class HighlightRenderer {
     }
 
     private void updateDesiredChunks(Map<BlockPos, HighlightState> highlights) {
-        Map<ChunkKey, Map<BlockPos, HighlightState>> nextChunks = new HashMap<>();
+        Map<ChunkKey, ChunkUpdate> nextChunks = new HashMap<>(Math.max(16, highlights.size() >> 4));
         for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
-            if (!shouldRenderState(entry.getValue())) continue;
-            ChunkKey key = ChunkKey.from(entry.getKey());
-            nextChunks.computeIfAbsent(key, ignored -> new HashMap<>()).put(entry.getKey().toImmutable(), entry.getValue());
+            HighlightState state = entry.getValue();
+            if (!shouldRenderState(state)) continue;
+
+            BlockPos pos = entry.getKey().toImmutable();
+            ChunkKey key = ChunkKey.from(pos);
+            ChunkUpdate update = nextChunks.get(key);
+            if (update == null) {
+                update = new ChunkUpdate();
+                nextChunks.put(key, update);
+            }
+            update.add(pos, state, highlightEntryHash(pos, state));
         }
 
         Iterator<ChunkKey> existing = desiredChunks.keySet().iterator();
@@ -112,16 +121,20 @@ public class HighlightRenderer {
             ChunkKey key = existing.next();
             if (!nextChunks.containsKey(key)) {
                 existing.remove();
+                desiredChunkFingerprints.remove(key);
                 dirtyChunks.remove(key);
                 removeChunkCache(key);
             }
         }
 
-        for (Map.Entry<ChunkKey, Map<BlockPos, HighlightState>> entry : nextChunks.entrySet()) {
-            Map<BlockPos, HighlightState> previous = desiredChunks.get(entry.getKey());
-            if (!entry.getValue().equals(previous)) {
-                desiredChunks.put(entry.getKey(), entry.getValue());
-                dirtyChunks.add(entry.getKey());
+        for (Map.Entry<ChunkKey, ChunkUpdate> entry : nextChunks.entrySet()) {
+            ChunkKey key = entry.getKey();
+            ChunkUpdate update = entry.getValue();
+            ChunkFingerprint fingerprint = update.fingerprint();
+            if (!fingerprint.equals(desiredChunkFingerprints.get(key))) {
+                desiredChunks.put(key, update.states);
+                desiredChunkFingerprints.put(key, fingerprint);
+                dirtyChunks.add(key);
             }
         }
     }
@@ -515,6 +528,7 @@ public class HighlightRenderer {
         }
         chunkCaches.clear();
         desiredChunks.clear();
+        desiredChunkFingerprints.clear();
         dirtyChunks.clear();
         clearTaskOverlayCache();
         cachedHighlightVersion = -1;
@@ -576,6 +590,12 @@ public class HighlightRenderer {
         return state == HighlightState.MANUAL_COMPLETED || state == HighlightState.MANUAL_NEEDS_FILL;
     }
 
+    private long highlightEntryHash(BlockPos pos, HighlightState state) {
+        long value = pos.asLong();
+        value ^= ((long) state.ordinal() + 0x9e3779b97f4a7c15L) * 0xbf58476d1ce4e5b9L;
+        return mix64(value);
+    }
+
     private void drawManualOverrideBadge(HighlightBox box, HighlightState state, Vec3d cameraPos, net.minecraft.client.render.BufferBuilder buffer) {
         float size = Math.min(box.maxX() - box.minX(), box.maxZ() - box.minZ());
         float cx = box.centerX();
@@ -624,6 +644,26 @@ public class HighlightRenderer {
             return new ChunkKey(pos.getX() >> RENDER_CACHE_REGION_SHIFT, pos.getZ() >> RENDER_CACHE_REGION_SHIFT);
         }
     }
+
+    private static final class ChunkUpdate {
+        private final Map<BlockPos, HighlightState> states = new HashMap<>();
+        private long sum = 0L;
+        private long xor = 0L;
+        private int count = 0;
+
+        private void add(BlockPos pos, HighlightState state, long entryHash) {
+            states.put(pos, state);
+            sum += entryHash;
+            xor ^= Long.rotateLeft(entryHash, (int) (entryHash & 63L));
+            count++;
+        }
+
+        private ChunkFingerprint fingerprint() {
+            return new ChunkFingerprint(count, sum, xor);
+        }
+    }
+
+    private record ChunkFingerprint(int count, long sum, long xor) {}
 
     private record ChunkRenderCache(RenderContext lineContext, RenderContext fillContext, double cameraX, double cameraY, double cameraZ) {}
 
