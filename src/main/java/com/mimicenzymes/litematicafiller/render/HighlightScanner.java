@@ -41,6 +41,7 @@ public class HighlightScanner {
     private static final Deque<BlockPos> DATA_REQUEST_QUEUE = new ArrayDeque<>();
     private static final Set<BlockPos> QUEUED_DATA_REQUESTS = new HashSet<>();
     private static volatile int highlightVersion = 0;
+    private static HighlightFingerprint highlightFingerprint = HighlightFingerprint.empty();
     private static final ExecutorService INDEX_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "LitematicaFiller-HighlightScanner");
         thread.setDaemon(true);
@@ -101,7 +102,10 @@ public class HighlightScanner {
                 changed = true;
             }
         }
-        if (changed) highlightVersion++;
+        if (changed) {
+            highlightFingerprint = computeHighlightFingerprint(HIGHLIGHT_MAP);
+            highlightVersion++;
+        }
         triggerBoost(BOOST_DURATION_TICKS);
     }
 
@@ -315,7 +319,7 @@ public class HighlightScanner {
         int currentRadius = Configs.RENDER_RADIUS.getIntegerValue();
         double radiusSq = currentRadius * currentRadius;
 
-        Map<BlockPos, HighlightState> nextMap = new HashMap<>();
+        HighlightBuild nextHighlights = new HighlightBuild();
 
         for (BlockPos pos : getNearbyHighlightCandidates(currentCenter, currentRadius)) {
             if (currentRadius > 0 && pos.getSquaredDistance(currentCenter) > radiusSq) continue;
@@ -331,7 +335,7 @@ public class HighlightScanner {
             if (!schematicContainer) {
                 BlockState realState = client.world.getBlockState(pos);
                 if (!ContainerBlockFilter.isAllowedForSchematicFill(realState, client.world, pos)) continue;
-                nextMap.put(pos.toImmutable(), ManualContainerOverrideManager.isCompleted(pos)
+                nextHighlights.put(pos, ManualContainerOverrideManager.isCompleted(pos)
                         ? HighlightState.MANUAL_COMPLETED
                         : HighlightState.MANUAL_NEEDS_FILL);
                 continue;
@@ -347,13 +351,15 @@ public class HighlightScanner {
             Set<Integer> ignoredSlots = getCachedIgnoredSlots(checkPos, client);
             boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
             boolean manualNeedsFill = ManualContainerOverrideManager.isNeedsFill(checkPos);
+            boolean crafterNeedsLocking = false;
 
             boolean hasRequiredItems = required != null && !required.isEmpty();
             boolean hasJob = hasRequiredItems;
             boolean shouldCheckEmptySchematicContainer = Configs.HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS.getBooleanValue();
             if (isCrafter) {
                 Set<Integer> schematicLocks = LitematicaContainerReader.getDisabledSlots(checkPos);
-                hasJob = hasJob || !schematicLocks.isEmpty() || LitematicaContainerReader.doesCrafterNeedLocking(checkPos, client);
+                crafterNeedsLocking = LitematicaContainerReader.doesCrafterNeedLocking(checkPos, client);
+                hasJob = hasJob || !schematicLocks.isEmpty() || crafterNeedsLocking;
             }
 
             if (manualCompleted || manualNeedsFill) hasJob = true;
@@ -365,7 +371,7 @@ public class HighlightScanner {
                     observeRealContainerStates(client, checkPos, halves);
                     clearRealContainerCache(checkPos, halves);
                     if (Configs.HIGHLIGHT_UNPLACED_CONTAINERS.getBooleanValue() && hasJob) {
-                        nextMap.put(pos.toImmutable(), HighlightState.UNPLACED);
+                        nextHighlights.put(pos, HighlightState.UNPLACED);
                     }
                     continue;
                 }
@@ -382,7 +388,7 @@ public class HighlightScanner {
                     type = HighlightState.UNKNOWN;
                     queueHighlightRefresh(checkPos, UNKNOWN_REQUEST_INTERVAL_MS, now);
                 } else {
-                    type = evaluateState(cached, required, ignoredSlots, isCrafter, checkPos, client);
+                    type = evaluateState(cached, required, ignoredSlots, isCrafter, crafterNeedsLocking);
                     queueHighlightRefresh(checkPos, requestIntervalFor(type), now);
                 }
 
@@ -392,20 +398,20 @@ public class HighlightScanner {
 
                 if (hasJob || type != HighlightState.UNKNOWN) {
                     if (hideCompleted && type == HighlightState.SATISFIED) continue;
-                    nextMap.put(pos.toImmutable(), type);
+                    nextHighlights.put(pos, type);
                 }
             } else {
                 if (hasJob) {
                     if (manualCompleted) {
-                        nextMap.put(pos.toImmutable(), HighlightState.MANUAL_COMPLETED);
+                        nextHighlights.put(pos, HighlightState.MANUAL_COMPLETED);
                     } else if (manualNeedsFill || !hideCompleted) {
-                        nextMap.put(pos.toImmutable(), manualNeedsFill ? HighlightState.MANUAL_NEEDS_FILL : HighlightState.UNKNOWN);
+                        nextHighlights.put(pos, manualNeedsFill ? HighlightState.MANUAL_NEEDS_FILL : HighlightState.UNKNOWN);
                     }
                 }
             }
         }
 
-        replaceHighlightsIfChanged(nextMap);
+        replaceHighlightsIfChanged(nextHighlights);
         if (boostedTicks > 0) {
             boostedTicks--;
         }
@@ -526,15 +532,28 @@ public class HighlightScanner {
         if (HIGHLIGHT_MAP.isEmpty()) return;
 
         HIGHLIGHT_MAP.clear();
+        highlightFingerprint = HighlightFingerprint.empty();
         highlightVersion++;
     }
 
-    private static void replaceHighlightsIfChanged(Map<BlockPos, HighlightState> nextMap) {
-        if (HIGHLIGHT_MAP.equals(nextMap)) return;
+    private static void replaceHighlightsIfChanged(HighlightBuild nextHighlights) {
+        HighlightFingerprint nextFingerprint = nextHighlights.fingerprint();
+        if (highlightFingerprint.equals(nextFingerprint)) {
+            return;
+        }
 
         HIGHLIGHT_MAP.clear();
-        HIGHLIGHT_MAP.putAll(nextMap);
+        HIGHLIGHT_MAP.putAll(nextHighlights.states);
+        highlightFingerprint = nextFingerprint;
         highlightVersion++;
+    }
+
+    private static HighlightFingerprint computeHighlightFingerprint(Map<BlockPos, HighlightState> highlights) {
+        HighlightBuild build = new HighlightBuild();
+        for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
+            build.put(entry.getKey(), entry.getValue());
+        }
+        return build.fingerprint();
     }
 
     private static long requestIntervalFor(HighlightState type) {
@@ -719,7 +738,7 @@ public class HighlightScanner {
         return buckets;
     }
 
-    private static HighlightState evaluateState(Map<Integer, ItemStack> realItems, Map<Integer, ItemStack> required, Set<Integer> ignoredSlots, boolean isCrafter, BlockPos pos, MinecraftClient client) {
+    private static HighlightState evaluateState(Map<Integer, ItemStack> realItems, Map<Integer, ItemStack> required, Set<Integer> ignoredSlots, boolean isCrafter, boolean crafterNeedsLocking) {
         if (realItems == null) return HighlightState.UNKNOWN;
 
         int maxSlot = isCrafter ? 9 : 54;
@@ -745,15 +764,63 @@ public class HighlightScanner {
                     else if (real.getCount() < req.getCount()) hasPartial = true;
                 }
             }
+
+            if (hasWrong) return HighlightState.WRONG_ITEM;
         }
 
-        if (isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, client)) hasPartial = true;
+        if (crafterNeedsLocking) hasPartial = true;
 
-        if (hasWrong) return HighlightState.WRONG_ITEM;
         if (hasPartial) return hasAnyReal ? HighlightState.PARTIAL : HighlightState.UNFILLED;
         if (hasExtra) return HighlightState.OVERFILLED;
 
         return HighlightState.SATISFIED;
+    }
+
+    private static long highlightEntryHash(BlockPos pos, HighlightState state) {
+        long value = pos.asLong();
+        value ^= ((long) state.ordinal() + 0x9e3779b97f4a7c15L) * 0xbf58476d1ce4e5b9L;
+        return mix64(value);
+    }
+
+    private static final class HighlightBuild {
+        private final Map<BlockPos, HighlightState> states = new HashMap<>();
+        private int count = 0;
+        private long sum = 0L;
+        private long xor = 0L;
+
+        private void put(BlockPos pos, HighlightState state) {
+            if (pos == null || state == null) return;
+            BlockPos key = pos.toImmutable();
+            HighlightState previous = states.put(key, state);
+            if (previous != null) {
+                remove(key, previous);
+            }
+            add(key, state);
+        }
+
+        private void add(BlockPos pos, HighlightState state) {
+            long hash = highlightEntryHash(pos, state);
+            count++;
+            sum += hash;
+            xor ^= Long.rotateLeft(hash, (int) (hash & 63L));
+        }
+
+        private void remove(BlockPos pos, HighlightState state) {
+            long hash = highlightEntryHash(pos, state);
+            count--;
+            sum -= hash;
+            xor ^= Long.rotateLeft(hash, (int) (hash & 63L));
+        }
+
+        private HighlightFingerprint fingerprint() {
+            return new HighlightFingerprint(count, sum, xor);
+        }
+    }
+
+    private record HighlightFingerprint(int count, long sum, long xor) {
+        static HighlightFingerprint empty() {
+            return new HighlightFingerprint(0, 0L, 0L);
+        }
     }
 
     private record BucketKey(int x, int y, int z) {
