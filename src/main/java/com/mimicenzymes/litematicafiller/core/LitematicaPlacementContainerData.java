@@ -27,9 +27,6 @@ public class LitematicaPlacementContainerData {
 
     public static Set<BlockPos> rebuildIndex() {
         Snapshot next = buildSnapshot();
-        if (!next.valid()) {
-            return snapshot.positions();
-        }
         snapshot = next;
         return next.positions();
     }
@@ -95,13 +92,11 @@ public class LitematicaPlacementContainerData {
                 }
             }
         } catch (Exception ignored) {
-            return Snapshot.failed();
         }
 
         return new Snapshot(
                 Collections.unmodifiableSet(positions),
                 Collections.unmodifiableMap(nbtByWorldPos),
-                true,
                 true
         );
     }
@@ -111,10 +106,7 @@ public class LitematicaPlacementContainerData {
 
         synchronized (LitematicaPlacementContainerData.class) {
             if (!snapshot.initialized()) {
-                Snapshot next = buildSnapshot();
-                if (next.valid()) {
-                    snapshot = next;
-                }
+                snapshot = buildSnapshot();
             }
         }
     }
@@ -184,13 +176,9 @@ public class LitematicaPlacementContainerData {
         }
     }
 
-    private record Snapshot(Set<BlockPos> positions, Map<BlockPos, NbtCompound> nbtByWorldPos, boolean initialized, boolean valid) {
+    private record Snapshot(Set<BlockPos> positions, Map<BlockPos, NbtCompound> nbtByWorldPos, boolean initialized) {
         static Snapshot empty() {
-            return new Snapshot(Collections.emptySet(), Collections.emptyMap(), false, true);
-        }
-
-        static Snapshot failed() {
-            return new Snapshot(Collections.emptySet(), Collections.emptyMap(), false, false);
+            return new Snapshot(Collections.emptySet(), Collections.emptyMap(), false);
         }
     }
 }
