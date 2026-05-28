@@ -25,20 +25,40 @@ import java.util.Set;
 public class LitematicaContainerReader {
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    public static BlockPos[] getDoubleContainerHalves(net.minecraft.world.level.Level world, BlockPos pos, BlockState state) {
-        return getDoubleContainerHalves(world, pos, state, -1);
+    public static BlockPos[] getDoubleContainerHalves(net.minecraft.world.level.Level Level, BlockPos pos, BlockState state) {
+        return getDoubleContainerHalves(Level, pos, state, -1);
     }
 
-    public static BlockPos[] getDoubleContainerHalves(net.minecraft.world.level.Level world, BlockPos pos, BlockState state, int knownSlotCount) {
-        return getContainerHalves(world, pos, state, false, knownSlotCount);
+    public static BlockPos[] getDoubleContainerHalves(net.minecraft.world.level.Level Level, BlockPos pos, BlockState state, int knownSlotCount) {
+        return getContainerHalves(Level, pos, state, false, knownSlotCount);
     }
 
-    public static BlockPos[] getRenderContainerHalves(net.minecraft.world.level.Level world, BlockPos pos, BlockState state) {
+    public static BlockPos[] getRenderContainerHalves(net.minecraft.world.level.Level Level, BlockPos pos, BlockState state) {
         int knownSlotCount = RealContainerCache.getKnownSlotCount(pos);
-        return getContainerHalves(world, pos, state, true, knownSlotCount);
+        return getContainerHalves(Level, pos, state, true, knownSlotCount);
     }
 
-    private static BlockPos[] getContainerHalves(net.minecraft.world.level.Level world, BlockPos pos, BlockState state, boolean renderOnly, int knownSlotCount) {
+    public static BlockPos[] getLargeBarrelConfirmationPair(net.minecraft.world.level.Level Level, BlockPos pos, BlockState state) {
+        if (Configs.getCarpetLargeBarrelMode() != CarpetLargeBarrelMode.AUTO) return null;
+        BlockPos[] pair = getPotentialLargeBarrelPair(Level, pos, state);
+        if (pair == null) return null;
+        if (RealContainerCache.isConfirmedLargeBarrel(pair[0]) || RealContainerCache.isConfirmedLargeBarrel(pair[1])) {
+            return null;
+        }
+        int firstSlots = RealContainerCache.getCachedKnownSlotCount(pair[0]);
+        if (firstSlots > 0 && firstSlots < 54) return null;
+        int secondSlots = RealContainerCache.getCachedKnownSlotCount(pair[1]);
+        if (secondSlots > 0 && secondSlots < 54) return null;
+        return pair;
+    }
+
+    public static BlockPos[] getPotentialLargeBarrelPair(net.minecraft.world.level.Level Level, BlockPos pos, BlockState state) {
+        if (Level == null || pos == null || state == null || !state.is(net.minecraft.world.level.block.Blocks.BARREL)) return null;
+        Direction facing = state.getValue(net.minecraft.world.level.block.BarrelBlock.FACING);
+        return getLargeBarrelPair(Level, pos, facing, pos.relative(facing.getOpposite()));
+    }
+
+    private static BlockPos[] getContainerHalves(net.minecraft.world.level.Level Level, BlockPos pos, BlockState state, boolean renderOnly, int knownSlotCount) {
         if (state.getBlock() instanceof ChestBlock) {
             ChestType type = state.getValue(ChestBlock.TYPE);
             if (type != ChestType.SINGLE) {
@@ -49,16 +69,15 @@ public class LitematicaContainerReader {
                 return new BlockPos[]{rightPos, leftPos};
             }
         } else if (state.is(net.minecraft.world.level.block.Blocks.BARREL)) {
-            Direction facing = state.getValue(net.minecraft.world.level.block.BarrelBlock.FACING);
-            BlockPos[] pair = getLargeBarrelPair(world, pos, facing, pos.relative(facing.getOpposite()));
+            BlockPos[] pair = getPotentialLargeBarrelPair(Level, pos, state);
             if (pair == null) return null;
 
-            return shouldUseLargeBarrels(world, pos, state, pair, renderOnly, knownSlotCount) ? pair : null;
+            return shouldUseLargeBarrels(Level, pos, state, pair, renderOnly, knownSlotCount) ? pair : null;
         }
         return null;
     }
 
-    private static boolean shouldUseLargeBarrels(net.minecraft.world.level.Level world, BlockPos pos, BlockState state, BlockPos[] pair, boolean renderOnly, int knownSlotCount) {
+    private static boolean shouldUseLargeBarrels(net.minecraft.world.level.Level Level, BlockPos pos, BlockState state, BlockPos[] pair, boolean renderOnly, int knownSlotCount) {
         CarpetLargeBarrelMode mode = Configs.getCarpetLargeBarrelMode();
         if (mode == CarpetLargeBarrelMode.OFF) return false;
         if (mode == CarpetLargeBarrelMode.ON) return true;
@@ -66,6 +85,7 @@ public class LitematicaContainerReader {
         BlockPos mate = pair[0].equals(pos) ? pair[1] : pair[0];
 
         if (knownSlotCount >= 54) return true;
+        if (RealContainerCache.isConfirmedLargeBarrel(pair[0]) || RealContainerCache.isConfirmedLargeBarrel(pair[1])) return true;
         if (knownSlotCount > 0) return false;
 
         int cachedSlotCount = RealContainerCache.getKnownSlotCount(pos);
@@ -79,8 +99,8 @@ public class LitematicaContainerReader {
         return false;
     }
 
-    private static BlockPos[] getLargeBarrelPair(net.minecraft.world.level.Level world, BlockPos pos, Direction facing, BlockPos pos2) {
-        BlockState state2 = world.getBlockState(pos2);
+    private static BlockPos[] getLargeBarrelPair(net.minecraft.world.level.Level Level, BlockPos pos, Direction facing, BlockPos pos2) {
+        BlockState state2 = Level.getBlockState(pos2);
         if (!state2.is(net.minecraft.world.level.block.Blocks.BARREL) || state2.getValue(net.minecraft.world.level.block.BarrelBlock.FACING) != facing.getOpposite()) {
             return null;
         }
@@ -90,15 +110,15 @@ public class LitematicaContainerReader {
         return new BlockPos[]{first, second};
     }
 
-    private static BlockPos findLargeBarrelMate(net.minecraft.world.level.Level world, BlockPos pos, Direction facing) {
+    private static BlockPos findLargeBarrelMate(net.minecraft.world.level.Level Level, BlockPos pos, Direction facing) {
         BlockPos behind = pos.relative(facing.getOpposite());
-        if (isLargeBarrelMate(world, behind, facing)) return behind;
+        if (isLargeBarrelMate(Level, behind, facing)) return behind;
 
         return null;
     }
 
-    private static boolean isLargeBarrelMate(net.minecraft.world.level.Level world, BlockPos pos, Direction facing) {
-        BlockState state = world.getBlockState(pos);
+    private static boolean isLargeBarrelMate(net.minecraft.world.level.Level Level, BlockPos pos, Direction facing) {
+        BlockState state = Level.getBlockState(pos);
         return state.is(net.minecraft.world.level.block.Blocks.BARREL) && state.getValue(net.minecraft.world.level.block.BarrelBlock.FACING) == facing.getOpposite();
     }
 
@@ -117,12 +137,8 @@ public class LitematicaContainerReader {
         if (halves != null) {
             Map<Integer, ItemStack> rightHalf = getSingleContainerItems(schematicWorld, halves[0], registries);
             Map<Integer, ItemStack> leftHalf = getSingleContainerItems(schematicWorld, halves[1], registries);
-
-            items.putAll(rightHalf);
-
-            for (Map.Entry<Integer, ItemStack> entry : leftHalf.entrySet()) {
-                items.put(entry.getKey() + 27, entry.getValue());
-            }
+            Map<Integer, ItemStack> combined = RealContainerCache.combineDoubleContainerItems(rightHalf, leftHalf);
+            if (combined != null) items.putAll(combined);
         } else {
             items.putAll(getSingleContainerItems(schematicWorld, worldPos, registries));
         }
@@ -134,6 +150,9 @@ public class LitematicaContainerReader {
 
     private static Map<Integer, ItemStack> getSingleContainerItems(net.minecraft.world.level.Level schematicWorld, BlockPos pos, HolderLookup.Provider registries) {
         Map<Integer, ItemStack> items = new HashMap<>();
+        items.putAll(LitematicaPlacementContainerData.getItems(pos, registries));
+        if (!items.isEmpty()) return items;
+
         BlockEntity blockEntity = schematicWorld.getBlockEntity(pos);
         if (blockEntity == null) return items;
 
@@ -153,19 +172,22 @@ public class LitematicaContainerReader {
         BlockPos[] halves = getDoubleContainerHalves(schematicWorld, worldPos, state);
 
         if (halves != null) {
-            collectIgnoredSlots(getSingleContainerItems(schematicWorld, halves[0], registries), 0, ignoredSlots);
-            collectIgnoredSlots(getSingleContainerItems(schematicWorld, halves[1], registries), 27, ignoredSlots);
+            Map<Integer, ItemStack> combined = RealContainerCache.combineDoubleContainerItems(
+                    getSingleContainerItems(schematicWorld, halves[0], registries),
+                    getSingleContainerItems(schematicWorld, halves[1], registries));
+            collectIgnoredSlots(combined, ignoredSlots);
         } else {
-            collectIgnoredSlots(getSingleContainerItems(schematicWorld, worldPos, registries), 0, ignoredSlots);
+            collectIgnoredSlots(getSingleContainerItems(schematicWorld, worldPos, registries), ignoredSlots);
         }
 
         return ignoredSlots;
     }
 
-    private static void collectIgnoredSlots(Map<Integer, ItemStack> items, int offset, Set<Integer> ignoredSlots) {
+    private static void collectIgnoredSlots(Map<Integer, ItemStack> items, Set<Integer> ignoredSlots) {
+        if (items == null) return;
         for (Map.Entry<Integer, ItemStack> entry : items.entrySet()) {
             if (MaterialReplacer.isIgnored(entry.getValue())) {
-                ignoredSlots.add(entry.getKey() + offset);
+                ignoredSlots.add(entry.getKey());
             }
         }
     }
@@ -173,6 +195,11 @@ public class LitematicaContainerReader {
     public static Set<Integer> getDisabledSlots(BlockPos worldPos) {
         var schematicWorld = SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld == null) return Collections.emptySet();
+
+        var placementNbt = LitematicaPlacementContainerData.getNbt(worldPos);
+        if (placementNbt.isPresent()) {
+            return parseDisabledSlots(placementNbt.get());
+        }
 
         BlockEntity blockEntity = schematicWorld.getBlockEntity(worldPos);
         if (blockEntity == null) return Collections.emptySet();

@@ -2,22 +2,22 @@
   "required": true,
   "minVersion": "0.8",
   "package": "com.mimicenzymes.litematicafiller.mixin",
-  "compatibilityLevel": "JAVA_25",
-  "mixins": [
-    "BlockEntityMixin",
-    "CrafterBlockEntityMixin",
-    "MaterialListPlacementAccessor",
-    "RandomizableContainerBlockEntityMixin",
-    "SchematicPlacementMixin"
-  ],
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [],
   "client": [
     "ClientCommonNetworkHandlerMixin",
-    "ClientPacketListenerMixin",
+    "ClientPlayerInteractionManagerMixin",
+    "ScreenInterceptorMixin",
+    "ClientPlayNetworkHandlerMixin",
+    "InGameHudMixin",
     "GuiMainMenuMixin",
     "GuiMaterialListMixin",
-    "InGameHudMixin",
     "MaterialListBaseMixin",
-    "ScreenInterceptorMixin"
+    "BlockEntityMixin",
+    "LootableContainerBlockEntityMixin",
+    "CrafterBlockEntityMixin",
+    "SchematicPlacementMixin",
+    "MaterialListPlacementAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

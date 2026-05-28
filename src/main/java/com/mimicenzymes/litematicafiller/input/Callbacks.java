@@ -4,10 +4,13 @@ import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.gui.GuiConfigs;
 import com.mimicenzymes.litematicafiller.config.Hotkeys;
 import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
+import com.mimicenzymes.litematicafiller.core.ManualContainerOverrideManager;
+import com.mimicenzymes.litematicafiller.core.ManualContainerOverrideState;
 import com.mimicenzymes.litematicafiller.tool.ContainerToolStateMachine;
 import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
+import com.mimicenzymes.litematicafiller.render.HighlightScanner;
 import fi.dy.masa.malilib.config.options.ConfigBooleanHotkeyed;
 import fi.dy.masa.malilib.gui.GuiBase;
 import fi.dy.masa.malilib.hotkeys.IHotkeyCallback;
@@ -82,6 +85,18 @@ public class Callbacks implements IHotkeyCallback {
             return true;
         }
 
+        if (key == Hotkeys.CYCLE_MANUAL_OVERRIDE.getKeybind()) {
+            cycleManualOverride(mc);
+            return true;
+        }
+
+        if (key == Hotkeys.CLEAR_MANUAL_OVERRIDES.getKeybind()) {
+            int count = ManualContainerOverrideManager.clearAll();
+            HighlightScanner.onManualOverridesCleared();
+            mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.manual_override_cleared", count));
+            return true;
+        }
+
         return false;
     }
 
@@ -140,6 +155,48 @@ public class Callbacks implements IHotkeyCallback {
         } else {
             mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.target_invalid"));
         }
+    }
+
+    private void cycleManualOverride(Minecraft mc) {
+        if (mc.hitResult == null || mc.hitResult.getType() != HitResult.Type.BLOCK) {
+            mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.target_invalid"));
+            return;
+        }
+
+            BlockPos pos = ((BlockHitResult) mc.hitResult).getBlockPos();
+        var schWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
+        boolean schematicContainer = schWorld != null && ContainerBlockFilter.isAllowedForSchematicFill(schWorld.getBlockState(pos), schWorld, pos);
+        boolean realContainer = mc.level != null && ContainerBlockFilter.isAllowedForSchematicFill(mc.level.getBlockState(pos), mc.level, pos);
+        if (!schematicContainer && !realContainer) {
+            mc.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.no_requirements"));
+            return;
+        }
+        pos = normalizeManualOverridePos(mc, schWorld, pos, schematicContainer);
+
+        ManualContainerOverrideState state = ManualContainerOverrideManager.cycle(pos);
+        HighlightScanner.onManualOverrideChanged(pos, state);
+        String stateKey = switch (state) {
+            case COMPLETED -> "litematica_container_filler.message.manual_override_completed";
+            case NEEDS_FILL -> "litematica_container_filler.message.manual_override_needs_fill";
+            case AUTO -> "litematica_container_filler.message.manual_override_auto";
+        };
+        mc.player.sendOverlayMessage(Component.translatable(stateKey));
+    }
+
+    private BlockPos normalizeManualOverridePos(Minecraft mc, net.minecraft.world.level.Level schematicWorld, BlockPos pos, boolean schematicContainer) {
+        if (schematicContainer && schematicWorld != null) {
+            var state = schematicWorld.getBlockState(pos);
+            BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
+            if (halves != null) return halves[0];
+        }
+
+        if (mc.level != null) {
+            var state = mc.level.getBlockState(pos);
+            BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(mc.level, pos, state);
+            if (halves != null) return halves[0];
+        }
+
+        return pos.immutable();
     }
 
 }

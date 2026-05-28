@@ -106,7 +106,7 @@ public abstract class GuiMaterialListMixin extends GuiBase {
                 for (Object btnObj : buttons) {
                     if (btnObj instanceof fi.dy.masa.malilib.gui.button.ButtonBase btn) {
                         if (btn.getY() < 50) {
-                            int rightEdge = btn.getX() + btn.getWidth();
+                int rightEdge = btn.getX() + btn.getWidth();
                             if (rightEdge > maxX) {
                                 maxX = rightEdge;
                                 targetY = btn.getY();

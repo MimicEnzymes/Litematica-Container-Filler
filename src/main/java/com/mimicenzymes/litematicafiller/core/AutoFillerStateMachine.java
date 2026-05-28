@@ -2354,6 +2354,13 @@ public class AutoFillerStateMachine {
         return currentTask != null || !taskQueue.isEmpty() || !missingMaterialMarkers.isEmpty() || !recentFillingMarkers.isEmpty();
     }
 
+    public boolean hasRenderableTaskMarkers(boolean renderFilling, boolean renderQueued, boolean renderMissing) {
+        pruneExpiredMarkers();
+        return (renderFilling && (currentTask != null || !recentFillingMarkers.isEmpty()))
+                || (renderQueued && !taskQueue.isEmpty())
+                || (renderMissing && !missingMaterialMarkers.isEmpty());
+    }
+
     public boolean isIdle() { return this.currentTask == null && this.actionQueue.isEmpty() && this.taskQueue.isEmpty(); }
 
     public boolean isWorking() { return !isIdle(); }
