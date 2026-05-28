@@ -9,6 +9,7 @@ import com.mimicenzymes.litematicafiller.dependency.QuickShulkerWrapper;
 import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.network.ClickPacketRateLimiter;
 import com.mimicenzymes.litematicafiller.network.TakeItOutCompat;
+import com.mimicenzymes.litematicafiller.render.HighlightScanner;
 import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.Screen;
@@ -157,6 +158,21 @@ public class AutoFillerStateMachine {
         this.shulkerExtractor = DependencyChecker.HAS_QUICK_SHULKER ? new QuickShulkerWrapper() : new DummyExtractor();
     }
 
+    private static Iterable<ItemStack> containerStacks(ContainerComponent component) {
+        return () -> component.stream().iterator();
+    }
+
+    private static ItemStack getContainerStackAt(ContainerComponent component, int targetIndex) {
+        if (component == null || targetIndex < 0) return ItemStack.EMPTY;
+
+        int index = 0;
+        for (ItemStack stack : containerStacks(component)) {
+            if (index == targetIndex) return stack;
+            index++;
+        }
+        return ItemStack.EMPTY;
+    }
+
     private void changePhase(Phase newPhase) {
         this.currentPhase = newPhase;
         this.guiOpenedForPhase = false;
@@ -204,20 +220,13 @@ public class AutoFillerStateMachine {
                             Map<Integer, ItemStack> right = getSingleBlockEntityInventory(serverWorld, halves[0]);
                             Map<Integer, ItemStack> left = getSingleBlockEntityInventory(serverWorld, halves[1]);
                             if (right != null && left != null) {
-                                Map<Integer, ItemStack> combined = new HashMap<>(right);
-                                left.forEach((k, v) -> combined.put(k + 27, v));
-                                inventoryData = combined;
+                                inventoryData = RealContainerCache.combineDoubleContainerItems(right, left);
                             }
                         } else {
                             inventoryData = getSingleBlockEntityInventory(serverWorld, finalPos);
                         }
                         if (inventoryData != null) {
-                            if (halves != null) {
-                                RealContainerCache.put(halves[0].toImmutable(), inventoryData);
-                                RealContainerCache.put(halves[1].toImmutable(), inventoryData);
-                            } else {
-                                RealContainerCache.put(finalPos, inventoryData);
-                            }
+                            RealContainerCache.put(halves != null ? halves[0].toImmutable() : finalPos, inventoryData);
                         }
                         if (state.getBlock() instanceof net.minecraft.block.CrafterBlock) {
                             net.minecraft.block.entity.BlockEntity be = serverWorld.getBlockEntity(finalPos);
@@ -267,6 +276,10 @@ public class AutoFillerStateMachine {
     public boolean addTask(BlockPos pos, Map<Integer, ItemStack> requiredItems, boolean preferNearby) {
         if (requiredItems == null) return false;
         pos = pos.toImmutable();
+        if (ManualContainerOverrideManager.isCompleted(pos)) return false;
+        if (isCreativeFillEnabled()) {
+            clearMaterialFailuresForCreativeFill();
+        }
         if (failedContainers.containsKey(pos)) return false;
         if (currentTask != null && currentTask.targetPos.equals(pos)) return false;
 
@@ -331,7 +344,7 @@ public class AutoFillerStateMachine {
         }
 
         if (needsCrafterLocking) needsAction = true;
-        if (!needsAction) return false;
+        if (!needsAction && !ManualContainerOverrideManager.isNeedsFill(pos)) return false;
 
         Set<Item> unavailable = getUnavailableMissingTypes(client, pos, requiredItems, missingItems);
         if (!unavailable.isEmpty() && !needsCrafterLocking && !hasExtractableGarbage(pos, requiredItems, trueData, isCrafter, ignoredSlots)) {
@@ -357,7 +370,7 @@ public class AutoFillerStateMachine {
 
     private Set<Item> getUnavailableMissingTypes(MinecraftClient client, BlockPos pos, Map<Integer, ItemStack> requiredItems, Map<Integer, ItemStack> knownMissingItems) {
         if (client == null || client.player == null || requiredItems == null || requiredItems.isEmpty()) return Collections.emptySet();
-        if (client.player.isCreative() && Configs.ENABLE_CREATIVE_FILL.getBooleanValue()) return Collections.emptySet();
+        if (isCreativeFillEnabled(client)) return Collections.emptySet();
 
         Map<Integer, ItemStack> missingItems = knownMissingItems;
         if (missingItems == null) {
@@ -464,7 +477,7 @@ public class AutoFillerStateMachine {
         boolean canFillSomething = false;
         Set<Item> trueMissingTypes = new LinkedHashSet<>();
 
-        boolean isCreativeFill = client.player != null && client.player.isCreative() && Configs.ENABLE_CREATIVE_FILL.getBooleanValue();
+        boolean isCreativeFill = isCreativeFillEnabled(client);
 
         for (int i = 0; i < 54; i++) {
             if (ignoredSlots.contains(i)) continue;
@@ -659,7 +672,7 @@ public class AutoFillerStateMachine {
             if (c == null) return i;
 
             long occupied = 0;
-            for (ItemStack inner : c.stream().toList()) {
+            for (ItemStack inner : containerStacks(c)) {
                 if (inner.isEmpty()) continue;
                 occupied++;
                 if (ItemMatcher.isSameItem(inner, stackToStore) && inner.getCount() < inner.getMaxCount()) {
@@ -681,7 +694,7 @@ public class AutoFillerStateMachine {
         if (c == null) return true;
 
         long occupied = 0;
-        for (ItemStack inner : c.stream().toList()) {
+        for (ItemStack inner : containerStacks(c)) {
             if (inner.isEmpty()) continue;
             occupied++;
             if (ItemMatcher.isSameItem(inner, stackToStore) && inner.getCount() < inner.getMaxCount()) return true;
@@ -713,6 +726,23 @@ public class AutoFillerStateMachine {
     public boolean isSilentlyExtracting() { return silentlyExtracting; }
     public void clearBlacklist() { failedContainers.clear(); blacklistedSlots.clear(); }
 
+    private boolean isCreativeFillEnabled() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        return isCreativeFillEnabled(client);
+    }
+
+    private boolean isCreativeFillEnabled(MinecraftClient client) {
+        return client != null && client.player != null && client.player.isCreative() && Configs.ENABLE_CREATIVE_FILL.getBooleanValue();
+    }
+
+    private void clearMaterialFailuresForCreativeFill() {
+        failedContainers.entrySet().removeIf(entry -> {
+            Set<Item> reasons = entry.getValue();
+            return reasons != null && !reasons.isEmpty() && !reasons.contains(net.minecraft.item.Items.BARRIER);
+        });
+        missingMaterialMarkers.clear();
+    }
+
     public void emergencyStop(MinecraftClient client) {
         taskQueue.clear();
         failedContainers.clear();
@@ -739,6 +769,9 @@ public class AutoFillerStateMachine {
 
         tickCounter++;
         tickTransientMarkers();
+        if (isCreativeFillEnabled(client)) {
+            clearMaterialFailuresForCreativeFill();
+        }
         if (!failedContainers.isEmpty() && tickCounter % 10 == 0) {
             failedContainers.entrySet().removeIf(entry -> {
                 Set<Item> reasons = entry.getValue();
@@ -1024,7 +1057,7 @@ public class AutoFillerStateMachine {
     }
 
     private void checkAndStartGatheringOrFilling(MinecraftClient client) {
-        boolean isCreativeFill = client.player != null && client.player.isCreative() && Configs.ENABLE_CREATIVE_FILL.getBooleanValue();
+        boolean isCreativeFill = isCreativeFillEnabled(client);
         boolean needsCrafterLocking = currentCrafterNeedsLocking(client);
 
         if (needsCrafterLocking && currentTask.missingItems.isEmpty()) {
@@ -1084,7 +1117,7 @@ public class AutoFillerStateMachine {
     }
 
     private boolean hasAnyMaterialsToFill(MinecraftClient client) {
-        boolean isCreativeFill = client.player != null && client.player.isCreative() && Configs.ENABLE_CREATIVE_FILL.getBooleanValue();
+        boolean isCreativeFill = isCreativeFillEnabled(client);
 
         Map<Integer, ItemStack> trueData = getTrueContainerData(client, currentTask.targetPos);
         if (trueData == null) trueData = new HashMap<>();
@@ -1241,7 +1274,7 @@ public class AutoFillerStateMachine {
                 if (s.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) {
                     ContainerComponent c = s.get(DataComponentTypes.CONTAINER);
                     if (c != null) {
-                        for (ItemStack inner : c.stream().toList()) {
+                        for (ItemStack inner : containerStacks(c)) {
                             if (ItemMatcher.isSameItem(inner, req)) {
                                 slots.add(i);
                                 amountToFind -= inner.getCount();
@@ -1419,10 +1452,7 @@ public class AutoFillerStateMachine {
         ContainerComponent component = shulker.get(DataComponentTypes.CONTAINER);
         if (component == null) return true;
 
-        List<ItemStack> innerStacks = component.stream().toList();
-        if (request.innerSlot() < 0 || request.innerSlot() >= innerStacks.size()) return true;
-
-        ItemStack inner = innerStacks.get(request.innerSlot());
+        ItemStack inner = getContainerStackAt(component, request.innerSlot());
         return inner.isEmpty() || !ItemMatcher.isSameItem(inner, request.requestedStack());
     }
 
@@ -1437,12 +1467,12 @@ public class AutoFillerStateMachine {
                 ContainerComponent component = shulker.get(DataComponentTypes.CONTAINER);
                 if (component == null) continue;
 
-                List<ItemStack> innerStacks = component.stream().toList();
-                for (int innerSlot = 0; innerSlot < innerStacks.size(); innerSlot++) {
-                    ItemStack inner = innerStacks.get(innerSlot);
+                int innerSlot = 0;
+                for (ItemStack inner : containerStacks(component)) {
                     if (ItemMatcher.isSameItem(inner, req)) {
                         return new TakeItOutRequest(shulkerSlot, innerSlot, req.copy(), countItemInPlayerInv(client, req));
                     }
+                    innerSlot++;
                 }
             }
         }
@@ -1602,7 +1632,7 @@ public class AutoFillerStateMachine {
         int delay = Configs.ENABLE_SAFETY_DELAY.getBooleanValue() ? Configs.FILL_DELAY.getIntegerValue() : 0;
         boolean dropExtracted = Configs.DROP_EXTRACTED_ITEMS.getBooleanValue();
         boolean dropEmptySchematicExtras = Configs.DROP_ITEMS_FROM_EMPTY_SCHEMATIC_CONTAINERS.getBooleanValue();
-        boolean isCreativeFill = client.player != null && client.player.isCreative() && Configs.ENABLE_CREATIVE_FILL.getBooleanValue();
+        boolean isCreativeFill = isCreativeFillEnabled(client);
 
         if (!handler.getCursorStack().isEmpty()) {
             boolean placed = tryPlaceCursorItem(client, handler);
@@ -1948,16 +1978,18 @@ public class AutoFillerStateMachine {
     }
 
     private void finishTaskAndReturn(MinecraftClient client) {
-        ScreenHandler currentHandler = client.player.currentScreenHandler;
-        if (currentHandler != client.player.playerScreenHandler) {
-            RealContainerCache.updateFromHandler(client, currentHandler);
-        }
-        RealContainerCache.putPredicted(currentTask.targetPos, currentTask.requiredItems);
-        lastCompletedTaskPos = currentTask.targetPos;
+        BlockPos completedPos = currentTask.targetPos.toImmutable();
+        RealContainerCache.putPredicted(completedPos, currentTask.requiredItems);
+        failedContainers.remove(completedPos);
+        missingMaterialMarkers.remove(completedPos);
+        AreaScanner.clearAttemptCooldown(completedPos);
+        taskQueue.removeIf(task -> task != null && completedPos.equals(task.targetPos));
+        HighlightScanner.onContainerDataChanged(completedPos);
+        lastCompletedTaskPos = completedPos;
         lastCompletedTaskItems = collectRequiredItemTypes(currentTask.requiredItems);
         int lingerTicks = Math.max(0, Configs.TASK_OVERLAY_LINGER_TICKS.getIntegerValue());
         if (lingerTicks > 0) {
-            recentFillingMarkers.put(currentTask.targetPos.toImmutable(), System.currentTimeMillis() + lingerTicks * TICK_MS);
+            recentFillingMarkers.put(completedPos, System.currentTimeMillis() + lingerTicks * TICK_MS);
         }
 
         sendFeedback(client, Text.translatable("litematica_container_filler.message.fill_completed").getString(), true);
@@ -2252,7 +2284,7 @@ public class AutoFillerStateMachine {
             if (s.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) {
                 ContainerComponent c = s.get(DataComponentTypes.CONTAINER);
                 if (c != null) {
-                    for (ItemStack inner : c.stream().toList()) {
+                    for (ItemStack inner : containerStacks(c)) {
                         if (ItemMatcher.isSameItem(inner, target)) return true;
                     }
                 }
@@ -2346,9 +2378,11 @@ public class AutoFillerStateMachine {
         return new LinkedHashSet<>(recentFillingMarkers.keySet());
     }
 
-    public boolean hasRenderableTaskMarkers() {
+    public boolean hasRenderableTaskMarkers(boolean renderFilling, boolean renderQueued, boolean renderMissing) {
         pruneExpiredMarkers();
-        return currentTask != null || !taskQueue.isEmpty() || !missingMaterialMarkers.isEmpty() || !recentFillingMarkers.isEmpty();
+        return (renderFilling && currentTask != null)
+                || (renderQueued && !taskQueue.isEmpty())
+                || (renderMissing && !missingMaterialMarkers.isEmpty());
     }
 
     public boolean isIdle() { return this.currentTask == null && this.actionQueue.isEmpty() && this.taskQueue.isEmpty(); }

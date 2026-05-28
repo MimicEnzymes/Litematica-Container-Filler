@@ -31,6 +31,7 @@ public class LitematicaChangeListener {
             LitematicaContainerIndex.rebuildIndex(mc);
             RealContainerCache.clear();
             LitematicaCache.clear();
+            ManualContainerOverrideManager.clearForCurrentContext();
         }
     }
 }

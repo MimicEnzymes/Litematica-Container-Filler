@@ -38,6 +38,12 @@ public class GuiRenderEditor extends GuiBase {
     private static final int MUTED = 0xFFBDC1C6;
     private static final int MUTED_SOFT = 0xFF8E98A4;
     private static final int WARNING = 0xFFFDD663;
+    private static final float TOP_PLATE_MIN_INSET = 0.02f;
+    private static final float TOP_PLATE_BOTTOM_OFFSET = 0.035f;
+    private static final float TOP_PLATE_TOP_OFFSET = 0.095f;
+    private static final float MANUAL_BADGE_GAP = 0.014f;
+    private static final float MANUAL_BADGE_SIZE = 0.44f;
+    private static final float MANUAL_BADGE_THICKNESS = 0.034f;
 
     private final Screen parent;
     private EditorTab tab = EditorTab.HIGHLIGHTS;
@@ -347,7 +353,8 @@ public class GuiRenderEditor extends GuiBase {
     public boolean onKeyTyped(int keyCode, int scanCode, int modifiers) {
         ColorInputBinding focused = getFocusedColorInput();
         if (focused != null) {
-            if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+            int key = keyCode;
+            if (key == GLFW.GLFW_KEY_ESCAPE || key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) {
                 finishColorInput(focused, true);
                 return true;
             }
@@ -774,7 +781,9 @@ public class GuiRenderEditor extends GuiBase {
                 new StatePreview("wrong", Configs.HIGHLIGHT_COLOR_WRONG),
                 new StatePreview("satisfied", Configs.HIGHLIGHT_COLOR_SATISFIED),
                 new StatePreview("unknown", Configs.HIGHLIGHT_COLOR_UNKNOWN),
-                new StatePreview("unplaced", Configs.HIGHLIGHT_COLOR_UNPLACED)
+                new StatePreview("unplaced", Configs.HIGHLIGHT_COLOR_UNPLACED),
+                new StatePreview("manual_completed", Configs.HIGHLIGHT_COLOR_SATISFIED),
+                new StatePreview("manual_needs_fill", Configs.HIGHLIGHT_COLOR_UNFILLED)
         );
 
         int columns = width < 360 ? 2 : Math.min(4, Math.max(2, width / 130));
@@ -789,21 +798,53 @@ public class GuiRenderEditor extends GuiBase {
             int cx = x + col * cellW + cellW / 2;
             int cy = originY + row * cellH + Math.max(30, cellH / 2);
             float size = Math.min(cellW, cellH) * 0.30f;
-            addHighlightModelCommands(rawCommands, cx, cy, size, state.color.getColor(), Configs.RENDER_STATE_GLASS.getBooleanValue(), Configs.RENDER_STATE_TOP_PLATE.getBooleanValue());
-            rawCommands.add(new PreviewLabelCommand(tr("litematica_container_filler.gui.label.render_state." + state.key), cx, cy + Math.round(size * 0.86f) + 12, cellW));
+            boolean manual = state.key.startsWith("manual_");
+            addHighlightModelCommands(rawCommands, cx, cy, size, state.color.getColor(), Configs.RENDER_STATE_GLASS.getBooleanValue(), Configs.RENDER_STATE_TOP_PLATE.getBooleanValue(), manual, state.key);
+            rawCommands.add(new PreviewLabelCommand(translateOrFallback("litematica_container_filler.gui.label.render_state." + state.key, state.key), cx, cy + Math.round(size * 0.86f) + 12, cellW));
         }
 
         return compactPreviewCommands(rawCommands);
     }
 
-    private void addHighlightModelCommands(List<PreviewDrawCommand> commands, int cx, int cy, float size, Color4f color, boolean glass, boolean topPlate) {
+    private void addHighlightModelCommands(List<PreviewDrawCommand> commands, int cx, int cy, float size, Color4f color, boolean glass, boolean topPlate, boolean manual, String key) {
         Color4f base = glass ? color : new Color4f(color.r, color.g, color.b, Math.min(0.16f, color.a));
-        addPreviewBoxCommands(commands, cx, cy, size, size, size, base);
+        addPreviewWorldBoxCommands(commands, cx, cy, size, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, base);
 
         if (topPlate) {
             Color4f plate = new Color4f(color.r, color.g, color.b, Math.min(0.72f, Math.max(0.20f, color.a * 0.9f)));
-            float plateWidth = size * (float)Configs.HIGHLIGHT_TOP_PLATE_SIZE.getDoubleValue();
-            addPreviewBoxCommands(commands, cx, cy - Math.round(size * 0.78f), plateWidth, Math.max(3.0f, size * 0.08f), size * 0.34f, plate);
+            float inset = Math.max(TOP_PLATE_MIN_INSET, (1.0f - (float)Configs.HIGHLIGHT_TOP_PLATE_SIZE.getDoubleValue()) * 0.5f);
+            addPreviewWorldBoxCommands(commands, cx, cy, size,
+                    inset, 1.0f + TOP_PLATE_BOTTOM_OFFSET, inset,
+                    1.0f - inset, 1.0f + TOP_PLATE_TOP_OFFSET, 1.0f - inset,
+                    plate);
+        }
+
+        if (manual) {
+            addManualBadgePreviewCommands(commands, cx, cy, size, "manual_completed".equals(key));
+        }
+    }
+
+    private void addManualBadgePreviewCommands(List<PreviewDrawCommand> commands, float cx, float cy, float size, boolean completed) {
+        Color4f ring = completed
+                ? new Color4f(0.88f, 1.0f, 0.95f, 0.76f)
+                : new Color4f(1.0f, 0.86f, 0.34f, 0.76f);
+        Color4f accent = completed
+                ? new Color4f(0.16f, 1.0f, 0.62f, 0.90f)
+                : new Color4f(1.0f, 0.52f, 0.12f, 0.90f);
+        float half = MANUAL_BADGE_SIZE * 0.5f;
+        float thick = Math.max(0.022f, MANUAL_BADGE_THICKNESS);
+        float y = 1.0f + TOP_PLATE_TOP_OFFSET + MANUAL_BADGE_GAP;
+
+        addPreviewWorldBoxCommands(commands, cx, cy, size, 0.5f - half, y, 0.5f - half, 0.5f + half, y + thick, 0.5f - half + thick, ring);
+        addPreviewWorldBoxCommands(commands, cx, cy, size, 0.5f - half, y, 0.5f + half - thick, 0.5f + half, y + thick, 0.5f + half, ring);
+        addPreviewWorldBoxCommands(commands, cx, cy, size, 0.5f - half, y, 0.5f - half, 0.5f - half + thick, y + thick, 0.5f + half, ring);
+        addPreviewWorldBoxCommands(commands, cx, cy, size, 0.5f + half - thick, y, 0.5f - half, 0.5f + half, y + thick, 0.5f + half, ring);
+        if (completed) {
+            addPreviewWorldBoxCommands(commands, cx, cy, size, 0.5f - half * 0.48f, y + thick, 0.5f - thick * 0.5f, 0.5f - half * 0.08f, y + thick * 2.0f, 0.5f + thick * 0.5f, accent);
+            addPreviewWorldBoxCommands(commands, cx, cy, size, 0.5f - half * 0.12f, y + thick, 0.5f - thick * 0.5f, 0.5f + half * 0.56f, y + thick * 2.0f, 0.5f + thick * 0.5f, accent);
+        } else {
+            addPreviewWorldBoxCommands(commands, cx, cy, size, 0.5f - thick * 0.5f, y + thick, 0.5f - half * 0.58f, 0.5f + thick * 0.5f, y + thick * 2.0f, 0.5f + half * 0.22f, accent);
+            addPreviewWorldBoxCommands(commands, cx, cy, size, 0.5f - thick * 0.6f, y + thick, 0.5f + half * 0.42f, 0.5f + thick * 0.6f, y + thick * 2.0f, 0.5f + half * 0.56f, accent);
         }
     }
 
@@ -852,9 +893,9 @@ public class GuiRenderEditor extends GuiBase {
             int edgeY = card.y + card.height / 2;
             int cornerX = (anchorX + edgeX) / 2;
 
-            drawLine(context, anchorX, anchorY, cornerX, anchorY, withAlpha(PRIMARY, alpha));
-            drawLine(context, cornerX, anchorY, edgeX, edgeY, withAlpha(PRIMARY, alpha));
-            context.fill(anchorX - 3, anchorY - 3, anchorX + 4, anchorY + 4, withAlpha(PRIMARY, alpha));
+            drawLine(context, anchorX, anchorY, cornerX, anchorY, withAlpha(0xFF6F7B86, alpha));
+            drawLine(context, cornerX, anchorY, edgeX, edgeY, withAlpha(0xFF6F7B86, alpha));
+            context.fill(anchorX - 3, anchorY - 3, anchorX + 4, anchorY + 4, withAlpha(0xFF6F7B86, alpha));
         }
 
         drawHudCard(context, card.x, card.y, card.width, card.height, alpha);
@@ -874,31 +915,52 @@ public class GuiRenderEditor extends GuiBase {
     private void drawHudCard(DrawContext context, int panelX, int panelY, int panelW, int panelH, int alpha) {
         drawSoftRect(context, panelX + 2, panelY + 3, panelW, panelH, withAlpha(0xFF000000, (int)(alpha * 0.32D)));
         drawRoundedPreviewCard(context, panelX, panelY, panelW, panelH, withAlpha(0xFF050708, (int)(alpha * 0.92D)));
+        int headerH = Math.max(15, Math.min(20, panelH / 4));
+        drawRoundedPreviewCardSection(context, panelX, panelY, panelW, panelH, 0, headerH + 7, withAlpha(0xFF151F26, (int)(alpha * 0.56D)));
         if (Configs.TOOL_HUD_BORDER.getBooleanValue()) {
-            drawRoundedPreviewCardOutline(context, panelX, panelY, panelW, panelH, withAlpha(0xFFE6F2E8, (int)(alpha * 0.88D)));
+            drawRoundedPreviewCardOutline(context, panelX, panelY, panelW, panelH, withAlpha(0xFF6F7B86, (int)(alpha * 0.88D)));
         }
         float scale = Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f;
         float iconScale = scale * clampFloat(Configs.TOOL_HUD_ICON_SCALE.getIntegerValue() / 100.0f, 0.5f, 1.5f);
-        int headerH = Math.max(15, Math.min(20, panelH / 4));
-        context.fill(panelX + 6, panelY + 6, panelX + panelW - 6, panelY + headerH + 5, withAlpha(0xFF1C2430, (int)(alpha * 0.86D)));
-        drawScaledString(context, tr("litematica_container_filler.gui.label.hud_title"), panelX + 10, panelY + 8, scale, withAlpha(TEXT, alpha));
+        int titleMaxWidth = Math.max(0, panelW - 20);
+        drawScaledString(context, fitToWidth(tr("litematica_container_filler.gui.label.hud_title"), unscaledWidth(titleMaxWidth, scale)), panelX + 10, panelY + 8, scale, withAlpha(TEXT, alpha));
         double time = quantizedTime(Configs.TOOL_HUD_FRAME_RATE.getIntegerValue());
         ContainerToolMode mode = Configs.CONTAINER_TOOL_MODE.getOptionListValue() instanceof ContainerToolMode toolMode ? toolMode : ContainerToolMode.CLEAR;
         int pulse = (int)(Math.sin(time * 5.0D) * 2.0D);
+        int textHeight = Math.max(1, (int)Math.ceil(this.textRenderer.fontHeight * scale));
+        int lineGap = Math.max(textHeight + 1, Math.round(11.0f * scale));
         int iconX = panelX + Math.round(24 * scale) + (mode == ContainerToolMode.COPY ? pulse : 0);
         int iconY = panelY + headerH + Math.round(29 * scale) + (mode == ContainerToolMode.COPY ? 0 : pulse);
         drawMiniHudToolIcon(context, iconX, iconY, alpha, iconScale, mode);
         int textX = panelX + Math.round(48 * scale);
         int labelY = panelY + headerH + 8;
-        drawScaledString(context, fit(mode.getDisplayName(), Math.max(8, panelW / 8)), textX, labelY, scale, withAlpha(MUTED, alpha));
-        drawScaledString(context, fit(tr("litematica_container_filler.hud.tool_action", "V"), Math.max(8, panelW / 8)), textX, labelY + Math.round(12.0f * scale), scale, withAlpha(0xFF55FF68, alpha));
-        drawScaledString(context, fit(tr("litematica_container_filler.hud.tool_switch_close", "G", "H"), Math.max(8, panelW / 7)), textX, labelY + Math.round(24.0f * scale), scale, withAlpha(MUTED, (int)(alpha * 0.78D)));
+        int textMaxWidth = Math.max(0, panelW - (textX - panelX) - 10);
+        int textMaxUnscaled = unscaledWidth(textMaxWidth, scale);
+        String actionText = tr("litematica_container_filler.hud.tool_action", "V");
+        String secondaryText = tr("litematica_container_filler.hud.tool_switch_close", "G", "H");
+        int contentBottom = panelY + panelH - Math.max(5, Math.round(5.0f * scale));
+        int maxLines = countFittingLines(labelY, lineGap, textHeight, contentBottom, 3);
+        if (maxLines <= 1) {
+            drawScaledString(context, fitToWidth(actionText, textMaxUnscaled), textX, Math.min(labelY, Math.max(panelY + headerH + 2, contentBottom - textHeight)), scale, withAlpha(0xFF55FF68, alpha));
+        } else {
+            drawScaledString(context, fitToWidth(mode.getDisplayName(), textMaxUnscaled), textX, labelY, scale, withAlpha(MUTED, alpha));
+            drawScaledString(context, fitToWidth(actionText, textMaxUnscaled), textX, labelY + lineGap, scale, withAlpha(0xFF55FF68, alpha));
+        }
+        if (maxLines >= 3) {
+            drawScaledString(context, fitToWidth(secondaryText, textMaxUnscaled), textX, labelY + lineGap * 2, scale, withAlpha(MUTED, (int)(alpha * 0.78D)));
+        }
     }
 
     private void drawRoundedPreviewCard(DrawContext context, int x, int y, int width, int height, int color) {
         context.fill(x + 4, y, x + width - 4, y + height, color);
         context.fill(x, y + 4, x + width, y + height - 4, color);
         context.fill(x + 2, y + 2, x + width - 2, y + height - 2, color);
+    }
+
+    private void drawRoundedPreviewCardSection(DrawContext context, int x, int y, int width, int height, int sectionTop, int sectionBottom, int color) {
+        int top = clamp(sectionTop, 0, height);
+        int bottom = clamp(sectionBottom, top, height);
+        drawRoundedPreviewRows(context, x, y, width, height, 7, top, bottom, color);
     }
 
     private void drawRoundedPreviewCardOutline(DrawContext context, int x, int y, int width, int height, int color) {
@@ -944,6 +1006,28 @@ public class GuiRenderEditor extends GuiBase {
         return 0;
     }
 
+    private int countFittingLines(int firstY, int lineGap, int textHeight, int bottom, int requestedLines) {
+        int lines = 0;
+        for (int i = 0; i < requestedLines; i++) {
+            if (firstY + lineGap * i + textHeight <= bottom) {
+                lines++;
+            }
+        }
+        return lines;
+    }
+
+    private void drawRoundedPreviewRows(DrawContext context, int x, int y, int width, int height, int radius, int fromRow, int toRow, int color) {
+        if (width <= 0 || height <= 0) return;
+        int start = clamp(fromRow, 0, height);
+        int end = clamp(toRow, start, height);
+        int r = clamp(radius, 0, Math.min(width, height) / 2);
+
+        for (int row = start; row < end; row++) {
+            int inset = roundedInset(row, height, r);
+            context.fill(x + inset, y + row, x + width - inset, y + row + 1, color);
+        }
+    }
+
     private void drawMiniHudToolIcon(DrawContext context, int cx, int cy, int alpha, float scale, ContainerToolMode mode) {
         ArrowDirection direction = switch (mode) {
             case CLEAR -> ArrowDirection.UP;
@@ -987,15 +1071,18 @@ public class GuiRenderEditor extends GuiBase {
 
     private void drawHighlightModel(DrawContext context, int cx, int cy, float size, Color4f color, boolean glass, boolean topPlate) {
         if (glass) {
-            drawPreviewCuboid(context, cx, cy, size, color);
+            drawPreviewWorldBox(context, cx, cy, size, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, color);
         } else {
-            drawPreviewCuboid(context, cx, cy, size, new Color4f(color.r, color.g, color.b, Math.min(0.16f, color.a)));
+            drawPreviewWorldBox(context, cx, cy, size, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, new Color4f(color.r, color.g, color.b, Math.min(0.16f, color.a)));
         }
 
         if (topPlate) {
             Color4f plate = new Color4f(color.r, color.g, color.b, Math.min(0.72f, Math.max(0.20f, color.a * 0.9f)));
-            float plateWidth = size * (float)Configs.HIGHLIGHT_TOP_PLATE_SIZE.getDoubleValue();
-            drawPreviewBox(context, cx, cy - Math.round(size * 0.78f), plateWidth, Math.max(3.0f, size * 0.08f), size * 0.34f, plate);
+            float inset = Math.max(TOP_PLATE_MIN_INSET, (1.0f - (float)Configs.HIGHLIGHT_TOP_PLATE_SIZE.getDoubleValue()) * 0.5f);
+            drawPreviewWorldBox(context, cx, cy, size,
+                    inset, 1.0f + TOP_PLATE_BOTTOM_OFFSET, inset,
+                    1.0f - inset, 1.0f + TOP_PLATE_TOP_OFFSET, 1.0f - inset,
+                    plate);
         }
     }
 
@@ -1189,14 +1276,32 @@ public class GuiRenderEditor extends GuiBase {
     }
 
     private void drawPreviewBox(DrawContext context, float cx, float cy, float halfX, float halfY, float halfZ, Color4f color) {
-        drawPreviewBox(context, cx, cy, halfX, halfY, halfZ, color, null);
+        drawPreviewBox(context, cx, cy, 0.0f, 0.0f, 0.0f, halfX, halfY, halfZ, color, null);
     }
 
     private void addPreviewBoxCommands(List<PreviewDrawCommand> commands, float cx, float cy, float halfX, float halfY, float halfZ, Color4f color) {
-        drawPreviewBox(null, cx, cy, halfX, halfY, halfZ, color, commands);
+        drawPreviewBox(null, cx, cy, 0.0f, 0.0f, 0.0f, halfX, halfY, halfZ, color, commands);
     }
 
-    private void drawPreviewBox(DrawContext context, float cx, float cy, float halfX, float halfY, float halfZ, Color4f color, List<PreviewDrawCommand> commands) {
+    private void drawPreviewWorldBox(DrawContext context, float cx, float cy, float scale, float minX, float minY, float minZ, float maxX, float maxY, float maxZ, Color4f color) {
+        drawPreviewWorldBox(context, null, cx, cy, scale, minX, minY, minZ, maxX, maxY, maxZ, color);
+    }
+
+    private void addPreviewWorldBoxCommands(List<PreviewDrawCommand> commands, float cx, float cy, float scale, float minX, float minY, float minZ, float maxX, float maxY, float maxZ, Color4f color) {
+        drawPreviewWorldBox(null, commands, cx, cy, scale, minX, minY, minZ, maxX, maxY, maxZ, color);
+    }
+
+    private void drawPreviewWorldBox(DrawContext context, List<PreviewDrawCommand> commands, float cx, float cy, float scale, float minX, float minY, float minZ, float maxX, float maxY, float maxZ, Color4f color) {
+        float centerX = ((minX + maxX) * 0.5f - 0.5f) * scale * 2.0f;
+        float centerY = ((minY + maxY) * 0.5f - 0.5f) * scale * 2.0f;
+        float centerZ = ((minZ + maxZ) * 0.5f - 0.5f) * scale * 2.0f;
+        float halfX = Math.max(0.5f, (maxX - minX) * scale);
+        float halfY = Math.max(0.5f, (maxY - minY) * scale);
+        float halfZ = Math.max(0.5f, (maxZ - minZ) * scale);
+        drawPreviewBox(context, cx, cy, centerX, centerY, centerZ, halfX, halfY, halfZ, color, commands);
+    }
+
+    private void drawPreviewBox(DrawContext context, float cx, float cy, float centerX, float centerY, float centerZ, float halfX, float halfY, float halfZ, Color4f color, List<PreviewDrawCommand> commands) {
         double yaw = Math.toRadians(this.previewYaw);
         double pitch = Math.toRadians(this.previewPitch);
         double cosY = Math.cos(yaw);
@@ -1212,9 +1317,9 @@ public class GuiRenderEditor extends GuiBase {
         double[] sz = new double[8];
 
         for (int i = 0; i < vertices.length; i++) {
-            double x = vertices[i][0] * halfX;
-            double y = vertices[i][1] * halfY;
-            double z = vertices[i][2] * halfZ;
+            double x = centerX + vertices[i][0] * halfX;
+            double y = centerY + vertices[i][1] * halfY;
+            double z = centerZ + vertices[i][2] * halfZ;
             double rx = x * cosY - z * sinY;
             double rz = x * sinY + z * cosY;
             double ry = y * cosP - rz * sinP;
@@ -1429,6 +1534,9 @@ public class GuiRenderEditor extends GuiBase {
     }
 
     private void drawScaledString(DrawContext context, String text, int x, int y, float scale, int color) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
         if (Math.abs(scale - 1.0f) < 0.01f) {
             drawString(context, text, x, y, color);
             return;
@@ -1473,6 +1581,34 @@ public class GuiRenderEditor extends GuiBase {
         return text.substring(0, maxChars - 1) + "...";
     }
 
+    private int unscaledWidth(int scaledWidth, float scale) {
+        if (scaledWidth <= 0 || scale <= 0.01f) {
+            return 0;
+        }
+        return Math.max(0, (int)Math.floor(scaledWidth / scale));
+    }
+
+    private String fitToWidth(String text, int maxWidth) {
+        if (text == null || text.isEmpty() || maxWidth <= 0) {
+            return "";
+        }
+        if (this.textRenderer.getWidth(text) <= maxWidth) {
+            return text;
+        }
+
+        String suffix = "...";
+        int suffixWidth = this.textRenderer.getWidth(suffix);
+        if (suffixWidth > maxWidth) {
+            return "";
+        }
+
+        int end = text.length();
+        while (end > 0 && this.textRenderer.getWidth(text.substring(0, end)) + suffixWidth > maxWidth) {
+            end--;
+        }
+        return end <= 0 ? suffix : text.substring(0, end) + suffix;
+    }
+
     private double quantizedTime(int fpsLimit) {
         double time = System.nanoTime() / 1_000_000_000.0D;
         if (fpsLimit <= 0) return time;
@@ -1503,6 +1639,11 @@ public class GuiRenderEditor extends GuiBase {
 
     private static String tr(String key, Object... args) {
         return StringUtils.translate(key, args);
+    }
+
+    private static String translateOrFallback(String key, String fallback) {
+        String translated = tr(key);
+        return translated.equals(key) ? fallback : translated;
     }
 
     private static int withAlpha(int argb, int alpha) {
