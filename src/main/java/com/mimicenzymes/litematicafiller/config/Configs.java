@@ -93,8 +93,8 @@ public class Configs implements IConfigHandler {
 
     //楂樹寒娓叉煋鍩虹璁剧疆
     public static final ConfigBooleanHotkeyed HIGHLIGHT_CONTAINERS  = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightContainers", true, "", "litematica_container_filler.config.comment.highlightContainers");
-    public static final ConfigBooleanHotkeyed HIGHLIGHT_XRAY        = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightXray", true, "", "litematica_container_filler.config.comment.highlightXray");
-    public static final ConfigInteger RENDER_RADIUS                 = new ConfigInteger("litematica_container_filler.config.name.renderRadius", 15, 0, 1024, "litematica_container_filler.config.comment.renderRadius");
+    public static final ConfigBooleanHotkeyed HIGHLIGHT_XRAY        = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightXray", false, "", "litematica_container_filler.config.comment.highlightXray");
+    public static final ConfigInteger RENDER_RADIUS                 = new ConfigInteger("litematica_container_filler.config.name.renderRadius", 0, 0, 1024, "litematica_container_filler.config.comment.renderRadius");
     public static final ConfigBooleanHotkeyed SYNC_LITE_LAYER       = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.syncLiteLayer", true, "", "litematica_container_filler.config.comment.syncLiteLayer");
     public static final ConfigBooleanHotkeyed HIDE_COMPLETED_CONTAINERS = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.hideCompletedContainers", true, "", "litematica_container_filler.config.comment.hideCompletedContainers");
     public static final ConfigBooleanHotkeyed HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightEmptySchematicContainers", true, "", "litematica_container_filler.config.comment.highlightEmptySchematicContainers");
