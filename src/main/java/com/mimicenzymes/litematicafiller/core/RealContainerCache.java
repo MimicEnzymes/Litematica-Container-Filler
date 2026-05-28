@@ -26,6 +26,7 @@ import net.minecraft.world.World;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -140,7 +141,7 @@ public class RealContainerCache {
     public static void updateFromHandler(MinecraftClient client, ScreenHandler handler) {
         if (handler == null) return;
 
-        if (shouldIgnoreHandler(client, handler)) {
+        if (isIgnoredHandlerType(client, handler)) {
             return;
         }
 
@@ -149,30 +150,40 @@ public class RealContainerCache {
             return;
         }
 
+        updateFromHandler(client, handler, containerInv);
+    }
+
+    private static long updateFromHandler(MinecraftClient client, ScreenHandler handler, Inventory containerInv) {
         BlockPos pos = resolveHandlerTargetPos(client, handler, containerInv);
-        if (pos == null) return;
+        if (pos == null) return Long.MIN_VALUE;
 
         if (!isCacheableTargetContainer(client, pos)) {
-            return;
+            return Long.MIN_VALUE;
         }
 
         if (!isBoundHandlerTarget(handler, pos) && !isCurrentTaskTarget(pos) &&
                 !isHandlerInventoryForTarget(client, pos, containerInv)) {
-            return;
+            return Long.MIN_VALUE;
         }
 
         int slotCount = containerInv.size();
         if (!isPlausibleSlotCountForTarget(client, pos, slotCount)) {
-            return;
+            return Long.MIN_VALUE;
         }
         rememberLargeBarrelIfObserved(client, pos, slotCount);
 
         Map<Integer, ItemStack> items = new HashMap<>();
+        long signature = 0xcbf29ce484222325L;
+        signature = mix(signature, slotCount);
 
         for (Slot slot : handler.slots) {
             if (slot.inventory != null && slot.inventory == containerInv && slot.isEnabled()) {
-                if (!slot.getStack().isEmpty()) {
-                    items.put(slot.getIndex(), slot.getStack().copy());
+                ItemStack stack = slot.getStack();
+                if (!stack.isEmpty()) {
+                    items.put(slot.getIndex(), stack.copy());
+                    signature = mix(signature, slot.getIndex());
+                    signature = mix(signature, stack.getCount());
+                    signature = mix(signature, ItemStack.hashCode(stack));
                 }
             }
         }
@@ -196,9 +207,14 @@ public class RealContainerCache {
 
         if (handler instanceof net.minecraft.screen.CrafterScreenHandler crafterHandler) {
             Set<Integer> locks = new HashSet<>();
+            int disabledMask = 0;
             for (int i = 0; i < 9; i++) {
-                if (crafterHandler.isSlotDisabled(i)) locks.add(i);
+                if (crafterHandler.isSlotDisabled(i)) {
+                    locks.add(i);
+                    disabledMask |= 1 << i;
+                }
             }
+            signature = mix(signature, disabledMask);
             Set<Integer> previousLocks = LOCK_CACHE.put(pos.toImmutable(), locks);
             changed |= !locks.equals(previousLocks);
         }
@@ -208,11 +224,19 @@ public class RealContainerCache {
             clearInvalidation(pos, halves);
             markChanged(pos, halves);
         }
+
+        return signature;
     }
 
     private static void updateFromHandlerIfNeeded(MinecraftClient client, ScreenHandler handler) {
         if (handler == null || client.world == null) return;
-        if (shouldIgnoreHandler(client, handler)) {
+        if (isIgnoredHandlerType(client, handler)) {
+            resetObservedHandler();
+            return;
+        }
+
+        Inventory containerInv = findPrimaryContainerInventory(client, handler);
+        if (containerInv == null) {
             resetObservedHandler();
             return;
         }
@@ -231,24 +255,35 @@ public class RealContainerCache {
             return;
         }
 
-        long signature = computeHandlerSignature(handler, client);
         lastObservedTick = worldTime;
+        if (newHandler) {
+            lastObservedHandler = handler;
+            lastObservedSyncId = handler.syncId;
+            long signature = updateFromHandler(client, handler, containerInv);
+            lastObservedSignature = signature != Long.MIN_VALUE ? signature : computeHandlerSignature(handler, containerInv);
+            return;
+        }
+
+        long signature = computeHandlerSignature(handler, containerInv);
         if (!newHandler && signature == lastObservedSignature) {
             return;
         }
 
         lastObservedHandler = handler;
         lastObservedSyncId = handler.syncId;
-        lastObservedSignature = signature;
-        updateFromHandler(client, handler);
+        long updatedSignature = updateFromHandler(client, handler, containerInv);
+        lastObservedSignature = updatedSignature != Long.MIN_VALUE ? updatedSignature : signature;
     }
 
     private static boolean shouldIgnoreHandler(MinecraftClient client, ScreenHandler handler) {
+        return isIgnoredHandlerType(client, handler) || findPrimaryContainerInventory(client, handler) == null;
+    }
+
+    private static boolean isIgnoredHandlerType(MinecraftClient client, ScreenHandler handler) {
         if (client == null || client.player == null || handler == null) return true;
         if (handler == client.player.playerScreenHandler) return true;
         return handler instanceof net.minecraft.screen.PlayerScreenHandler ||
-                handler.getClass().getSimpleName().contains("CreativeScreenHandler") ||
-                findPrimaryContainerInventory(client, handler) == null;
+                handler.getClass().getSimpleName().contains("CreativeScreenHandler");
     }
 
     private static boolean isPlayerInventoryScreen(Object screen) {
@@ -427,12 +462,15 @@ public class RealContainerCache {
         Inventory playerInventory = client.player.getInventory();
         Inventory bestInventory = null;
         int bestCount = 0;
+        Map<Inventory, Integer> counts = new IdentityHashMap<>();
 
         for (Slot slot : handler.slots) {
             if (slot.inventory == null || slot.inventory == playerInventory || !slot.isEnabled()) continue;
 
             Inventory inventory = slot.inventory;
-            int count = countEnabledSlotsForInventory(handler, inventory);
+            Integer cachedCount = counts.get(inventory);
+            int count = cachedCount != null ? cachedCount : countEnabledSlotsForInventory(handler, inventory);
+            if (cachedCount == null) counts.put(inventory, count);
             if (count > bestCount) {
                 bestInventory = inventory;
                 bestCount = count;
@@ -470,11 +508,13 @@ public class RealContainerCache {
 
         Inventory primaryInv = findPrimaryContainerInventory(client, handler);
         if (primaryInv == null) return 0L;
+        return computeHandlerSignature(handler, primaryInv);
+    }
 
+    private static long computeHandlerSignature(ScreenHandler handler, Inventory primaryInv) {
+        if (handler == null || primaryInv == null) return 0L;
         long hash = 0xcbf29ce484222325L;
-        if (primaryInv != null) {
-            hash = mix(hash, primaryInv.size());
-        }
+        hash = mix(hash, primaryInv.size());
 
         for (Slot slot : handler.slots) {
             if (slot.inventory == null || slot.inventory != primaryInv) continue;
@@ -918,13 +958,25 @@ public class RealContainerCache {
         BlockEntity previousEntity = currentEntity == null
                 ? BLOCK_ENTITY_CACHE.remove(key)
                 : BLOCK_ENTITY_CACHE.put(key, currentEntity);
-        if ((previous != null && !previous.equals(state)) ||
+        if ((previous != null && hasMeaningfulBlockStateChange(previous, state)) ||
                 (previousEntity != null && previousEntity != currentEntity)) {
             removeCachedDataForContainer(key, state);
             markEntityInvalidated(key, state);
             cacheVersion++;
             markChanged(key, null);
         }
+    }
+
+    private static boolean hasMeaningfulBlockStateChange(BlockState previous, BlockState current) {
+        if (previous.equals(current)) return false;
+
+        if (previous.isOf(net.minecraft.block.Blocks.BARREL) &&
+                current.isOf(net.minecraft.block.Blocks.BARREL) &&
+                previous.get(net.minecraft.block.BarrelBlock.FACING) == current.get(net.minecraft.block.BarrelBlock.FACING)) {
+            return false;
+        }
+
+        return true;
     }
 
     private static void markEntityInvalidated(BlockPos pos, BlockState state) {
