@@ -7,5 +7,7 @@ public enum HighlightState {
     WRONG_ITEM,
     UNKNOWN,
     UNPLACED,
-    SATISFIED
+    SATISFIED,
+    MANUAL_COMPLETED,
+    MANUAL_NEEDS_FILL
 }
