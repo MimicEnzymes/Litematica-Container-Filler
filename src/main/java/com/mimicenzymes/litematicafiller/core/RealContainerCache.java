@@ -103,9 +103,13 @@ public class RealContainerCache {
             return;
         }
 
+        updateFromHandlerAndGetSignature(client, handler);
+    }
+
+    private static long updateFromHandlerAndGetSignature(MinecraftClient client, ScreenHandler handler) {
         BlockPos pos = AutoFillerStateMachine.getInstance().getCurrentTaskPos();
         if (pos == null) pos = lastLookedPos;
-        if (pos == null) return;
+        if (pos == null) return Long.MIN_VALUE;
 
         Map<Integer, ItemStack> items = new HashMap<>();
 
@@ -113,11 +117,19 @@ public class RealContainerCache {
         if (!handler.slots.isEmpty()) {
             primaryInv = handler.slots.get(0).inventory;
         }
+        long signature = 0xcbf29ce484222325L;
+        if (primaryInv != null) {
+            signature = mix(signature, primaryInv.size());
+        }
 
         for (Slot slot : handler.slots) {
             if (slot.inventory != null && slot.inventory == primaryInv) {
-                if (!slot.getStack().isEmpty()) {
-                    items.put(slot.getIndex(), slot.getStack().copy());
+                ItemStack stack = slot.getStack();
+                if (!stack.isEmpty()) {
+                    items.put(slot.getIndex(), stack.copy());
+                    signature = mix(signature, slot.getIndex());
+                    signature = mix(signature, stack.getCount());
+                    signature = mix(signature, ItemStack.hashCode(stack));
                 }
             }
         }
@@ -141,9 +153,14 @@ public class RealContainerCache {
 
         if (handler instanceof net.minecraft.screen.CrafterScreenHandler crafterHandler) {
             Set<Integer> locks = new HashSet<>();
+            int disabledMask = 0;
             for (int i = 0; i < 9; i++) {
-                if (crafterHandler.isSlotDisabled(i)) locks.add(i);
+                if (crafterHandler.isSlotDisabled(i)) {
+                    locks.add(i);
+                    disabledMask |= 1 << i;
+                }
             }
+            signature = mix(signature, disabledMask);
             Set<Integer> previousLocks = LOCK_CACHE.put(pos.toImmutable(), locks);
             changed |= !locks.equals(previousLocks);
         }
@@ -151,6 +168,8 @@ public class RealContainerCache {
         if (changed) {
             cacheVersion++;
         }
+
+        return signature;
     }
 
     private static void updateFromHandlerIfNeeded(MinecraftClient client, ScreenHandler handler) {
@@ -172,16 +191,24 @@ public class RealContainerCache {
             return;
         }
 
-        long signature = computeHandlerSignature(handler, client);
         lastObservedTick = worldTime;
-        if (!newHandler && signature == lastObservedSignature) {
+        if (newHandler) {
+            lastObservedHandler = handler;
+            lastObservedSyncId = handler.syncId;
+            long signature = updateFromHandlerAndGetSignature(client, handler);
+            lastObservedSignature = signature != Long.MIN_VALUE ? signature : computeHandlerSignature(handler, client);
+            return;
+        }
+
+        long signature = computeHandlerSignature(handler, client);
+        if (signature == lastObservedSignature) {
             return;
         }
 
         lastObservedHandler = handler;
         lastObservedSyncId = handler.syncId;
-        lastObservedSignature = signature;
-        updateFromHandler(client, handler);
+        long updatedSignature = updateFromHandlerAndGetSignature(client, handler);
+        lastObservedSignature = updatedSignature != Long.MIN_VALUE ? updatedSignature : signature;
     }
 
     private static boolean shouldIgnoreHandler(ScreenHandler handler) {
@@ -573,10 +600,22 @@ public class RealContainerCache {
 
         BlockPos key = pos.toImmutable();
         BlockState previous = BLOCK_STATE_CACHE.put(key, state);
-        if (previous != null && !previous.equals(state)) {
+        if (previous != null && hasMeaningfulBlockStateChange(previous, state)) {
             removeCachedDataOnly(key);
             cacheVersion++;
         }
+    }
+
+    private static boolean hasMeaningfulBlockStateChange(BlockState previous, BlockState current) {
+        if (previous.equals(current)) return false;
+
+        if (previous.isOf(net.minecraft.block.Blocks.BARREL) &&
+                current.isOf(net.minecraft.block.Blocks.BARREL) &&
+                previous.get(net.minecraft.block.BarrelBlock.FACING) == current.get(net.minecraft.block.BarrelBlock.FACING)) {
+            return false;
+        }
+
+        return true;
     }
 
     private static void removeCachedDataOnly(BlockPos pos) {
