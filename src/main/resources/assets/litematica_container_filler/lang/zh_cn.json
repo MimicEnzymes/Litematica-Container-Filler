@@ -20,6 +20,7 @@
   "litematica_container_filler.gui.button.defaults": "默认",
   "litematica_container_filler.gui.button.clear": "清空",
   "litematica_container_filler.gui.button.back": "返回",
+  "litematica_container_filler.gui.button.trigger": "触发",
   "litematica_container_filler.gui.title.container_filter_picker": "容器过滤选择",
   "litematica_container_filler.gui.title.render_editor": "渲染编辑器",
   "litematica_container_filler.gui.label.container_filter_picker": "点击容器卡片，把对应方块 ID 加入或移出白名单/黑名单列表；按 ESC 返回配置页。",
@@ -38,6 +39,8 @@
   "litematica_container_filler.gui.label.render_state.satisfied": "完成",
   "litematica_container_filler.gui.label.render_state.unknown": "未知",
   "litematica_container_filler.gui.label.render_state.unplaced": "未放置",
+  "litematica_container_filler.gui.label.render_state.manual_completed": "手动完成",
+  "litematica_container_filler.gui.label.render_state.manual_needs_fill": "手动填充",
   "litematica_container_filler.gui.label.marker_filling": "正在填充",
   "litematica_container_filler.gui.label.marker_queued": "排队等待",
   "litematica_container_filler.gui.label.marker_missing": "缺少材料",
@@ -325,4 +328,12 @@
   "litematica_container_filler.config.name.taskMarkerAnimationFps": "任务标记帧率上限",
   "litematica_container_filler.config.comment.taskMarkerAnimationFps": "正在填充、排队等待、缺少材料标记的最大动画重建帧率。0 表示不限制。",
   "litematica_container_filler.hud.fixed.title": "工具信息："
+  , "litematica_container_filler.hotkey.name.cycleManualOverride": "切换容器手动标记"
+  , "litematica_container_filler.hotkey.name.clearManualOverrides": "清除容器手动标记"
+  , "litematica_container_filler.hotkey.comment.cycleManualOverride": "将准星指向的投影容器在自动、手动已完成、手动需要填充之间循环切换。"
+  , "litematica_container_filler.hotkey.comment.clearManualOverrides": "清除本次会话中的所有容器手动标记。"
+  , "litematica_container_filler.message.manual_override_auto": "§b[容器填充] 已清除手动标记：恢复自动判断。"
+  , "litematica_container_filler.message.manual_override_completed": "§a[容器填充] 已标记为完成：填充会跳过该容器。"
+  , "litematica_container_filler.message.manual_override_needs_fill": "§e[容器填充] 已标记为需要填充：该容器会保持高亮并参与填充。"
+  , "litematica_container_filler.message.manual_override_cleared": "§b[容器填充] 已清除 %s 个容器手动标记。"
 }

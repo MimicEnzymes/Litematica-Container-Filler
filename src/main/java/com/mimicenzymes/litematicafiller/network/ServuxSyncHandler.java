@@ -15,6 +15,7 @@ public class ServuxSyncHandler {
     private static final int MAX_INDEPENDENT_CACHE_SIZE = 1024;
 
     public static final Map<BlockPos, Map<Integer, ItemStack>> INDEPENDENT_CACHE = new ConcurrentHashMap<>();
+    private static final Map<BlockPos, Integer> SLOT_COUNT_CACHE = new ConcurrentHashMap<>();
 
     private static boolean minihudChecked = false;
     private static Class<?> minihudCacheClass = null;
@@ -118,6 +119,7 @@ public class ServuxSyncHandler {
                         if (map != null) {
                             Object result = map.get(pos);
                             if (result != null) {
+                                rememberSlotCount(pos, result);
                                 Map<Integer, ItemStack> extracted = extractItemsFromObject(result);
                                 if (extracted != null && !extracted.isEmpty()) return extracted;
                             }
@@ -140,6 +142,7 @@ public class ServuxSyncHandler {
 
                         Object result = isStatic ? m.invoke(null, pos) : m.invoke(cacheInstance, pos);
                         if (result != null) {
+                            rememberSlotCount(pos, result);
                             Map<Integer, ItemStack> extracted = extractItemsFromObject(result);
                             if (extracted != null && !extracted.isEmpty()) return extracted;
                         }
@@ -149,6 +152,24 @@ public class ServuxSyncHandler {
         }
 
         return INDEPENDENT_CACHE.get(pos);
+    }
+
+    public static int getCachedSlotCount(BlockPos pos) {
+        Integer slotCount = SLOT_COUNT_CACHE.get(pos);
+        if (slotCount != null) return slotCount;
+        return inferSlotCountFromItems(INDEPENDENT_CACHE.get(pos));
+    }
+
+    public static void clearCachedData(BlockPos pos) {
+        if (pos == null) return;
+        BlockPos key = pos.toImmutable();
+        INDEPENDENT_CACHE.remove(key);
+        SLOT_COUNT_CACHE.remove(key);
+    }
+
+    public static void clearAllCachedData() {
+        INDEPENDENT_CACHE.clear();
+        SLOT_COUNT_CACHE.clear();
     }
 
     public static boolean requestData(BlockPos pos) {
@@ -181,10 +202,117 @@ public class ServuxSyncHandler {
         if (INDEPENDENT_CACHE.size() >= MAX_INDEPENDENT_CACHE_SIZE) {
             var iterator = INDEPENDENT_CACHE.keySet().iterator();
             if (iterator.hasNext()) {
-                iterator.next();
+                BlockPos evicted = iterator.next();
                 iterator.remove();
+                SLOT_COUNT_CACHE.remove(evicted);
             }
         }
-        INDEPENDENT_CACHE.put(pos, items);
+        INDEPENDENT_CACHE.put(pos.toImmutable(), items);
+        rememberSlotCount(pos, items);
+    }
+
+    private static void rememberSlotCount(BlockPos pos, Object inventoryData) {
+        int slotCount = inferSlotCountFromObject(inventoryData);
+        if (slotCount <= 0) return;
+        SLOT_COUNT_CACHE.merge(pos.toImmutable(), slotCount, Math::max);
+    }
+
+    private static int inferSlotCountFromObject(Object obj) {
+        if (obj == null) return -1;
+
+        if (obj instanceof java.util.Collection<?> list) {
+            return normalizeSlotCount(list.size());
+        }
+        if (obj instanceof ItemStack[] arr) {
+            return normalizeSlotCount(arr.length);
+        }
+        if (obj instanceof Map<?, ?> map) {
+            return inferSlotCountFromMap(map);
+        }
+
+        int methodCount = inferSlotCountFromMethods(obj);
+        if (methodCount > 0) return methodCount;
+
+        try {
+            for (Field f : obj.getClass().getDeclaredFields()) {
+                f.setAccessible(true);
+                Object val = f.get(obj);
+                if (val instanceof java.util.Collection<?> list) {
+                    int count = normalizeSlotCount(list.size());
+                    if (count > 0) return count;
+                }
+                if (val instanceof ItemStack[] arr) {
+                    int count = normalizeSlotCount(arr.length);
+                    if (count > 0) return count;
+                }
+                if (val instanceof Map<?, ?> map) {
+                    int count = inferSlotCountFromMap(map);
+                    if (count > 0) return count;
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        return -1;
+    }
+
+    private static int inferSlotCountFromMethods(Object obj) {
+        for (Method method : obj.getClass().getDeclaredMethods()) {
+            if (method.getParameterCount() != 0) continue;
+            String name = method.getName().toLowerCase();
+            if (!name.equals("size") && !name.equals("getsize") &&
+                    !name.equals("getinventorysize") && !name.equals("getslotcount") &&
+                    !name.equals("slotcount")) {
+                continue;
+            }
+
+            try {
+                method.setAccessible(true);
+                Object value = method.invoke(obj);
+                if (value instanceof Number number) {
+                    int count = normalizeSlotCount(number.intValue());
+                    if (count > 0) return count;
+                }
+            } catch (Throwable ignored) {}
+        }
+        return -1;
+    }
+
+    private static int inferSlotCountFromMap(Map<?, ?> map) {
+        if (map == null || map.isEmpty()) return -1;
+
+        int maxSlot = -1;
+        for (Object key : map.keySet()) {
+            int slot = parseSlotKey(key);
+            if (slot > maxSlot) maxSlot = slot;
+        }
+        if (maxSlot < 0) return -1;
+        return normalizeSlotCount(maxSlot + 1);
+    }
+
+    private static int inferSlotCountFromItems(Map<Integer, ItemStack> items) {
+        if (items == null || items.isEmpty()) return -1;
+
+        int maxSlot = -1;
+        for (Integer slot : items.keySet()) {
+            if (slot != null && slot > maxSlot) maxSlot = slot;
+        }
+        if (maxSlot < 0) return -1;
+        return normalizeSlotCount(maxSlot + 1);
+    }
+
+    private static int parseSlotKey(Object key) {
+        if (key instanceof Number number) return number.intValue();
+        if (key instanceof String string) {
+            try {
+                return Integer.parseInt(string);
+            } catch (NumberFormatException ignored) {}
+        }
+        return -1;
+    }
+
+    private static int normalizeSlotCount(int rawCount) {
+        if (rawCount >= 54) return 54;
+        if (rawCount >= 27) return 27;
+        return rawCount > 0 ? rawCount : -1;
     }
 }

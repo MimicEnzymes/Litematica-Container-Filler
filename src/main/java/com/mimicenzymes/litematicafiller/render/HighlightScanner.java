@@ -6,15 +6,16 @@ import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.tool.ContainerToolStateMachine;
 import com.mimicenzymes.litematicafiller.core.ItemMatcher;
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
+import com.mimicenzymes.litematicafiller.core.LitematicaPlacementContainerData;
+import com.mimicenzymes.litematicafiller.core.ManualContainerOverrideManager;
+import com.mimicenzymes.litematicafiller.core.ManualContainerOverrideState;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtList;
 import net.minecraft.util.math.BlockPos;
+import fi.dy.masa.malilib.util.LayerRange;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -28,14 +29,13 @@ public class HighlightScanner {
     private static final int BOOSTED_UPDATE_INTERVAL_TICKS = 2;
     private static final int BOOST_DURATION_TICKS = 60;
     private static final int MAX_DATA_REQUESTS_PER_TICK = 128;
-    private static final int FALLBACK_WORLD_SCAN_RADIUS = 16;
-    private static final int FALLBACK_WORLD_SCAN_SECTION_SIZE = 8;
-    private static final long FALLBACK_WORLD_SCAN_CACHE_MS = 1500L;
     private static final long UNKNOWN_REQUEST_INTERVAL_MS = 100L;
+    private static final long BARREL_ACTIVE_REQUEST_INTERVAL_MS = 250L;
+    private static final long BARREL_SATISFIED_REQUEST_INTERVAL_MS = 1000L;
+    private static final long LARGE_BARREL_CONFIRM_REQUEST_INTERVAL_MS = 250L;
     private static final long ACTIVE_REQUEST_INTERVAL_MS = 750L;
     private static final long SATISFIED_REQUEST_INTERVAL_MS = 4000L;
     private static final long EMPTY_SYNC_CONFIRMATION_MS = 5000L;
-
     private static final Map<BlockPos, HighlightState> HIGHLIGHT_MAP = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Map<Integer, ItemStack>> SCHEMATIC_REQ_CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Set<Integer>> SCHEMATIC_IGNORED_SLOT_CACHE = new ConcurrentHashMap<>();
@@ -43,17 +43,31 @@ public class HighlightScanner {
     private static final Map<BlockPos, Long> HIGHLIGHT_REQUEST_INTERVALS = new ConcurrentHashMap<>();
     private static final Deque<BlockPos> DATA_REQUEST_QUEUE = new ArrayDeque<>();
     private static final Set<BlockPos> QUEUED_DATA_REQUESTS = new HashSet<>();
+    private static final Deque<BlockPos> DIRTY_HIGHLIGHT_QUEUE = new ArrayDeque<>();
+    private static final Set<BlockPos> QUEUED_DIRTY_HIGHLIGHTS = new HashSet<>();
+    private static final int MAX_DIRTY_HIGHLIGHT_UPDATES_PER_TICK = 64;
     private static volatile int highlightVersion = 0;
+    private static HighlightFingerprint highlightFingerprint = HighlightFingerprint.empty();
     private static final ExecutorService INDEX_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "LitematicaFiller-HighlightScanner");
         thread.setDaemon(true);
         return thread;
     });
     private static volatile Set<BlockPos> SCHEMATIC_CONTAINERS = Collections.emptySet();
-    private static volatile Map<BucketKey, Set<BlockPos>> SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
-    private static volatile FallbackScanCache fallbackScanCache = FallbackScanCache.empty();
+    private static volatile Map<Long, Set<BlockPos>> SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
     private static volatile long lastIndexTime = 0;
     private static volatile boolean isIndexing = false;
+    private static long lastRenderLayerSignature = Long.MIN_VALUE;
+    private static boolean pendingRenderLayerRefresh = false;
+    private static long lastRenderLayerRefreshTick = Long.MIN_VALUE;
+    private static Map<Long, Set<BlockPos>> cachedNearbyBucketSource = Collections.emptyMap();
+    private static List<Set<BlockPos>> cachedNearbyBucketSets = Collections.emptyList();
+    private static int cachedNearbyMinX = Integer.MIN_VALUE;
+    private static int cachedNearbyMaxX = Integer.MIN_VALUE;
+    private static int cachedNearbyMinY = Integer.MIN_VALUE;
+    private static int cachedNearbyMaxY = Integer.MIN_VALUE;
+    private static int cachedNearbyMinZ = Integer.MIN_VALUE;
+    private static int cachedNearbyMaxZ = Integer.MIN_VALUE;
 
     private static int tickCounter = 0;
     private static int boostedTicks = 0;
@@ -66,6 +80,51 @@ public class HighlightScanner {
         return highlightVersion;
     }
 
+    public static void onContainerDataChanged(BlockPos pos) {
+        if (pos != null) {
+            HIGHLIGHT_REQUEST_TIME.remove(pos);
+            HIGHLIGHT_REQUEST_INTERVALS.remove(pos);
+            DATA_REQUEST_QUEUE.remove(pos);
+            QUEUED_DATA_REQUESTS.remove(pos);
+        }
+        triggerBoost(BOOST_DURATION_TICKS);
+    }
+
+    public static void onManualOverrideChanged(BlockPos pos, ManualContainerOverrideState state) {
+        if (pos == null) return;
+
+        if (state == ManualContainerOverrideState.AUTO) {
+            BlockPos key = pos.toImmutable();
+            RealContainerCache.remove(key);
+            HIGHLIGHT_REQUEST_TIME.remove(key);
+            HIGHLIGHT_REQUEST_INTERVALS.remove(key);
+            DATA_REQUEST_QUEUE.remove(key);
+            QUEUED_DATA_REQUESTS.remove(key);
+            if (HIGHLIGHT_MAP.remove(key) != null) {
+                highlightVersion++;
+            }
+            triggerBoost(BOOST_DURATION_TICKS);
+        } else {
+            triggerBoost(BOOST_DURATION_TICKS);
+        }
+    }
+
+    public static void onManualOverridesCleared() {
+        boolean changed = false;
+        for (Map.Entry<BlockPos, HighlightState> entry : HIGHLIGHT_MAP.entrySet()) {
+            HighlightState state = entry.getValue();
+            if ((state == HighlightState.MANUAL_COMPLETED || state == HighlightState.MANUAL_NEEDS_FILL) &&
+                    HIGHLIGHT_MAP.remove(entry.getKey(), state)) {
+                changed = true;
+            }
+        }
+        if (changed) {
+            highlightFingerprint = computeHighlightFingerprint(HIGHLIGHT_MAP);
+            highlightVersion++;
+        }
+        triggerBoost(BOOST_DURATION_TICKS);
+    }
+
     public record ContainerSnapshot(List<BlockPos> positions, int nextCursor, int totalCount) {
     }
 
@@ -73,35 +132,20 @@ public class HighlightScanner {
         ensureSchematicContainerIndex();
         if (limit <= 0) return new ContainerSnapshot(Collections.emptyList(), 0, 0);
 
-        Map<BucketKey, Set<BlockPos>> buckets = SCHEMATIC_CONTAINER_BUCKETS;
+        Map<Long, Set<BlockPos>> buckets = SCHEMATIC_CONTAINER_BUCKETS;
         if (radius <= 0 || buckets.isEmpty()) {
             Collection<BlockPos> indexed = SCHEMATIC_CONTAINERS;
-            if (!indexed.isEmpty()) return collectSnapshot(indexed, cursor, limit);
-            return collectSnapshot(getFallbackSchematicWorldContainers(center, radius), cursor, limit);
+            return collectSnapshot(indexed, cursor, limit);
         }
 
-        int minX = (center.getX() - radius) >> 4;
-        int maxX = (center.getX() + radius) >> 4;
-        int minY = (center.getY() - radius) >> 4;
-        int maxY = (center.getY() + radius) >> 4;
-        int minZ = (center.getZ() - radius) >> 4;
-        int maxZ = (center.getZ() + radius) >> 4;
-        List<Set<BlockPos>> bucketSets = new ArrayList<>();
+        List<Set<BlockPos>> bucketSets = getNearbyBucketSets(buckets, center, radius);
         int totalCount = 0;
-
-        for (int x = minX; x <= maxX; x++) {
-            for (int y = minY; y <= maxY; y++) {
-                for (int z = minZ; z <= maxZ; z++) {
-                    Set<BlockPos> bucket = buckets.get(new BucketKey(x, y, z));
-                    if (bucket == null || bucket.isEmpty()) continue;
-                    bucketSets.add(bucket);
-                    totalCount += bucket.size();
-                }
-            }
+        for (Set<BlockPos> bucket : bucketSets) {
+            totalCount += bucket.size();
         }
 
         if (totalCount == 0) {
-            return collectSnapshot(getFallbackSchematicWorldContainers(center, radius), cursor, limit);
+            return new ContainerSnapshot(Collections.emptyList(), 0, 0);
         }
 
         int start = Math.floorMod(cursor, totalCount);
@@ -175,10 +219,17 @@ public class HighlightScanner {
         HIGHLIGHT_REQUEST_INTERVALS.clear();
         DATA_REQUEST_QUEUE.clear();
         QUEUED_DATA_REQUESTS.clear();
+        DIRTY_HIGHLIGHT_QUEUE.clear();
+        QUEUED_DIRTY_HIGHLIGHTS.clear();
+        LitematicaPlacementContainerData.clear();
+        ManualContainerOverrideManager.clearForCurrentContext();
         SCHEMATIC_CONTAINERS = Collections.emptySet();
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
-        clearFallbackScanCache();
+        invalidateNearbyBucketCache();
         lastIndexTime = 0;
+        lastRenderLayerSignature = Long.MIN_VALUE;
+        pendingRenderLayerRefresh = false;
+        lastRenderLayerRefreshTick = Long.MIN_VALUE;
         boostedTicks = 0;
     }
 
@@ -191,9 +242,16 @@ public class HighlightScanner {
         HIGHLIGHT_REQUEST_INTERVALS.clear();
         DATA_REQUEST_QUEUE.clear();
         QUEUED_DATA_REQUESTS.clear();
+        DIRTY_HIGHLIGHT_QUEUE.clear();
+        QUEUED_DIRTY_HIGHLIGHTS.clear();
+        LitematicaPlacementContainerData.clear();
+        ManualContainerOverrideManager.clearForCurrentContext();
         triggerBoost(BOOST_DURATION_TICKS);
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
-        clearFallbackScanCache();
+        invalidateNearbyBucketCache();
+        lastRenderLayerSignature = Long.MIN_VALUE;
+        pendingRenderLayerRefresh = false;
+        lastRenderLayerRefreshTick = Long.MIN_VALUE;
     }
 
     private static Map<Integer, ItemStack> getCachedSchematicReq(BlockPos pos, MinecraftClient client) {
@@ -222,6 +280,8 @@ public class HighlightScanner {
             clearHighlights();
             DATA_REQUEST_QUEUE.clear();
             QUEUED_DATA_REQUESTS.clear();
+            DIRTY_HIGHLIGHT_QUEUE.clear();
+            QUEUED_DIRTY_HIGHLIGHTS.clear();
             HIGHLIGHT_REQUEST_TIME.clear();
             HIGHLIGHT_REQUEST_INTERVALS.clear();
             return;
@@ -237,7 +297,6 @@ public class HighlightScanner {
             if (!HIGHLIGHT_REQUEST_TIME.isEmpty()) HIGHLIGHT_REQUEST_TIME.clear();
             if (!SCHEMATIC_CONTAINERS.isEmpty()) SCHEMATIC_CONTAINERS = Collections.emptySet();
             if (!SCHEMATIC_CONTAINER_BUCKETS.isEmpty()) SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
-            clearFallbackScanCache();
             return;
         }
 
@@ -245,8 +304,14 @@ public class HighlightScanner {
 
         long now = System.currentTimeMillis();
         boolean modOperating = AutoFillerStateMachine.getInstance().isWorking() || ContainerToolStateMachine.getInstance().isWorking();
+        boolean syncLayer = Configs.SYNC_LITE_LAYER.getBooleanValue();
+        boolean hideCompleted = Configs.HIDE_COMPLETED_CONTAINERS.getBooleanValue();
+        LayerRange renderLayerRange = syncLayer ? fi.dy.masa.litematica.data.DataManager.getRenderLayerRange() : null;
+        processDirtyHighlights(client, schematicWorld, renderLayerRange, hideCompleted, now);
+
         boolean userHandledScreenOpen = client.currentScreen instanceof HandledScreen<?> && !modOperating;
         if (userHandledScreenOpen) {
+            pumpDataRequests(now);
             return;
         }
 
@@ -254,92 +319,195 @@ public class HighlightScanner {
 
         startIndexingIfIdle(now);
 
+        boolean layerChanged = updateRenderLayerSignature(syncLayer);
+        if (layerChanged) {
+            pendingRenderLayerRefresh = true;
+            triggerBoost(BOOST_DURATION_TICKS);
+        }
+
         boolean fillWorkEnabled = Configs.WORKING_STATE.getBooleanValue();
         int updateInterval = boostedTicks > 0
                 ? BOOSTED_UPDATE_INTERVAL_TICKS
                 : (modOperating || fillWorkEnabled ? NORMAL_UPDATE_INTERVAL_TICKS : IDLE_UPDATE_INTERVAL_TICKS);
-        if (tickCounter % updateInterval != 0) {
+        boolean layerRefreshDue = pendingRenderLayerRefresh &&
+                (lastRenderLayerRefreshTick == Long.MIN_VALUE ||
+                        tickCounter - lastRenderLayerRefreshTick >= BOOSTED_UPDATE_INTERVAL_TICKS);
+        if (!layerRefreshDue && tickCounter % updateInterval != 0) {
             if (boostedTicks > 0) boostedTicks--;
             return;
         }
-
-        boolean hideCompleted = Configs.HIDE_COMPLETED_CONTAINERS.getBooleanValue();
-        boolean syncLayer = Configs.SYNC_LITE_LAYER.getBooleanValue();
+        if (pendingRenderLayerRefresh) {
+            pendingRenderLayerRefresh = false;
+            lastRenderLayerRefreshTick = tickCounter;
+        }
 
         int currentRadius = Configs.RENDER_RADIUS.getIntegerValue();
         double radiusSq = currentRadius * currentRadius;
+        boolean hasManualOverrides = ManualContainerOverrideManager.hasOverrides();
 
-        Map<BlockPos, HighlightState> nextMap = new HashMap<>();
+        HighlightBuild nextHighlights = new HighlightBuild();
 
-        for (BlockPos pos : getNearbySchematicContainers(currentCenter, currentRadius)) {
+        for (BlockPos pos : getNearbyHighlightCandidates(currentCenter, currentRadius)) {
             if (currentRadius > 0 && pos.getSquaredDistance(currentCenter) > radiusSq) continue;
 
-            if (syncLayer && !fi.dy.masa.litematica.data.DataManager.getRenderLayerRange().isPositionWithinRange(pos)) continue;
-
-            BlockState state = schematicWorld.getBlockState(pos);
-            if (state == null || state.isAir() || !state.hasBlockEntity()) continue;
-            if (!ContainerBlockFilter.isAllowedForSchematicFill(state, schematicWorld, pos)) continue;
-
-            BlockPos checkPos = pos;
-            BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
-            if (halves != null) checkPos = halves[0];
-            if (!checkPos.equals(pos)) continue;
-
-            Map<Integer, ItemStack> required = getCachedSchematicReq(checkPos, client);
-            Set<Integer> ignoredSlots = getCachedIgnoredSlots(checkPos, client);
-            boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
-
-            boolean hasRequiredItems = required != null && !required.isEmpty();
-            boolean hasJob = hasRequiredItems;
-            boolean shouldCheckEmptySchematicContainer = Configs.HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS.getBooleanValue();
-            if (isCrafter) {
-                Set<Integer> schematicLocks = LitematicaContainerReader.getDisabledSlots(checkPos);
-                hasJob = hasJob || !schematicLocks.isEmpty() || LitematicaContainerReader.doesCrafterNeedLocking(checkPos, client);
-            }
-
-            if (!hasJob && !shouldCheckEmptySchematicContainer) continue;
-
-            if (isRealContainerAreaLoaded(client, checkPos, halves)) {
-                if (isRealContainerMissing(client, checkPos, halves)) {
-                    observeRealContainerStates(client, checkPos, halves);
-                    clearRealContainerCache(checkPos, halves);
-                    if (Configs.HIGHLIGHT_UNPLACED_CONTAINERS.getBooleanValue() && hasJob) {
-                        nextMap.put(pos.toImmutable(), HighlightState.UNPLACED);
-                    }
-                    continue;
-                }
-
-                observeRealContainerStates(client, checkPos, halves);
-                Map<Integer, ItemStack> cached = RealContainerCache.getCachedItems(checkPos);
-                HighlightState type;
-
-                if (cached == null) {
-                    type = HighlightState.UNKNOWN;
-                    queueHighlightRefresh(checkPos, UNKNOWN_REQUEST_INTERVAL_MS, now);
-                } else {
-                    type = evaluateState(cached, required, ignoredSlots, isCrafter, checkPos, client);
-                    queueHighlightRefresh(checkPos, requestIntervalFor(type), now);
-                }
-
-                if (!hasJob && type == HighlightState.SATISFIED) {
-                    continue;
-                }
-
-                if (hasJob || type != HighlightState.UNKNOWN) {
-                    if (hideCompleted && type == HighlightState.SATISFIED) continue;
-                    nextMap.put(pos.toImmutable(), type);
-                }
-            } else {
-                if (hasJob && !hideCompleted) {
-                    nextMap.put(pos.toImmutable(), HighlightState.UNKNOWN);
-                }
+            HighlightState type = evaluateHighlightForPosition(client, schematicWorld, pos, renderLayerRange,
+                    hideCompleted, hasManualOverrides, now);
+            if (type != null) {
+                nextHighlights.put(pos, type);
             }
         }
 
-        replaceHighlightsIfChanged(nextMap);
+        replaceHighlightsIfChanged(nextHighlights);
         if (boostedTicks > 0) {
             boostedTicks--;
         }
+    }
+
+    private static void processDirtyHighlights(MinecraftClient client,
+                                               net.minecraft.world.World schematicWorld,
+                                               LayerRange renderLayerRange,
+                                               boolean hideCompleted,
+                                               long now) {
+        Set<BlockPos> changed = RealContainerCache.drainChangedPositions();
+        for (BlockPos changedPos : changed) {
+            if (changedPos == null) continue;
+            BlockPos key = changedPos.toImmutable();
+            if (QUEUED_DIRTY_HIGHLIGHTS.add(key)) {
+                DIRTY_HIGHLIGHT_QUEUE.offer(key);
+            }
+        }
+        if (DIRTY_HIGHLIGHT_QUEUE.isEmpty()) return;
+
+        boolean hasManualOverrides = ManualContainerOverrideManager.hasOverrides();
+        int processed = 0;
+        Set<BlockPos> processedRenderPositions = new HashSet<>();
+        while (processed < MAX_DIRTY_HIGHLIGHT_UPDATES_PER_TICK && !DIRTY_HIGHLIGHT_QUEUE.isEmpty()) {
+            BlockPos changedPos = DIRTY_HIGHLIGHT_QUEUE.poll();
+            QUEUED_DIRTY_HIGHLIGHTS.remove(changedPos);
+            if (changedPos == null) continue;
+            BlockPos renderPos = getRenderPositionForChangedContainer(schematicWorld, changedPos);
+            if (renderPos == null) renderPos = changedPos;
+            renderPos = renderPos.toImmutable();
+            if (!processedRenderPositions.add(renderPos)) continue;
+
+            HighlightState previous = HIGHLIGHT_MAP.get(renderPos);
+            HighlightState next = evaluateHighlightForPosition(client, schematicWorld, renderPos, renderLayerRange,
+                    hideCompleted, hasManualOverrides, now);
+
+            boolean changedHighlight;
+            if (next == null) {
+                changedHighlight = HIGHLIGHT_MAP.remove(renderPos) != null;
+            } else {
+                changedHighlight = previous != next;
+                if (changedHighlight) {
+                    HIGHLIGHT_MAP.put(renderPos.toImmutable(), next);
+                }
+            }
+
+            if (changedHighlight) {
+                highlightFingerprint = computeHighlightFingerprint(HIGHLIGHT_MAP);
+                highlightVersion++;
+            }
+
+            processed++;
+        }
+    }
+
+    private static BlockPos getRenderPositionForChangedContainer(net.minecraft.world.World schematicWorld, BlockPos pos) {
+        BlockState state = schematicWorld.getBlockState(pos);
+        if (state == null || state.isAir()) return pos;
+
+        BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
+        return halves != null ? halves[0] : pos;
+    }
+
+    private static HighlightState evaluateHighlightForPosition(MinecraftClient client,
+                                                               net.minecraft.world.World schematicWorld,
+                                                               BlockPos pos,
+                                                               LayerRange renderLayerRange,
+                                                               boolean hideCompleted,
+                                                               boolean hasManualOverrides,
+                                                               long now) {
+        BlockState state = schematicWorld.getBlockState(pos);
+        boolean schematicContainer = state != null && !state.isAir() && state.hasBlockEntity() &&
+                ContainerBlockFilter.isAllowedForSchematicFill(state, schematicWorld, pos);
+        ManualContainerOverrideState manualState = hasManualOverrides
+                ? ManualContainerOverrideManager.get(pos)
+                : ManualContainerOverrideState.AUTO;
+        boolean manualCompleted = manualState == ManualContainerOverrideState.COMPLETED;
+        boolean manualNeedsFill = manualState == ManualContainerOverrideState.NEEDS_FILL;
+        boolean manualMarked = manualCompleted || manualNeedsFill;
+
+        if (renderLayerRange != null && schematicContainer && !renderLayerRange.isPositionWithinRange(pos)) return null;
+        if (!schematicContainer && !manualMarked) return null;
+
+        if (!schematicContainer) {
+            BlockState realState = client.world.getBlockState(pos);
+            if (!ContainerBlockFilter.isAllowedForSchematicFill(realState, client.world, pos)) return null;
+            return manualCompleted ? HighlightState.MANUAL_COMPLETED : HighlightState.MANUAL_NEEDS_FILL;
+        }
+
+        BlockPos checkPos = pos;
+        BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
+        if (halves != null) checkPos = halves[0];
+        if (!checkPos.equals(pos)) return null;
+        queueLargeBarrelConfirmationIfNeeded(client, schematicWorld, checkPos, state, now);
+
+        Map<Integer, ItemStack> required = getCachedSchematicReq(checkPos, client);
+        boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
+        boolean crafterNeedsLocking = false;
+
+        boolean hasRequiredItems = required != null && !required.isEmpty();
+        boolean hasJob = hasRequiredItems;
+        boolean shouldCheckEmptySchematicContainer = Configs.HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS.getBooleanValue();
+        if (isCrafter) {
+            Set<Integer> schematicLocks = LitematicaContainerReader.getDisabledSlots(checkPos);
+            crafterNeedsLocking = LitematicaContainerReader.doesCrafterNeedLocking(checkPos, client);
+            hasJob = hasJob || !schematicLocks.isEmpty() || crafterNeedsLocking;
+        }
+
+        if (manualCompleted || manualNeedsFill) hasJob = true;
+
+        if (!hasJob && !shouldCheckEmptySchematicContainer) return null;
+
+        if (isRealContainerAreaLoaded(client, checkPos, halves)) {
+            if (isRealContainerMissing(client, checkPos, halves)) {
+                observeRealContainerStates(client, checkPos, halves);
+                clearRealContainerCache(checkPos, halves);
+                return Configs.HIGHLIGHT_UNPLACED_CONTAINERS.getBooleanValue() && hasJob
+                        ? HighlightState.UNPLACED
+                        : null;
+            }
+
+            observeRealContainerStates(client, checkPos, halves);
+            Map<Integer, ItemStack> cached = RealContainerCache.getCachedItems(checkPos);
+            HighlightState type;
+
+            if (manualCompleted) {
+                type = HighlightState.MANUAL_COMPLETED;
+            } else if (manualNeedsFill) {
+                type = HighlightState.MANUAL_NEEDS_FILL;
+            } else if (cached == null) {
+                type = HighlightState.UNKNOWN;
+                queueHighlightRefresh(checkPos, UNKNOWN_REQUEST_INTERVAL_MS, now);
+            } else {
+                Set<Integer> ignoredSlots = getCachedIgnoredSlots(checkPos, client);
+                type = evaluateState(cached, required, ignoredSlots, isCrafter, crafterNeedsLocking);
+                queueHighlightRefresh(checkPos, requestIntervalFor(type, state), now);
+            }
+
+            if (!hasJob && type == HighlightState.SATISFIED) return null;
+            if (hasJob || type != HighlightState.UNKNOWN) {
+                if (hideCompleted && type == HighlightState.SATISFIED) return null;
+                return type;
+            }
+            return null;
+        }
+
+        if (!hasJob) return null;
+        if (manualCompleted) return HighlightState.MANUAL_COMPLETED;
+        if (manualNeedsFill || !hideCompleted) return manualNeedsFill ? HighlightState.MANUAL_NEEDS_FILL : HighlightState.UNKNOWN;
+        return null;
     }
 
     private static boolean isRealContainerMissing(MinecraftClient client, BlockPos checkPos, BlockPos[] schematicHalves) {
@@ -394,13 +562,51 @@ public class HighlightScanner {
         boostedTicks = Math.max(boostedTicks, ticks);
     }
 
+    private static boolean updateRenderLayerSignature(boolean syncLayer) {
+        long signature = syncLayer ? computeRenderLayerSignature() : Long.MIN_VALUE + 1L;
+        if (signature == lastRenderLayerSignature) {
+            return false;
+        }
+
+        boolean changed = lastRenderLayerSignature != Long.MIN_VALUE;
+        lastRenderLayerSignature = signature;
+        return changed;
+    }
+
+    private static long computeRenderLayerSignature() {
+        try {
+            LayerRange range = fi.dy.masa.litematica.data.DataManager.getRenderLayerRange();
+            if (range == null) return 0L;
+
+            long value = 0x6a09e667f3bcc909L;
+            value = mix64(value ^ range.getLayerMode().ordinal());
+            value = mix64(value ^ ((long) range.getAxis().ordinal() << 8));
+            value = mix64(value ^ ((long) range.getLayerSingle() << 16));
+            value = mix64(value ^ ((long) range.getLayerAbove() << 24));
+            value = mix64(value ^ ((long) range.getLayerBelow() << 32));
+            value = mix64(value ^ ((long) range.getLayerRangeMin() << 40));
+            value = mix64(value ^ ((long) range.getLayerRangeMax() << 48));
+            value = mix64(value ^ (range.getMoveLayerRangeMin() ? 0x100000001b3L : 0L));
+            value = mix64(value ^ (range.getMoveLayerRangeMax() ? 0x9e3779b97f4a7c15L : 0L));
+            return value;
+        } catch (Throwable ignored) {
+            return 0L;
+        }
+    }
+
+    private static long mix64(long value) {
+        value = (value ^ (value >>> 30)) * 0xbf58476d1ce4e5b9L;
+        value = (value ^ (value >>> 27)) * 0x94d049bb133111ebL;
+        return value ^ (value >>> 31);
+    }
+
     private static synchronized void startIndexingIfIdle(long now) {
         if (isIndexing || now - lastIndexTime <= 5000) return;
 
         isIndexing = true;
         CompletableFuture.runAsync(() -> {
             try {
-                Set<BlockPos> found = extractAllContainersFromSchematic();
+                Set<BlockPos> found = LitematicaPlacementContainerData.rebuildIndex();
                 if (!found.equals(SCHEMATIC_CONTAINERS)) {
                     SCHEMATIC_REQ_CACHE.clear();
                     SCHEMATIC_IGNORED_SLOT_CACHE.clear();
@@ -409,6 +615,7 @@ public class HighlightScanner {
                 SCHEMATIC_CONTAINER_BUCKETS = buildContainerBuckets(found);
             } catch (Exception e) {} finally {
                 lastIndexTime = System.currentTimeMillis();
+                invalidateNearbyBucketCache();
                 isIndexing = false;
             }
         }, INDEX_EXECUTOR);
@@ -418,19 +625,52 @@ public class HighlightScanner {
         if (HIGHLIGHT_MAP.isEmpty()) return;
 
         HIGHLIGHT_MAP.clear();
+        highlightFingerprint = HighlightFingerprint.empty();
         highlightVersion++;
     }
 
-    private static void replaceHighlightsIfChanged(Map<BlockPos, HighlightState> nextMap) {
-        if (HIGHLIGHT_MAP.equals(nextMap)) return;
+    private static void replaceHighlightsIfChanged(HighlightBuild nextHighlights) {
+        HighlightFingerprint nextFingerprint = nextHighlights.fingerprint();
+        if (highlightFingerprint.equals(nextFingerprint)) {
+            return;
+        }
 
         HIGHLIGHT_MAP.clear();
-        HIGHLIGHT_MAP.putAll(nextMap);
+        HIGHLIGHT_MAP.putAll(nextHighlights.states);
+        highlightFingerprint = nextFingerprint;
         highlightVersion++;
     }
 
-    private static long requestIntervalFor(HighlightState type) {
-        return type == HighlightState.SATISFIED ? SATISFIED_REQUEST_INTERVAL_MS : ACTIVE_REQUEST_INTERVAL_MS;
+    private static HighlightFingerprint computeHighlightFingerprint(Map<BlockPos, HighlightState> highlights) {
+        HighlightBuild build = new HighlightBuild();
+        for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
+            build.put(entry.getKey(), entry.getValue());
+        }
+        return build.fingerprint();
+    }
+
+    private static long requestIntervalFor(HighlightState type, BlockState state) {
+        if (state != null && state.isOf(net.minecraft.block.Blocks.BARREL)) {
+            return type == HighlightState.SATISFIED ? BARREL_SATISFIED_REQUEST_INTERVAL_MS : BARREL_ACTIVE_REQUEST_INTERVAL_MS;
+        }
+        if (type == HighlightState.SATISFIED) return SATISFIED_REQUEST_INTERVAL_MS;
+        return ACTIVE_REQUEST_INTERVAL_MS;
+    }
+
+    private static void queueLargeBarrelConfirmationIfNeeded(MinecraftClient client,
+                                                             net.minecraft.world.World schematicWorld,
+                                                             BlockPos pos,
+                                                             BlockState state,
+                                                             long now) {
+        BlockPos[] schematicPair = LitematicaContainerReader.getLargeBarrelConfirmationPair(schematicWorld, pos, state);
+        if (schematicPair == null) return;
+
+        BlockState realState = client.world.getBlockState(pos);
+        BlockPos[] realPair = LitematicaContainerReader.getLargeBarrelConfirmationPair(client.world, pos, realState);
+        BlockPos[] requestPair = realPair != null ? realPair : schematicPair;
+        for (BlockPos half : requestPair) {
+            queueHighlightRefresh(half, LARGE_BARREL_CONFIRM_REQUEST_INTERVAL_MS, now);
+        }
     }
 
     private static void queueHighlightRefresh(BlockPos pos, long minIntervalMs, long now) {
@@ -439,7 +679,7 @@ public class HighlightScanner {
 
         HIGHLIGHT_REQUEST_INTERVALS.put(key, minIntervalMs);
         if (QUEUED_DATA_REQUESTS.add(key)) {
-            if (minIntervalMs <= UNKNOWN_REQUEST_INTERVAL_MS) {
+            if (minIntervalMs <= UNKNOWN_REQUEST_INTERVAL_MS || minIntervalMs == LARGE_BARREL_CONFIRM_REQUEST_INTERVAL_MS) {
                 DATA_REQUEST_QUEUE.offerFirst(key);
             } else {
                 DATA_REQUEST_QUEUE.offerLast(key);
@@ -465,90 +705,153 @@ public class HighlightScanner {
         }
     }
 
-    private static Collection<BlockPos> getNearbySchematicContainers(BlockPos center, int radius) {
-        Map<BucketKey, Set<BlockPos>> buckets = SCHEMATIC_CONTAINER_BUCKETS;
+    private static Iterable<BlockPos> getNearbySchematicContainers(BlockPos center, int radius) {
+        Map<Long, Set<BlockPos>> buckets = SCHEMATIC_CONTAINER_BUCKETS;
         if (radius <= 0 || buckets.isEmpty()) {
             Collection<BlockPos> indexed = SCHEMATIC_CONTAINERS;
-            if (!indexed.isEmpty()) return indexed;
-            return getFallbackSchematicWorldContainers(center, radius);
+            return indexed;
         }
 
+        List<Set<BlockPos>> bucketSets = getNearbyBucketSets(buckets, center, radius);
+        return () -> new Iterator<>() {
+            private int bucketIndex = 0;
+            private Iterator<BlockPos> current = Collections.emptyIterator();
+
+            @Override
+            public boolean hasNext() {
+                advance();
+                return current.hasNext();
+            }
+
+            @Override
+            public BlockPos next() {
+                advance();
+                if (!current.hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                return current.next();
+            }
+
+            private void advance() {
+                while (!current.hasNext() && bucketIndex < bucketSets.size()) {
+                    current = bucketSets.get(bucketIndex++).iterator();
+                }
+            }
+        };
+    }
+
+    private static List<Set<BlockPos>> getNearbyBucketSets(Map<Long, Set<BlockPos>> buckets, BlockPos center, int radius) {
         int minX = (center.getX() - radius) >> 4;
         int maxX = (center.getX() + radius) >> 4;
         int minY = (center.getY() - radius) >> 4;
         int maxY = (center.getY() + radius) >> 4;
         int minZ = (center.getZ() - radius) >> 4;
         int maxZ = (center.getZ() + radius) >> 4;
-        List<BlockPos> nearby = new ArrayList<>();
 
+        if (buckets == cachedNearbyBucketSource &&
+                minX == cachedNearbyMinX && maxX == cachedNearbyMaxX &&
+                minY == cachedNearbyMinY && maxY == cachedNearbyMaxY &&
+                minZ == cachedNearbyMinZ && maxZ == cachedNearbyMaxZ) {
+            return cachedNearbyBucketSets;
+        }
+
+        List<Set<BlockPos>> bucketSets = new ArrayList<>();
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
-                    Set<BlockPos> bucket = buckets.get(new BucketKey(x, y, z));
-                    if (bucket != null) {
-                        nearby.addAll(bucket);
-                    }
+                    Set<BlockPos> bucket = buckets.get(packBucketKey(x, y, z));
+                    if (bucket == null || bucket.isEmpty()) continue;
+                    bucketSets.add(bucket);
                 }
             }
         }
 
-        return nearby;
+        cachedNearbyBucketSource = buckets;
+        cachedNearbyBucketSets = bucketSets;
+        cachedNearbyMinX = minX;
+        cachedNearbyMaxX = maxX;
+        cachedNearbyMinY = minY;
+        cachedNearbyMaxY = maxY;
+        cachedNearbyMinZ = minZ;
+        cachedNearbyMaxZ = maxZ;
+        return bucketSets;
     }
 
-    private static Collection<BlockPos> getFallbackSchematicWorldContainers(BlockPos center, int radius) {
-        if (!shouldUseFallbackWorldScan()) return Collections.emptyList();
-
-        int scanRadius = radius <= 0 ? FALLBACK_WORLD_SCAN_RADIUS : Math.min(radius, FALLBACK_WORLD_SCAN_RADIUS);
-        FallbackScanKey key = FallbackScanKey.from(center, scanRadius);
-        long now = System.currentTimeMillis();
-        FallbackScanCache cached = fallbackScanCache;
-        if (cached.matches(key, now)) return cached.positions();
-
-        List<BlockPos> positions = scanNearbySchematicWorldContainers(center, scanRadius);
-        fallbackScanCache = new FallbackScanCache(key, now, positions);
-        return positions;
+    private static void invalidateNearbyBucketCache() {
+        cachedNearbyBucketSource = Collections.emptyMap();
+        cachedNearbyBucketSets = Collections.emptyList();
+        cachedNearbyMinX = Integer.MIN_VALUE;
+        cachedNearbyMaxX = Integer.MIN_VALUE;
+        cachedNearbyMinY = Integer.MIN_VALUE;
+        cachedNearbyMaxY = Integer.MIN_VALUE;
+        cachedNearbyMinZ = Integer.MIN_VALUE;
+        cachedNearbyMaxZ = Integer.MIN_VALUE;
     }
 
-    private static boolean shouldUseFallbackWorldScan() {
-        return !isIndexing && lastIndexTime > 0 && SCHEMATIC_CONTAINERS.isEmpty();
-    }
+    private static Iterable<BlockPos> getNearbyHighlightCandidates(BlockPos center, int radius) {
+        Iterable<BlockPos> schematicCandidates = getNearbySchematicContainers(center, radius);
+        double radiusSq = radius * radius;
+        return () -> new Iterator<>() {
+            private final Iterator<BlockPos> schematicIterator = schematicCandidates.iterator();
+            private final Iterator<BlockPos> manualIterator = ManualContainerOverrideManager.iterateCurrentContextPositions().iterator();
+            private BlockPos nextManual;
+            private boolean schematicDone;
+            private boolean manualPrepared;
 
-    private static void clearFallbackScanCache() {
-        fallbackScanCache = FallbackScanCache.empty();
-    }
-
-    private static List<BlockPos> scanNearbySchematicWorldContainers(BlockPos center, int scanRadius) {
-        var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
-        if (schematicWorld == null) return Collections.emptyList();
-
-        List<BlockPos> nearby = new ArrayList<>();
-
-        for (int x = center.getX() - scanRadius; x <= center.getX() + scanRadius; x++) {
-            for (int y = center.getY() - scanRadius; y <= center.getY() + scanRadius; y++) {
-                for (int z = center.getZ() - scanRadius; z <= center.getZ() + scanRadius; z++) {
-                    BlockPos pos = new BlockPos(x, y, z);
-                    BlockState state = schematicWorld.getBlockState(pos);
-                    if (state == null || state.isAir() || !state.hasBlockEntity()) continue;
-                    if (!ContainerBlockFilter.isAllowedForSchematicFill(state, schematicWorld, pos)) continue;
-                    nearby.add(pos);
+            @Override
+            public boolean hasNext() {
+                if (!schematicDone && schematicIterator.hasNext()) {
+                    return true;
                 }
+                schematicDone = true;
+                prepareManual();
+                return nextManual != null;
             }
-        }
 
-        return nearby;
+            @Override
+            public BlockPos next() {
+                if (!schematicDone && schematicIterator.hasNext()) {
+                    return schematicIterator.next();
+                }
+                schematicDone = true;
+                prepareManual();
+                if (nextManual == null) {
+                    throw new NoSuchElementException();
+                }
+                BlockPos result = nextManual;
+                nextManual = null;
+                manualPrepared = false;
+                return result;
+            }
+
+            private void prepareManual() {
+                if (manualPrepared) return;
+                manualPrepared = true;
+
+                while (manualIterator.hasNext()) {
+                    BlockPos pos = manualIterator.next();
+                    if (radius > 0 && pos.getSquaredDistance(center) > radiusSq) continue;
+                    if (SCHEMATIC_CONTAINERS.contains(pos)) continue;
+                    nextManual = pos.toImmutable();
+                    return;
+                }
+
+                nextManual = null;
+            }
+        };
     }
 
-    private static Map<BucketKey, Set<BlockPos>> buildContainerBuckets(Set<BlockPos> containers) {
-        Map<BucketKey, Set<BlockPos>> buckets = new HashMap<>();
+    private static Map<Long, Set<BlockPos>> buildContainerBuckets(Set<BlockPos> containers) {
+        Map<Long, Set<BlockPos>> buckets = new HashMap<>();
 
         for (BlockPos pos : containers) {
-            buckets.computeIfAbsent(BucketKey.from(pos), ignored -> new HashSet<>()).add(pos);
+            buckets.computeIfAbsent(packBucketKey(pos.getX() >> 4, pos.getY() >> 4, pos.getZ() >> 4), ignored -> new HashSet<>()).add(pos);
         }
 
         return buckets;
     }
 
-    private static HighlightState evaluateState(Map<Integer, ItemStack> realItems, Map<Integer, ItemStack> required, Set<Integer> ignoredSlots, boolean isCrafter, BlockPos pos, MinecraftClient client) {
+    private static HighlightState evaluateState(Map<Integer, ItemStack> realItems, Map<Integer, ItemStack> required, Set<Integer> ignoredSlots, boolean isCrafter, boolean crafterNeedsLocking) {
         if (realItems == null) return HighlightState.UNKNOWN;
 
         int maxSlot = isCrafter ? 9 : 54;
@@ -574,170 +877,68 @@ public class HighlightScanner {
                     else if (real.getCount() < req.getCount()) hasPartial = true;
                 }
             }
+
+            if (hasWrong) return HighlightState.WRONG_ITEM;
         }
 
-        if (isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(pos, client)) hasPartial = true;
+        if (crafterNeedsLocking) hasPartial = true;
 
-        if (hasWrong) return HighlightState.WRONG_ITEM;
         if (hasPartial) return hasAnyReal ? HighlightState.PARTIAL : HighlightState.UNFILLED;
         if (hasExtra) return HighlightState.OVERFILLED;
 
         return HighlightState.SATISFIED;
     }
 
-    private static Set<BlockPos> extractAllContainersFromSchematic() {
-        Set<BlockPos> newSet = new HashSet<>();
-        try {
-            Object manager = fi.dy.masa.litematica.data.DataManager.getSchematicPlacementManager();
-            Collection<?> all = (Collection<?>) manager.getClass().getMethod("getAllSchematicsPlacements").invoke(manager);
-            if (all != null) {
-                var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
-
-                for (Object p : all) {
-                    Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-                    boolean enabled = true;
-                    try { enabled = (boolean) p.getClass().getMethod("isEnabled").invoke(p); } catch (Exception e) {}
-                    if (!enabled) continue;
-
-                    BlockPos origin = null;
-                    try {
-                        for (java.lang.reflect.Method m : p.getClass().getMethods()) {
-                            if (m.getParameterCount() == 0 && m.getReturnType() == BlockPos.class) {
-                                String name = m.getName().toLowerCase();
-                                if (name.contains("origin") || name.contains("pos")) {
-                                    origin = (BlockPos) m.invoke(p);
-                                    break;
-                                }
-                            }
-                        }
-                    } catch (Exception e) {}
-                    if (origin == null) origin = BlockPos.ORIGIN;
-
-                    List<NbtCompound> nbts = new ArrayList<>();
-                    extractNbts(p, nbts, visited, 0);
-
-                    for (NbtCompound nbt : nbts) {
-                        if (nbt.contains("x") && nbt.contains("y") && nbt.contains("z")) {
-                            int nx = getInt(nbt.get("x"));
-                            int ny = getInt(nbt.get("y"));
-                            int nz = getInt(nbt.get("z"));
-
-                            BlockPos directPos = new BlockPos(nx, ny, nz);
-                            BlockPos offsetPos = origin.add(nx, ny, nz);
-
-                            BlockPos worldPos = null;
-
-                            if (schematicWorld != null) {
-                                if (schematicWorld.getBlockState(offsetPos).hasBlockEntity()) {
-                                    worldPos = offsetPos;
-                                } else if (schematicWorld.getBlockState(directPos).hasBlockEntity()) {
-                                    worldPos = directPos;
-                                }
-                            }
-
-                            if (worldPos == null) {
-                                double distDirect = directPos.getSquaredDistance(origin);
-                                double distOffset = offsetPos.getSquaredDistance(origin);
-                                worldPos = (distDirect < distOffset) ? directPos : offsetPos;
-                            }
-
-                            newSet.add(worldPos);
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {}
-        return newSet;
+    private static long highlightEntryHash(BlockPos pos, HighlightState state) {
+        long value = pos.asLong();
+        value ^= ((long) state.ordinal() + 0x9e3779b97f4a7c15L) * 0xbf58476d1ce4e5b9L;
+        return mix64(value);
     }
 
-    private static void extractNbts(Object obj, List<NbtCompound> results, Set<Object> visited, int depth) {
-        if (obj == null || depth > 100 || !visited.add(obj)) return;
+    private static final class HighlightBuild {
+        private final Map<BlockPos, HighlightState> states = new HashMap<>();
+        private int count = 0;
+        private long sum = 0L;
+        private long xor = 0L;
 
-        if (obj instanceof NbtCompound c) {
-            if (c.contains("x") && c.contains("y") && c.contains("z") && (c.contains("Items") || c.contains("id"))) {
-                results.add(c);
+        private void put(BlockPos pos, HighlightState state) {
+            if (pos == null || state == null) return;
+            BlockPos key = pos.toImmutable();
+            HighlightState previous = states.put(key, state);
+            if (previous != null) {
+                remove(key, previous);
             }
-            for (String key : c.getKeys()) {
-                NbtElement el = c.get(key);
-                if (el instanceof NbtCompound child) extractNbts(child, results, visited, depth + 1);
-                else if (el instanceof NbtList list) {
-                    for (int i = 0; i < list.size(); i++) extractNbts(list.get(i), results, visited, depth + 1);
-                }
-            }
-            return;
+            add(key, state);
         }
 
-        if (obj instanceof net.minecraft.block.entity.BlockEntity be) {
-            MinecraftClient client = MinecraftClient.getInstance();
-            if (client.world != null) {
-                try {
-                    NbtCompound c = be.createNbt(client.world.getRegistryManager());
-                    if (c != null && c.contains("x")) results.add(c);
-                } catch (Exception ignored) {}
-            }
-            return;
+        private void add(BlockPos pos, HighlightState state) {
+            long hash = highlightEntryHash(pos, state);
+            count++;
+            sum += hash;
+            xor ^= Long.rotateLeft(hash, (int) (hash & 63L));
         }
 
-        if (obj instanceof Map<?, ?> map) {
-            for (Object val : map.values()) extractNbts(val, results, visited, depth + 1);
-            return;
-        }
-        if (obj instanceof Iterable<?> iter) {
-            for (Object val : iter) extractNbts(val, results, visited, depth + 1);
-            return;
-        }
-        if (obj.getClass().isArray() && !obj.getClass().getComponentType().isPrimitive()) {
-            for (Object val : (Object[]) obj) extractNbts(val, results, visited, depth + 1);
-            return;
+        private void remove(BlockPos pos, HighlightState state) {
+            long hash = highlightEntryHash(pos, state);
+            count--;
+            sum -= hash;
+            xor ^= Long.rotateLeft(hash, (int) (hash & 63L));
         }
 
-        String pkg = obj.getClass().getPackage() != null ? obj.getClass().getPackage().getName() : "";
-        if (!pkg.startsWith("fi.dy.masa")) return;
-
-        Class<?> clazz = obj.getClass();
-        while (clazz != null && clazz != Object.class) {
-            for (java.lang.reflect.Field f : clazz.getDeclaredFields()) {
-                if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType().isPrimitive()) continue;
-                String fname = f.getName().toLowerCase();
-                if (fname.contains("parent") || fname.contains("screen") || fname.contains("gui") || fname.contains("client") || fname.contains("world") || fname.contains("manager")) continue;
-                try {
-                    f.setAccessible(true);
-                    extractNbts(f.get(obj), results, visited, depth + 1);
-                } catch (Exception ignored) {}
-            }
-            clazz = clazz.getSuperclass();
+        private HighlightFingerprint fingerprint() {
+            return new HighlightFingerprint(count, sum, xor);
         }
     }
 
-    private static int getInt(NbtElement elem) {
-        if (elem instanceof net.minecraft.nbt.AbstractNbtNumber num) return num.intValue();
-        return 0;
-    }
-
-    private record BucketKey(int x, int y, int z) {
-        static BucketKey from(BlockPos pos) {
-            return new BucketKey(pos.getX() >> 4, pos.getY() >> 4, pos.getZ() >> 4);
+    private record HighlightFingerprint(int count, long sum, long xor) {
+        static HighlightFingerprint empty() {
+            return new HighlightFingerprint(0, 0L, 0L);
         }
     }
 
-    private record FallbackScanKey(int x, int y, int z, int radius) {
-        static FallbackScanKey from(BlockPos center, int radius) {
-            return new FallbackScanKey(
-                    Math.floorDiv(center.getX(), FALLBACK_WORLD_SCAN_SECTION_SIZE),
-                    Math.floorDiv(center.getY(), FALLBACK_WORLD_SCAN_SECTION_SIZE),
-                    Math.floorDiv(center.getZ(), FALLBACK_WORLD_SCAN_SECTION_SIZE),
-                    radius
-            );
-        }
-    }
-
-    private record FallbackScanCache(FallbackScanKey key, long timeMs, List<BlockPos> positions) {
-        static FallbackScanCache empty() {
-            return new FallbackScanCache(null, 0L, Collections.emptyList());
-        }
-
-        boolean matches(FallbackScanKey queryKey, long now) {
-            return key != null && key.equals(queryKey) && now - timeMs <= FALLBACK_WORLD_SCAN_CACHE_MS;
-        }
+    private static long packBucketKey(int x, int y, int z) {
+        return (((long) x & 0x3FFFFFL) << 42)
+                | (((long) z & 0x3FFFFFL) << 20)
+                | ((long) y & 0xFFFFFL);
     }
 }

@@ -20,6 +20,7 @@
   "litematica_container_filler.gui.button.defaults": "Defaults",
   "litematica_container_filler.gui.button.clear": "Clear",
   "litematica_container_filler.gui.button.back": "Back",
+  "litematica_container_filler.gui.button.trigger": "Trigger",
   "litematica_container_filler.gui.title.container_filter_picker": "Container Filter Picker",
   "litematica_container_filler.gui.title.render_editor": "Render Editor",
   "litematica_container_filler.gui.label.container_filter_picker": "Click container cards to add or remove their block IDs from the whitelist/blacklist list. Press ESC to return to configs.",
@@ -38,6 +39,8 @@
   "litematica_container_filler.gui.label.render_state.satisfied": "Done",
   "litematica_container_filler.gui.label.render_state.unknown": "Unknown",
   "litematica_container_filler.gui.label.render_state.unplaced": "Unplaced",
+  "litematica_container_filler.gui.label.render_state.manual_completed": "Manual Done",
+  "litematica_container_filler.gui.label.render_state.manual_needs_fill": "Manual Fill",
   "litematica_container_filler.gui.label.marker_filling": "Filling",
   "litematica_container_filler.gui.label.marker_queued": "Queued",
   "litematica_container_filler.gui.label.marker_missing": "Missing",
@@ -324,5 +327,13 @@
   "litematica_container_filler.config.option.toolHudStyle.anchoredCard": "Anchored Card",
   "litematica_container_filler.config.name.taskMarkerAnimationFps": "Task Marker FPS Limit",
   "litematica_container_filler.config.comment.taskMarkerAnimationFps": "Maximum animation rebuild rate for filling, queued, and missing-material markers. 0 means unlimited.",
-  "litematica_container_filler.hud.fixed.title": "Tool Info:"
+  "litematica_container_filler.hud.fixed.title": "Tool Info:",
+  "litematica_container_filler.hotkey.name.cycleManualOverride": "Cycle Manual Container Mark",
+  "litematica_container_filler.hotkey.name.clearManualOverrides": "Clear Manual Container Marks",
+  "litematica_container_filler.hotkey.comment.cycleManualOverride": "Cycles the looked-at schematic container between Auto, Manually Completed, and Manually Needs Fill.",
+  "litematica_container_filler.hotkey.comment.clearManualOverrides": "Clears all session-only manual container marks.",
+  "litematica_container_filler.message.manual_override_auto": "\u00a7b[Container Filler] Manual mark cleared: automatic state.",
+  "litematica_container_filler.message.manual_override_completed": "\u00a7a[Container Filler] Marked as completed. Fill will skip this container.",
+  "litematica_container_filler.message.manual_override_needs_fill": "\u00a7e[Container Filler] Marked as needing fill. It will stay highlighted and be considered by fill.",
+  "litematica_container_filler.message.manual_override_cleared": "\u00a7b[Container Filler] Cleared %s manual container marks."
 }
