@@ -28,6 +28,7 @@ public class HighlightScanner {
     private static final int IDLE_UPDATE_INTERVAL_TICKS = 20;
     private static final int BOOSTED_UPDATE_INTERVAL_TICKS = 2;
     private static final int BOOST_DURATION_TICKS = 60;
+    private static final int SCHEMATIC_WORLD_NULL_CLEAR_TICKS = 20;
     private static final int MAX_DATA_REQUESTS_PER_TICK = 128;
     private static final long UNKNOWN_REQUEST_INTERVAL_MS = 100L;
     private static final long BARREL_ACTIVE_REQUEST_INTERVAL_MS = 250L;
@@ -57,6 +58,7 @@ public class HighlightScanner {
     private static volatile Map<Long, Set<BlockPos>> SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
     private static volatile long lastIndexTime = 0;
     private static volatile boolean isIndexing = false;
+    private static volatile boolean pendingIndexRefresh = false;
     private static long lastRenderLayerSignature = Long.MIN_VALUE;
     private static boolean pendingRenderLayerRefresh = false;
     private static long lastRenderLayerRefreshTick = Long.MIN_VALUE;
@@ -71,6 +73,7 @@ public class HighlightScanner {
 
     private static int tickCounter = 0;
     private static int boostedTicks = 0;
+    private static int schematicWorldNullTicks = 0;
 
     public static Map<BlockPos, HighlightState> getHighlights() {
         return HIGHLIGHT_MAP;
@@ -231,11 +234,13 @@ public class HighlightScanner {
         pendingRenderLayerRefresh = false;
         lastRenderLayerRefreshTick = Long.MIN_VALUE;
         boostedTicks = 0;
+        pendingIndexRefresh = false;
+        schematicWorldNullTicks = 0;
     }
 
     public static void onPlacementChanged() {
         lastIndexTime = 0;
-        SCHEMATIC_CONTAINERS = Collections.emptySet();
+        pendingIndexRefresh = true;
         SCHEMATIC_REQ_CACHE.clear();
         SCHEMATIC_IGNORED_SLOT_CACHE.clear();
         HIGHLIGHT_REQUEST_TIME.clear();
@@ -247,8 +252,6 @@ public class HighlightScanner {
         LitematicaPlacementContainerData.clear();
         ManualContainerOverrideManager.clearForCurrentContext();
         triggerBoost(BOOST_DURATION_TICKS);
-        SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
-        invalidateNearbyBucketCache();
         lastRenderLayerSignature = Long.MIN_VALUE;
         pendingRenderLayerRefresh = false;
         lastRenderLayerRefreshTick = Long.MIN_VALUE;
@@ -291,6 +294,10 @@ public class HighlightScanner {
 
         var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld == null) {
+            if (++schematicWorldNullTicks < SCHEMATIC_WORLD_NULL_CLEAR_TICKS) {
+                pumpDataRequests(System.currentTimeMillis());
+                return;
+            }
             clearHighlights();
             if (!SCHEMATIC_REQ_CACHE.isEmpty()) SCHEMATIC_REQ_CACHE.clear();
             if (!SCHEMATIC_IGNORED_SLOT_CACHE.isEmpty()) SCHEMATIC_IGNORED_SLOT_CACHE.clear();
@@ -299,6 +306,7 @@ public class HighlightScanner {
             if (!SCHEMATIC_CONTAINER_BUCKETS.isEmpty()) SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
             return;
         }
+        schematicWorldNullTicks = 0;
 
         BlockPos currentCenter = client.player.getBlockPos();
 
@@ -613,6 +621,7 @@ public class HighlightScanner {
                 }
                 SCHEMATIC_CONTAINERS = found;
                 SCHEMATIC_CONTAINER_BUCKETS = buildContainerBuckets(found);
+                pendingIndexRefresh = false;
             } catch (Exception e) {} finally {
                 lastIndexTime = System.currentTimeMillis();
                 invalidateNearbyBucketCache();
@@ -630,6 +639,10 @@ public class HighlightScanner {
     }
 
     private static void replaceHighlightsIfChanged(HighlightBuild nextHighlights) {
+        if (nextHighlights.isEmpty() && !HIGHLIGHT_MAP.isEmpty() && (isIndexing || pendingIndexRefresh)) {
+            return;
+        }
+
         HighlightFingerprint nextFingerprint = nextHighlights.fingerprint();
         if (highlightFingerprint.equals(nextFingerprint)) {
             return;
@@ -927,6 +940,10 @@ public class HighlightScanner {
 
         private HighlightFingerprint fingerprint() {
             return new HighlightFingerprint(count, sum, xor);
+        }
+
+        private boolean isEmpty() {
+            return count == 0;
         }
     }
 
