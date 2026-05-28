@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
+import com.mojang.blaze3d.systems.RenderSystem;
 import fi.dy.masa.malilib.render.MaLiLibPipelines;
 import fi.dy.masa.malilib.render.RenderContext;
 import fi.dy.masa.malilib.render.RenderUtils;
@@ -243,11 +244,19 @@ public class HighlightRenderer {
     }
 
     private void drawChunkCache(ChunkRenderCache cache) {
-        if (cache.fillContext != null && cache.fillContext.isUploaded()) {
-            cache.fillContext.offset(renderOffset).drawPost(false, true);
-        }
-        if (cache.lineContext != null && cache.lineContext.isUploaded()) {
-            cache.lineContext.offset(renderOffset).drawPost(false, true);
+        var modelViewStack = RenderSystem.getModelViewStack();
+        modelViewStack.pushMatrix();
+
+        try {
+            modelViewStack.translate(renderOffset[0], renderOffset[1], renderOffset[2]);
+            if (cache.fillContext != null && cache.fillContext.isUploaded()) {
+                cache.fillContext.drawPost(false, false);
+            }
+            if (cache.lineContext != null && cache.lineContext.isUploaded()) {
+                cache.lineContext.drawPost(false, false);
+            }
+        } finally {
+            modelViewStack.popMatrix();
         }
     }
 
