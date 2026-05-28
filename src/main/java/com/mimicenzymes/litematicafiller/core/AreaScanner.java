@@ -3,6 +3,7 @@ package com.mimicenzymes.litematicafiller.core;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.render.HighlightScanner;
+import com.mimicenzymes.litematicafiller.render.HighlightState;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
@@ -15,7 +16,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -71,18 +71,8 @@ public class AreaScanner {
         List<PendingTask> pendingTasks = new ArrayList<>();
         Set<BlockPos> processedPositions = new HashSet<>();
         int maxCandidates = passThroughScan ? PASS_THROUGH_CANDIDATE_BUDGET : (isSilentPrinter ? SILENT_CANDIDATE_BUDGET : MANUAL_CANDIDATE_BUDGET);
-        List<BlockPos> candidates = collectCandidates(center, r, effectiveCandidateRadius, maxCandidates);
-
-        int processedCandidates = 0;
-        for (BlockPos rawPos : candidates) {
-            if (processedCandidates >= maxCandidates) break;
-            processedCandidates++;
-
-            if (r > 0 && rawPos.getSquaredDistance(center) > (double) r * r) continue;
-            if (syncLayer && !fi.dy.masa.litematica.data.DataManager.getRenderLayerRange().isPositionWithinRange(rawPos)) continue;
-
-            collectPendingTask(mc, schematicWorld, center, eyePos, reachSq, now, isSilentPrinter, passThroughScan, processedPositions, pendingTasks, rawPos);
-        }
+        collectCandidates(mc, schematicWorld, center, r, effectiveCandidateRadius, maxCandidates, syncLayer,
+                eyePos, reachSq, now, isSilentPrinter, passThroughScan, processedPositions, pendingTasks);
 
         pendingTasks.sort(Comparator.comparingDouble(t -> t.distSq));
 
@@ -105,19 +95,62 @@ public class AreaScanner {
         }
     }
 
-    private static List<BlockPos> collectCandidates(BlockPos center, int fillRadius, int candidateRadius, int maxCandidates) {
-        LinkedHashSet<BlockPos> candidates = new LinkedHashSet<>();
+    private static void collectCandidates(MinecraftClient mc,
+                                          net.minecraft.world.World schematicWorld,
+                                          BlockPos center,
+                                          int fillRadius,
+                                          int candidateRadius,
+                                          int maxCandidates,
+                                          boolean syncLayer,
+                                          Vec3d eyePos,
+                                          double reachSq,
+                                          long now,
+                                          boolean isSilentPrinter,
+                                          boolean passThroughScan,
+                                          Set<BlockPos> processedPositions,
+                                          List<PendingTask> pendingTasks) {
         double candidateRadiusSq = (double) candidateRadius * candidateRadius;
+        double fillRadiusSq = (double) fillRadius * fillRadius;
+        int processedCandidates = 0;
+
         for (BlockPos pos : HighlightScanner.getHighlights().keySet()) {
             if (pos.getSquaredDistance(center) > candidateRadiusSq) continue;
-            if (fillRadius > 0 && pos.getSquaredDistance(center) > (double) fillRadius * fillRadius) continue;
-            candidates.add(pos);
+            if (!collectCandidate(mc, schematicWorld, center, fillRadius, fillRadiusSq, syncLayer, eyePos, reachSq, now,
+                    isSilentPrinter, passThroughScan, processedPositions, pendingTasks, pos)) {
+                continue;
+            }
+            if (++processedCandidates >= maxCandidates) return;
         }
 
         HighlightScanner.ContainerSnapshot snapshot = HighlightScanner.getNearbySchematicContainersSnapshot(center, candidateRadius, scanCursor, maxCandidates);
         scanCursor = snapshot.nextCursor();
-        candidates.addAll(snapshot.positions());
-        return new ArrayList<>(candidates);
+        for (BlockPos pos : snapshot.positions()) {
+            if (collectCandidate(mc, schematicWorld, center, fillRadius, fillRadiusSq, syncLayer, eyePos, reachSq, now,
+                    isSilentPrinter, passThroughScan, processedPositions, pendingTasks, pos)) {
+                if (++processedCandidates >= maxCandidates) return;
+            }
+        }
+    }
+
+    private static boolean collectCandidate(MinecraftClient mc,
+                                            net.minecraft.world.World schematicWorld,
+                                            BlockPos center,
+                                            int fillRadius,
+                                            double fillRadiusSq,
+                                            boolean syncLayer,
+                                            Vec3d eyePos,
+                                            double reachSq,
+                                            long now,
+                                            boolean isSilentPrinter,
+                                            boolean passThroughScan,
+                                            Set<BlockPos> processedPositions,
+                                            List<PendingTask> pendingTasks,
+                                            BlockPos rawPos) {
+        if (fillRadius > 0 && rawPos.getSquaredDistance(center) > fillRadiusSq) return false;
+        if (syncLayer && !fi.dy.masa.litematica.data.DataManager.getRenderLayerRange().isPositionWithinRange(rawPos)) return false;
+
+        collectPendingTask(mc, schematicWorld, center, eyePos, reachSq, now, isSilentPrinter, passThroughScan, processedPositions, pendingTasks, rawPos);
+        return true;
     }
 
     private static void collectPendingTask(MinecraftClient mc,
@@ -139,6 +172,9 @@ public class AreaScanner {
         BlockPos taskPos = halves != null ? halves[0] : rawPos;
 
         if (!processedPositions.add(taskPos)) return;
+        if (ManualContainerOverrideManager.isCompleted(taskPos)) return;
+        HighlightState highlightState = HighlightScanner.getHighlights().get(taskPos);
+        if (highlightState == HighlightState.SATISFIED || highlightState == HighlightState.MANUAL_COMPLETED) return;
         if (eyePos.squaredDistanceTo(Vec3d.ofCenter(taskPos)) > reachSq) return;
         if (isLoadedRealContainerMissing(mc, taskPos, halves)) return;
 
@@ -151,7 +187,8 @@ public class AreaScanner {
         Map<Integer, ItemStack> required = HighlightScanner.getCachedSchematicRequirement(taskPos, mc);
         boolean isCrafter = state.getBlock() instanceof net.minecraft.block.CrafterBlock;
         boolean needsLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(taskPos, mc);
-        boolean hasItems = required != null && !required.isEmpty() && !RealContainerCache.isSatisfied(taskPos, required);
+        boolean manualNeedsFill = ManualContainerOverrideManager.isNeedsFill(taskPos);
+        boolean hasItems = required != null && !required.isEmpty() && (manualNeedsFill || !RealContainerCache.isSatisfied(taskPos, required));
 
         if (!hasItems && !needsLocking) return;
 
