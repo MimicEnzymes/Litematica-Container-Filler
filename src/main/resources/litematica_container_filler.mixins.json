@@ -12,11 +12,16 @@
     "InGameHudMixin",
     "GuiMainMenuMixin",
     "GuiMaterialListMixin",
+    "ButtonBaseAccessor",
+    "WidgetContainerInvoker",
+    "WidgetListMaterialListMixin",
+    "WidgetMaterialListEntryMixin",
     "MaterialListBaseMixin",
     "BlockEntityMixin",
     "LootableContainerBlockEntityMixin",
     "CrafterBlockEntityMixin",
     "SchematicPlacementMixin",
+    "SchematicPlacementManagerMixin",
     "MaterialListPlacementAccessor"
   ],
   "injectors": {
