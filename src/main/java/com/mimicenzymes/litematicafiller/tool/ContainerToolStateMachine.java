@@ -160,6 +160,11 @@ public class ContainerToolStateMachine {
         send(client, "litematica_container_filler.message.tool_all_closed");
     }
 
+    public void stopForDisabledMod(MinecraftClient client) {
+        reset(client, true, true);
+        resetContinuousTriggerState();
+    }
+
     public void triggerCurrent(MinecraftClient client) {
         if (!Configs.ENABLE_MOD.getBooleanValue()) {
             return;

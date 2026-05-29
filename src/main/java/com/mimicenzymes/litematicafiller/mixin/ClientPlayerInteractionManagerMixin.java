@@ -21,7 +21,8 @@ public class ClientPlayerInteractionManagerMixin {
                                                                   BlockHitResult hitResult,
                                                                   CallbackInfoReturnable<?> cir) {
         MinecraftClient client = MinecraftClient.getInstance();
-        if (!Configs.ENABLE_MOD.getBooleanValue() || player == null || client.world == null || hitResult == null) {
+        if (!Configs.ENABLE_MOD.getBooleanValue() || !RealContainerCache.hasActiveConsumers() ||
+                player == null || client.world == null || hitResult == null) {
             return;
         }
 

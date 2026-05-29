@@ -1,9 +1,10 @@
 package com.mimicenzymes.litematicafiller.materials;
 
-import com.mimicenzymes.litematicafiller.core.ItemMatcher;
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
 import com.mimicenzymes.litematicafiller.core.MaterialReplacer;
+import com.mimicenzymes.litematicafiller.core.MaterialReplacementUi;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
+import com.mimicenzymes.litematicafiller.core.SchematicMaterialReplacementContext;
 import com.mimicenzymes.litematicafiller.mixin.MaterialListPlacementAccessor;
 import fi.dy.masa.litematica.data.DataManager;
 import fi.dy.masa.litematica.gui.GuiMaterialList;
@@ -23,6 +24,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.component.ComponentChanges;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
 import net.minecraft.item.BlockItem;
@@ -45,18 +47,21 @@ public class FillMaterialCalculator {
     public static int listMode = 0;
 
     public static volatile boolean hasMissingData = false;
+    private static volatile int materialReplacementVersion = 0;
 
     private static final Map<SchematicPlacement, List<NbtContext>> PLACEMENT_NBT_CACHE = new IdentityHashMap<>();
     public static class ItemStackKey {
         public final Item item;
         public final String customName;
         public final int containerHash;
+        public final ComponentChanges componentChanges;
 
         public ItemStackKey(ItemStack stack) {
             this.item = stack.getItem();
             net.minecraft.text.Text name = stack.get(DataComponentTypes.CUSTOM_NAME);
             this.customName = name != null ? name.getString() : "";
             this.containerHash = computeContainerHash(stack);
+            this.componentChanges = stack.getComponentChanges();
         }
 
         private static int computeContainerHash(ItemStack stack) {
@@ -86,13 +91,17 @@ public class FillMaterialCalculator {
             if (this == o) return true;
             if (!(o instanceof ItemStackKey)) return false;
             ItemStackKey that = (ItemStackKey) o;
-            return item.equals(that.item) && customName.equals(that.customName) && containerHash == that.containerHash;
+            return item.equals(that.item)
+                    && customName.equals(that.customName)
+                    && containerHash == that.containerHash
+                    && componentChanges.equals(that.componentChanges);
         }
 
         @Override
         public int hashCode() {
             int result = 31 * item.hashCode() + customName.hashCode();
-            return 31 * result + containerHash;
+            result = 31 * result + containerHash;
+            return 31 * result + componentChanges.hashCode();
         }
     }
 
@@ -106,12 +115,23 @@ public class FillMaterialCalculator {
         final BlockPos worldPos;
         final SchematicPlacement placement;
         final Map<Integer, ItemStack> parsedRequired;
+        final Map<ItemStackKey, ItemStack> replacementOrigins;
+        final Set<ItemStackKey> replacedKeys;
 
-        NbtContext(BlockPos worldPos, SchematicPlacement placement, Map<Integer, ItemStack> parsedRequired) {
+        NbtContext(BlockPos worldPos, SchematicPlacement placement, Map<Integer, ItemStack> parsedRequired,
+                   Map<ItemStackKey, ItemStack> replacementOrigins, Set<ItemStackKey> replacedKeys) {
             this.worldPos = worldPos;
             this.placement = placement;
             this.parsedRequired = parsedRequired;
+            this.replacementOrigins = replacementOrigins;
+            this.replacedKeys = replacedKeys;
         }
+    }
+
+    private static class ReplacementResult {
+        final Map<Integer, ItemStack> items = new HashMap<>();
+        final Map<ItemStackKey, ItemStack> origins = new HashMap<>();
+        final Set<ItemStackKey> replacedKeys = new HashSet<>();
     }
 
     private static class SchematicSource {
@@ -125,6 +145,41 @@ public class FillMaterialCalculator {
     }
 
     private static final Map<ItemStackKey, ItemStats> itemStatsCache = new HashMap<>();
+    private static final Map<ItemStackKey, ItemStack> replacementSourceCache = new HashMap<>();
+    private static final Set<ItemStackKey> containerMaterialKeys = new HashSet<>();
+    private static final Set<ItemStackKey> replacedMaterialKeys = new HashSet<>();
+
+    public static int getMaterialReplacementVersion() {
+        return materialReplacementVersion;
+    }
+
+    public static ItemStack getOriginalReplacementSource(ItemStack displayedStack) {
+        if (displayedStack == null || displayedStack.isEmpty()) return ItemStack.EMPTY;
+
+        ItemStack source = replacementSourceCache.get(new ItemStackKey(displayedStack));
+        if (source != null && !source.isEmpty()) {
+            ItemStack copy = source.copy();
+            copy.setCount(1);
+            return copy;
+        }
+
+        ItemStack copy = displayedStack.copy();
+        copy.setCount(1);
+        return copy;
+    }
+
+    public static boolean isContainerMaterial(ItemStack stack) {
+        return stack != null && !stack.isEmpty() && containerMaterialKeys.contains(new ItemStackKey(stack));
+    }
+
+    public static boolean isReplacementDisplay(ItemStack stack) {
+        return stack != null && !stack.isEmpty() && replacedMaterialKeys.contains(new ItemStackKey(stack));
+    }
+
+    public static void requestMaterialReplacementRefresh() {
+        PLACEMENT_NBT_CACHE.clear();
+        materialReplacementVersion++;
+    }
 
     public static void calculate(Object input, boolean silent) {
         calculate(input, silent, null);
@@ -132,6 +187,9 @@ public class FillMaterialCalculator {
 
     public static void calculate(Object input, boolean silent, List<MaterialListEntry> fallbackEntries) {
         itemStatsCache.clear();
+        replacementSourceCache.clear();
+        containerMaterialKeys.clear();
+        replacedMaterialKeys.clear();
 
         if (!silent) {
             PLACEMENT_NBT_CACHE.clear();
@@ -198,6 +256,7 @@ public class FillMaterialCalculator {
             if (cachedCtx == null) {
                 LitematicaSchematic schematic = placement.getSchematic();
                 if (schematic == null) continue;
+                String schematicKey = SchematicMaterialReplacementContext.keyForPlacement(placement);
 
                 int totalTEs = 0;
                 for (String regionName : schematic.getAreaPositions().keySet()) {
@@ -234,12 +293,13 @@ public class FillMaterialCalculator {
                                         if (be != null) {
                                             NbtCompound nbt = be.createNbt(client.world.getRegistryManager());
                                             if (nbt != null && nbt.contains("Items")) {
-                                                Map<Integer, ItemStack> parsedReq = RealContainerCache.parseNbtInventory(nbt, client.world.getRegistryManager());
-                                                MaterialReplacer.replaceInMap(parsedReq);
+                                                ReplacementResult parsedReq = replaceInventoryMapWithOrigins(
+                                                        RealContainerCache.parseNbtInventory(nbt, client.world.getRegistryManager()),
+                                                        schematicKey);
 
                                                 NbtContext existing = bestMap.get(worldPos);
                                                 if (existing == null || getItemsCount(nbt) > getItemsCount(existing.parsedRequired)) {
-                                                    bestMap.put(worldPos, new NbtContext(worldPos, placement, parsedReq));
+                                                    bestMap.put(worldPos, new NbtContext(worldPos, placement, parsedReq.items, parsedReq.origins, parsedReq.replacedKeys));
                                                 }
                                             }
                                         }
@@ -274,6 +334,8 @@ public class FillMaterialCalculator {
         for (Map.Entry<BlockPos, NbtContext> entry : nbtMap.entrySet()) {
             BlockPos pos = entry.getKey();
             NbtContext ctx = entry.getValue();
+            replacementSourceCache.putAll(ctx.replacementOrigins);
+            replacedMaterialKeys.addAll(ctx.replacedKeys);
 
             if (globalVisited.contains(pos)) continue;
 
@@ -308,6 +370,8 @@ public class FillMaterialCalculator {
 
                     if (nbtMap.containsKey(otherPos)) {
                         Map<Integer, ItemStack> otherReq = nbtMap.get(otherPos).parsedRequired;
+                        replacementSourceCache.putAll(nbtMap.get(otherPos).replacementOrigins);
+                        replacedMaterialKeys.addAll(nbtMap.get(otherPos).replacedKeys);
 
                         if (isPrimary) {
                             for (Map.Entry<Integer, ItemStack> e : otherReq.entrySet()) {
@@ -373,6 +437,7 @@ public class FillMaterialCalculator {
                 reqAgg.merge(key, s.getCount(), Integer::sum);
                 ItemStats stats = itemStatsCache.computeIfAbsent(key, k -> new ItemStats());
                 if (stats.representative.isEmpty()) stats.representative = s.copy();
+                containerMaterialKeys.add(key);
             }
 
             for (ItemStack s : realItems.values()) {
@@ -505,11 +570,14 @@ public class FillMaterialCalculator {
                 for (NbtCompound nbt : teMap.values()) {
                     if (nbt == null || !nbt.contains("Items")) continue;
 
-                    Map<Integer, ItemStack> parsed = RealContainerCache.parseNbtInventory(nbt, client.world.getRegistryManager());
-                    if (parsed.isEmpty()) continue;
+                    ReplacementResult parsed = replaceInventoryMapWithOrigins(
+                            RealContainerCache.parseNbtInventory(nbt, client.world.getRegistryManager()),
+                            SchematicMaterialReplacementContext.keyForSchematic(source.schematic));
+                    if (parsed.items.isEmpty()) continue;
 
-                    MaterialReplacer.replaceInMap(parsed);
-                    addSchematicContainerItems(parsed);
+                    replacementSourceCache.putAll(parsed.origins);
+                    replacedMaterialKeys.addAll(parsed.replacedKeys);
+                    addSchematicContainerItems(parsed.items);
                     foundContainers = true;
                 }
             }
@@ -591,6 +659,7 @@ public class FillMaterialCalculator {
             if (s == null || s.isEmpty()) continue;
 
             ItemStackKey key = new ItemStackKey(s);
+            containerMaterialKeys.add(key);
             ItemStats stats = itemStatsCache.computeIfAbsent(key, k -> new ItemStats());
             if (stats.representative.isEmpty()) stats.representative = s.copy();
 
@@ -607,6 +676,7 @@ public class FillMaterialCalculator {
         if (entries.isEmpty()) return false;
 
         boolean foundContainers = false;
+        String schematicKey = MaterialReplacementUi.findSchematicKey(materialList);
 
         for (MaterialListEntry entry : entries) {
             if (entry == null || entry.getStack().isEmpty()) continue;
@@ -624,8 +694,11 @@ public class FillMaterialCalculator {
             for (ItemStack contained : container.iterateNonEmpty()) {
                 if (contained.isEmpty()) continue;
 
-                ItemStack stack = MaterialReplacer.replaceSingleStack(contained.copy());
+                ItemStack original = contained.copy();
+                ItemStack stack = MaterialReplacer.replaceSingleStack(original, schematicKey);
                 if (stack.isEmpty()) continue;
+
+                registerReplacementOrigin(original, stack);
 
                 int count = stack.getCount();
                 addMaterialListContainerItem(
@@ -663,6 +736,7 @@ public class FillMaterialCalculator {
         if (total == 0 && missing == 0 && available == 0 && mismatch == 0) return;
 
         ItemStackKey key = new ItemStackKey(stack);
+        containerMaterialKeys.add(key);
         ItemStats stats = itemStatsCache.computeIfAbsent(key, k -> new ItemStats());
         if (stats.representative.isEmpty()) {
             stats.representative = stack.copy();
@@ -678,6 +752,50 @@ public class FillMaterialCalculator {
         stats.missingLayer += missing;
         stats.availableLayer += available;
         stats.mismatchLayer += mismatch;
+    }
+
+    private static ReplacementResult replaceInventoryMapWithOrigins(Map<Integer, ItemStack> inventory, String schematicKey) {
+        ReplacementResult result = new ReplacementResult();
+        if (inventory == null || inventory.isEmpty()) return result;
+
+        for (Map.Entry<Integer, ItemStack> entry : inventory.entrySet()) {
+            ItemStack original = entry.getValue();
+            if (original == null || original.isEmpty()) continue;
+
+            ItemStack replaced = MaterialReplacer.replaceSingleStack(original.copy(), schematicKey);
+            if (replaced == null || replaced.isEmpty()) continue;
+
+            recordReplacementOrigin(original, replaced, result.origins, result.replacedKeys);
+            result.items.put(entry.getKey(), replaced);
+        }
+
+        return result;
+    }
+
+    private static void registerReplacementOrigin(ItemStack original, ItemStack displayed) {
+        if (original == null || original.isEmpty() || displayed == null || displayed.isEmpty()) return;
+
+        recordReplacementOrigin(original, displayed, replacementSourceCache, replacedMaterialKeys);
+    }
+
+    private static void recordReplacementOrigin(ItemStack original, ItemStack displayed,
+                                                Map<ItemStackKey, ItemStack> origins,
+                                                Set<ItemStackKey> replacedKeys) {
+        if (original == null || original.isEmpty() || displayed == null || displayed.isEmpty()) return;
+
+        ItemStack origin = normalizeOrigin(original);
+        ItemStack current = normalizeOrigin(displayed);
+        if (!ItemStack.areItemsAndComponentsEqual(origin, current)) {
+            ItemStackKey key = new ItemStackKey(current);
+            origins.put(key, origin);
+            replacedKeys.add(key);
+        }
+    }
+
+    private static ItemStack normalizeOrigin(ItemStack stack) {
+        ItemStack copy = stack.copy();
+        copy.setCount(1);
+        return copy;
     }
 
     private static boolean isItemIgnored(MaterialListBase materialList, Item item) {

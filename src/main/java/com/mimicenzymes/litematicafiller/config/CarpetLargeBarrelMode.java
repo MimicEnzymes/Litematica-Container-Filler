@@ -5,8 +5,7 @@ import fi.dy.masa.malilib.util.StringUtils;
 
 public enum CarpetLargeBarrelMode implements IConfigOptionListEntry {
     OFF("off", "litematica_container_filler.config.option.carpetLargeBarrelMode.off"),
-    ON("on", "litematica_container_filler.config.option.carpetLargeBarrelMode.on"),
-    AUTO("auto", "litematica_container_filler.config.option.carpetLargeBarrelMode.auto");
+    ON("on", "litematica_container_filler.config.option.carpetLargeBarrelMode.on");
 
     private final String configString;
     private final String translationKey;
@@ -45,6 +44,6 @@ public enum CarpetLargeBarrelMode implements IConfigOptionListEntry {
                 return mode;
             }
         }
-        return AUTO;
+        return OFF;
     }
 }
