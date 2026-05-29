@@ -41,6 +41,8 @@ public class GuiRenderEditor extends GuiBase {
     private static final int MUTED = 0xFFBDC1C6;
     private static final int MUTED_SOFT = 0xFF8E98A4;
     private static final int WARNING = 0xFFFDD663;
+    private static final int RENDER_WARNING_HEIGHT = 38;
+    private static final int RENDER_WARNING_GAP = 8;
     private static final float TOP_PLATE_MIN_INSET = 0.02f;
     private static final float TOP_PLATE_BOTTOM_OFFSET = 0.035f;
     private static final float TOP_PLATE_TOP_OFFSET = 0.095f;
@@ -406,7 +408,9 @@ public class GuiRenderEditor extends GuiBase {
         drawSectionHeader(GuiContext, tr("litematica_container_filler.gui.label.render_editor_settings"), layout.controlsPanel.x + 16, layout.controlsPanel.y + 12);
         drawTabDescription(GuiContext, layout.controlsPanel.x + 16, layout.controlsPanel.y + 31, layout.controlsPanel.width - 32);
         drawPreview(GuiContext, layout.preview.x, layout.preview.y, layout.preview.width, layout.preview.height, partialTicks);
-        drawRenderWarning(GuiContext, layout.previewPanel.x + 14, layout.previewPanel.y + layout.previewPanel.height - 50, layout.previewPanel.width - 28);
+        if (getRenderWarningReserve(layout.previewPanel) > 0) {
+            drawRenderWarning(GuiContext, layout.previewPanel.x + 14, layout.previewPanel.y + 34, layout.previewPanel.width - 28);
+        }
         super.drawContents(GuiContext, mouseX, mouseY, partialTicks);
         drawTabButtonOverlay(GuiContext, mouseX, mouseY);
         drawBackButtonOverlay(GuiContext, mouseX, mouseY);
@@ -424,7 +428,7 @@ public class GuiRenderEditor extends GuiBase {
     private void drawRenderWarning(GuiContext context, int x, int y, int width) {
         if (width < 160 || y < 88) return;
 
-        drawRoundedOutline(context, x, y, width, 38, 6, 0x88FDD663, 0xDD1D242E);
+        drawRoundedOutline(context, x, y, width, RENDER_WARNING_HEIGHT, 6, 0x88FDD663, 0xDD1D242E);
         drawString(context, tr("litematica_container_filler.gui.label.render_editor.warning.title"), x + 10, y + 7, WARNING);
         int textY = y + 19;
         int maxChars = Math.max(18, (width - 20) / 6);
@@ -678,10 +682,11 @@ public class GuiRenderEditor extends GuiBase {
             int controlsH = Math.max(72, height - previewH - gap);
             Rect previewPanel = new Rect(sideMargin, top, panelW, previewH);
             Rect controlsPanel = new Rect(sideMargin, top + previewH + gap, panelW, controlsH);
+            int warningReserve = getRenderWarningReserve(previewPanel);
             return new EditorLayout(
                     previewPanel,
                     controlsPanel,
-                    new Rect(previewPanel.x + 14, previewPanel.y + 34, previewPanel.width - 28, previewPanel.height - 48)
+                    new Rect(previewPanel.x + 14, previewPanel.y + 34 + warningReserve, previewPanel.width - 28, Math.max(24, previewPanel.height - 48 - warningReserve))
             );
         }
 
@@ -696,11 +701,16 @@ public class GuiRenderEditor extends GuiBase {
 
         Rect previewPanel = new Rect(sideMargin + 4, top, previewW, height);
         Rect controlsPanel = new Rect(previewPanel.x + previewW + gap, top, controlsW, height);
+            int warningReserve = getRenderWarningReserve(previewPanel);
         return new EditorLayout(
                 previewPanel,
                 controlsPanel,
-                new Rect(previewPanel.x + 14, previewPanel.y + 34, previewPanel.width - 28, previewPanel.height - 48)
+                new Rect(previewPanel.x + 14, previewPanel.y + 34 + warningReserve, previewPanel.width - 28, Math.max(24, previewPanel.height - 48 - warningReserve))
         );
+    }
+
+    private int getRenderWarningReserve(Rect previewPanel) {
+        return previewPanel.width >= 160 && previewPanel.height >= 150 ? RENDER_WARNING_HEIGHT + RENDER_WARNING_GAP : 0;
     }
 
     private ControlLayout getControlLayout(int controlCount) {

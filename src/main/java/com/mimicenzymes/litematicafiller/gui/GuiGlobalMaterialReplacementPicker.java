@@ -269,6 +269,9 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
             int local = index - firstIndex;
             int x = this.gridX + (local % this.gridColumns) * CELL_SIZE;
             int y = this.gridY + (local / this.gridColumns) * CELL_SIZE - scrollOffset;
+            if (y < this.gridY || y + CELL_SIZE > this.gridY + this.gridRows * CELL_SIZE) {
+                continue;
+            }
             boolean hovered = index == hoveredIndex;
             boolean replaced = MaterialReplacer.getGlobalReplacementTarget(new ItemStack(item)).isPresent();
 
