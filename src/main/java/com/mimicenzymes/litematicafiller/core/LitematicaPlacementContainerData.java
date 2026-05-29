@@ -48,12 +48,13 @@ public class LitematicaPlacementContainerData {
         }
 
         Map<Integer, ItemStack> items = RealContainerCache.parseNbtInventory(nbt.get(), registries);
-        MaterialReplacer.replaceInMap(items);
+        MaterialReplacer.replaceInMap(items, snapshot.schematicKeyByWorldPos().get(worldPos));
         return items;
     }
 
     private static Snapshot buildSnapshot() {
         Map<BlockPos, NbtCompound> nbtByWorldPos = new HashMap<>();
+        Map<BlockPos, String> schematicKeyByWorldPos = new HashMap<>();
         Set<BlockPos> positions = new HashSet<>();
         MinecraftClient client = MinecraftClient.getInstance();
 
@@ -86,8 +87,10 @@ public class LitematicaPlacementContainerData {
 
                         if (!isContainerBlockEntity(container, localPos, client, nbt)) continue;
 
-                        positions.add(worldPos.toImmutable());
-                        nbtByWorldPos.put(worldPos.toImmutable(), nbt.copy());
+                        BlockPos immutableWorldPos = worldPos.toImmutable();
+                        positions.add(immutableWorldPos);
+                        nbtByWorldPos.put(immutableWorldPos, nbt.copy());
+                        schematicKeyByWorldPos.put(immutableWorldPos, SchematicMaterialReplacementContext.keyForPlacement(placement));
                     }
                 }
             }
@@ -97,6 +100,7 @@ public class LitematicaPlacementContainerData {
         return new Snapshot(
                 Collections.unmodifiableSet(positions),
                 Collections.unmodifiableMap(nbtByWorldPos),
+                Collections.unmodifiableMap(schematicKeyByWorldPos),
                 true
         );
     }
@@ -176,9 +180,9 @@ public class LitematicaPlacementContainerData {
         }
     }
 
-    private record Snapshot(Set<BlockPos> positions, Map<BlockPos, NbtCompound> nbtByWorldPos, boolean initialized) {
+    private record Snapshot(Set<BlockPos> positions, Map<BlockPos, NbtCompound> nbtByWorldPos, Map<BlockPos, String> schematicKeyByWorldPos, boolean initialized) {
         static Snapshot empty() {
-            return new Snapshot(Collections.emptySet(), Collections.emptyMap(), false);
+            return new Snapshot(Collections.emptySet(), Collections.emptyMap(), Collections.emptyMap(), false);
         }
     }
 }

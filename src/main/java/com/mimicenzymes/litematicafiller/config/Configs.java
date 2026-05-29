@@ -34,13 +34,13 @@ public class Configs implements IConfigHandler {
 
     private static final String CONFIG_FILE_NAME = "litematica_container_filler.json";
 
-    //鏍稿績杩愯璁剧疆
+    //核心运行设置
     public static final ConfigBooleanHotkeyed ENABLE_MOD            = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.enableMod", true, "", "litematica_container_filler.config.comment.enableMod");
     public static final ConfigBooleanHotkeyed WORKING_STATE         = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.workingState", false, "", "litematica_container_filler.config.comment.workingState");
     private static final ConfigBoolean CONTINUOUS_FILL              = new ConfigBoolean("litematica_container_filler.config.name.continuousFill", false, "litematica_container_filler.config.comment.continuousFill");
     private static final ConfigBoolean AREA_MODE                    = new ConfigBoolean("litematica_container_filler.config.name.areaMode", false, "litematica_container_filler.config.comment.areaMode");
     private static final ConfigBoolean LEGACY_ENABLE_CARPET_LARGE_BARRELS = new ConfigBoolean("litematica_container_filler.config.name.enableCarpetLargeBarrels", false, "litematica_container_filler.config.comment.enableCarpetLargeBarrels");
-    public static final ConfigOptionList CARPET_LARGE_BARREL_MODE   = new ConfigOptionList("litematica_container_filler.config.name.carpetLargeBarrelMode", CarpetLargeBarrelMode.AUTO, "litematica_container_filler.config.comment.carpetLargeBarrelMode");
+    public static final ConfigOptionList CARPET_LARGE_BARREL_MODE   = new ConfigOptionList("litematica_container_filler.config.name.carpetLargeBarrelMode", CarpetLargeBarrelMode.OFF, "litematica_container_filler.config.comment.carpetLargeBarrelMode");
     public static final ConfigInteger FILL_RADIUS                   = new ConfigInteger("litematica_container_filler.config.name.fillRadius", 5, 0, 1024, "litematica_container_filler.config.comment.fillRadius");
     public static final ConfigInteger FILL_DELAY                    = new ConfigInteger("litematica_container_filler.config.name.fillDelay", 0, 0, 100, "litematica_container_filler.config.comment.fillDelay");
     public static final ConfigBoolean ENABLE_SAFETY_DELAY           = new ConfigBoolean("litematica_container_filler.config.name.enableSafetyDelay", true, "litematica_container_filler.config.comment.enableSafetyDelay");
@@ -52,11 +52,11 @@ public class Configs implements IConfigHandler {
     public static final ConfigStringList CONTAINER_FILTER_LIST      = new ConfigStringList("litematica_container_filler.config.name.containerFilterList", ImmutableList.of("minecraft:chest", "minecraft:barrel", "minecraft:trapped_chest", "minecraft:shulker_box", "minecraft:*_shulker_box", "minecraft:crafter", "minecraft:hopper", "minecraft:dispenser", "minecraft:dropper", "minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker", "minecraft:brewing_stand"), "litematica_container_filler.config.comment.containerFilterList");
     public static final ConfigStringList MATERIAL_REPLACEMENTS      = new ConfigStringList("litematica_container_filler.config.name.materialReplacements", ImmutableList.of(), "litematica_container_filler.config.comment.materialReplacements");
 
-    //鏁版嵁鍚屾璁剧疆
+    //数据同步设置
     public static final ConfigBooleanHotkeyed ENABLE_DATA_SYNC      = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.enableDataSync", true, "", "litematica_container_filler.config.comment.enableDataSync");
     public static final ConfigBoolean ENABLE_OP_NBT_QUERY           = new ConfigBoolean("litematica_container_filler.config.name.enableOpNbtQuery", true, "litematica_container_filler.config.comment.enableOpNbtQuery");
 
-    //鑷姩鐗╂祦璁剧疆
+    //自动物流设置
     public static final ConfigBoolean ENABLE_CREATIVE_FILL          = new ConfigBoolean("litematica_container_filler.config.name.creativeFill", true, "litematica_container_filler.config.comment.creativeFill");
     public static final ConfigBoolean ENABLE_QS_EXTRACTION          = new ConfigBoolean("litematica_container_filler.config.name.enableQsExtraction", true, "litematica_container_filler.config.comment.enableQsExtraction");
     public static final ConfigOptionList QUICK_SHULKER_OPEN_MODE    = new ConfigOptionList("litematica_container_filler.config.name.quickShulkerOpenMode", QuickShulkerOpenMode.INVOKE, "litematica_container_filler.config.comment.quickShulkerOpenMode");
@@ -91,12 +91,11 @@ public class Configs implements IConfigHandler {
     public static final ConfigBooleanHotkeyed TOOL_FILL_FULL_MODE    = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.toolFillFullMode", false, "", "litematica_container_filler.config.comment.toolFillFullMode");
     public static final ConfigBooleanHotkeyed TOOL_COPY_MODE         = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.toolCopyMode", false, "", "litematica_container_filler.config.comment.toolCopyMode");
 
-    //楂樹寒娓叉煋鍩虹璁剧疆
+    //高亮渲染基础设置
     public static final ConfigBooleanHotkeyed HIGHLIGHT_CONTAINERS  = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightContainers", true, "", "litematica_container_filler.config.comment.highlightContainers");
     public static final ConfigBooleanHotkeyed HIGHLIGHT_XRAY        = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightXray", false, "", "litematica_container_filler.config.comment.highlightXray");
     public static final ConfigInteger RENDER_RADIUS                 = new ConfigInteger("litematica_container_filler.config.name.renderRadius", 0, 0, 1024, "litematica_container_filler.config.comment.renderRadius");
     public static final ConfigBooleanHotkeyed SYNC_LITE_LAYER       = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.syncLiteLayer", true, "", "litematica_container_filler.config.comment.syncLiteLayer");
-    public static final ConfigBooleanHotkeyed HIDE_COMPLETED_CONTAINERS = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.hideCompletedContainers", true, "", "litematica_container_filler.config.comment.hideCompletedContainers");
     public static final ConfigBooleanHotkeyed HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightEmptySchematicContainers", true, "", "litematica_container_filler.config.comment.highlightEmptySchematicContainers");
     public static final ConfigBooleanHotkeyed RENDER_STATE_UNFILLED = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderStateUnfilled", true, "", "litematica_container_filler.config.comment.renderStateUnfilled");
     public static final ConfigBooleanHotkeyed RENDER_STATE_PARTIAL  = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderStatePartial", true, "", "litematica_container_filler.config.comment.renderStatePartial");
@@ -117,7 +116,7 @@ public class Configs implements IConfigHandler {
     public static final ConfigDouble TASK_OVERLAY_SCALE             = new ConfigDouble("litematica_container_filler.config.name.taskOverlayScale", 1.0D, 0.25D, 3.0D, "litematica_container_filler.config.comment.taskOverlayScale");
     public static final ConfigInteger TASK_MARKER_ANIMATION_FPS     = new ConfigInteger("litematica_container_filler.config.name.taskMarkerAnimationFps", 30, 0, 240, "litematica_container_filler.config.comment.taskMarkerAnimationFps");
 
-    //楂樹寒棰滆壊閰嶇疆
+    //高亮颜色配置
     public static final ConfigColor HIGHLIGHT_COLOR_UNFILLED        = new ConfigColor("litematica_container_filler.config.name.highlightColorUnfilled", "0x806E5CFF", "litematica_container_filler.config.comment.highlightColorUnfilled");
     public static final ConfigColor HIGHLIGHT_COLOR_PARTIAL         = new ConfigColor("litematica_container_filler.config.name.highlightColorPartial", "0x80FFB02E", "litematica_container_filler.config.comment.highlightColorPartial");
     public static final ConfigColor HIGHLIGHT_COLOR_OVERFILLED      = new ConfigColor("litematica_container_filler.config.name.highlightColorOverfilled", "0x80FF3EA5", "litematica_container_filler.config.comment.highlightColorOverfilled");
@@ -201,7 +200,6 @@ public class Configs implements IConfigHandler {
                 HIGHLIGHT_XRAY,
                 RENDER_RADIUS,
                 SYNC_LITE_LAYER,
-                HIDE_COMPLETED_CONTAINERS,
                 HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS,
                 RENDER_STATE_UNFILLED,
                 RENDER_STATE_PARTIAL,
@@ -240,7 +238,6 @@ public class Configs implements IConfigHandler {
                 HIGHLIGHT_CONTAINERS,
                 HIGHLIGHT_XRAY,
                 SYNC_LITE_LAYER,
-                HIDE_COMPLETED_CONTAINERS,
                 HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS,
                 RENDER_STATE_UNFILLED,
                 RENDER_STATE_PARTIAL,
@@ -361,6 +358,6 @@ public class Configs implements IConfigHandler {
         if (CARPET_LARGE_BARREL_MODE.getOptionListValue() instanceof CarpetLargeBarrelMode mode) {
             return mode;
         }
-        return CarpetLargeBarrelMode.AUTO;
+        return CarpetLargeBarrelMode.OFF;
     }
 }
