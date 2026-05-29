@@ -7,7 +7,9 @@ import net.minecraft.core.BlockPos;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -20,6 +22,11 @@ public class ServuxSyncHandler {
     private static boolean minihudChecked = false;
     private static Class<?> minihudCacheClass = null;
     private static Class<?> minihudSenderClass = null;
+    private static Field[] minihudCacheMapFields = new Field[0];
+    private static Method minihudCacheInstanceGetter = null;
+    private static Method[] minihudCacheLookupMethods = new Method[0];
+    private static Method[] minihudSenderMethods = new Method[0];
+    private static Object minihudCacheInstance = null;
     private static boolean payloadsRegistered = false;
 
     public static void registerPayloads() {
@@ -50,6 +57,11 @@ public class ServuxSyncHandler {
             for (String c : cacheClasses) {
                 try { minihudCacheClass = Class.forName(c); break; } catch (Throwable ignored) {}
             }
+            try {
+                if (minihudCacheClass != null) {
+                    initMinihudCacheAccessors();
+                }
+            } catch (Throwable ignored) {}
 
             String[] senderClasses = {
                     "fi.dy.masa.minihud.network.ClientPacketSender",
@@ -58,9 +70,70 @@ public class ServuxSyncHandler {
             for (String c : senderClasses) {
                 try { minihudSenderClass = Class.forName(c); break; } catch (Throwable ignored) {}
             }
+            try {
+                if (minihudSenderClass != null) {
+                    initMinihudSenderAccessors();
+                }
+            } catch (Throwable ignored) {}
 
             minihudChecked = true;
         }
+    }
+
+    private static void initMinihudCacheAccessors() {
+        List<Field> mapFields = new ArrayList<>();
+        List<Method> lookupMethods = new ArrayList<>();
+
+        for (Field field : minihudCacheClass.getDeclaredFields()) {
+            if (java.lang.reflect.Modifier.isStatic(field.getModifiers()) && Map.class.isAssignableFrom(field.getType())) {
+                field.setAccessible(true);
+                mapFields.add(field);
+            }
+        }
+
+        for (Method method : minihudCacheClass.getDeclaredMethods()) {
+            if (method.getName().equals("getInstance") &&
+                    method.getParameterCount() == 0 &&
+                    java.lang.reflect.Modifier.isStatic(method.getModifiers())) {
+                method.setAccessible(true);
+                minihudCacheInstanceGetter = method;
+                continue;
+            }
+
+            if (method.getParameterCount() == 1 && method.getParameterTypes()[0] == BlockPos.class) {
+                method.setAccessible(true);
+                lookupMethods.add(method);
+            }
+        }
+
+        minihudCacheMapFields = mapFields.toArray(new Field[0]);
+        minihudCacheLookupMethods = lookupMethods.toArray(new Method[0]);
+    }
+
+    private static void initMinihudSenderAccessors() {
+        List<Method> senderMethods = new ArrayList<>();
+        for (Method method : minihudSenderClass.getDeclaredMethods()) {
+            if (method.getParameterCount() == 1 && method.getParameterTypes()[0] == BlockPos.class) {
+                String name = method.getName().toLowerCase();
+                if (name.contains("container") || name.contains("inventory") ||
+                        name.contains("request") || name.contains("data") || name.contains("sync")) {
+                    method.setAccessible(true);
+                    senderMethods.add(method);
+                }
+            }
+        }
+        minihudSenderMethods = senderMethods.toArray(new Method[0]);
+    }
+
+    private static Object getMinihudCacheInstance() {
+        if (minihudCacheInstance != null || minihudCacheInstanceGetter == null) {
+            return minihudCacheInstance;
+        }
+
+        try {
+            minihudCacheInstance = minihudCacheInstanceGetter.invoke(null);
+        } catch (Throwable ignored) {}
+        return minihudCacheInstance;
     }
 
     private static Map<Integer, ItemStack> extractItemsFromObject(Object obj) {
@@ -112,40 +185,29 @@ public class ServuxSyncHandler {
 
         if (minihudCacheClass != null) {
             try {
-                for (Field f : minihudCacheClass.getDeclaredFields()) {
-                    if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) && Map.class.isAssignableFrom(f.getType())) {
-                        f.setAccessible(true);
-                        Map<?, ?> map = (Map<?, ?>) f.get(null);
-                        if (map != null) {
-                            Object result = map.get(pos);
-                            if (result != null) {
-                                rememberSlotCount(pos, result);
-                                Map<Integer, ItemStack> extracted = extractItemsFromObject(result);
-                                if (extracted != null && !extracted.isEmpty()) return extracted;
-                            }
-                        }
-                    }
-                }
-
-                Object cacheInstance = null;
-                for (Method m : minihudCacheClass.getDeclaredMethods()) {
-                    if (m.getName().equals("getInstance") && m.getParameterCount() == 0 && java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
-                        cacheInstance = m.invoke(null); break;
-                    }
-                }
-
-                for (Method m : minihudCacheClass.getDeclaredMethods()) {
-                    if (m.getParameterCount() == 1 && m.getParameterTypes()[0] == BlockPos.class) {
-                        m.setAccessible(true);
-                        boolean isStatic = java.lang.reflect.Modifier.isStatic(m.getModifiers());
-                        if (!isStatic && cacheInstance == null) continue;
-
-                        Object result = isStatic ? m.invoke(null, pos) : m.invoke(cacheInstance, pos);
+                for (Field field : minihudCacheMapFields) {
+                    Map<?, ?> map = (Map<?, ?>) field.get(null);
+                    if (map != null) {
+                        Object result = map.get(pos);
                         if (result != null) {
                             rememberSlotCount(pos, result);
                             Map<Integer, ItemStack> extracted = extractItemsFromObject(result);
                             if (extracted != null && !extracted.isEmpty()) return extracted;
                         }
+                    }
+                }
+
+                Object cacheInstance = getMinihudCacheInstance();
+
+                for (Method method : minihudCacheLookupMethods) {
+                    boolean isStatic = java.lang.reflect.Modifier.isStatic(method.getModifiers());
+                    if (!isStatic && cacheInstance == null) continue;
+
+                    Object result = isStatic ? method.invoke(null, pos) : method.invoke(cacheInstance, pos);
+                    if (result != null) {
+                        rememberSlotCount(pos, result);
+                        Map<Integer, ItemStack> extracted = extractItemsFromObject(result);
+                        if (extracted != null && !extracted.isEmpty()) return extracted;
                     }
                 }
             } catch (Throwable ignored) {}
@@ -177,15 +239,9 @@ public class ServuxSyncHandler {
 
         if (minihudSenderClass != null) {
             try {
-                for (Method m : minihudSenderClass.getDeclaredMethods()) {
-                    if (m.getParameterCount() == 1 && m.getParameterTypes()[0] == BlockPos.class) {
-                        String name = m.getName().toLowerCase();
-                        if (name.contains("container") || name.contains("inventory") || name.contains("request") || name.contains("data") || name.contains("sync")) {
-                            m.setAccessible(true);
-                            m.invoke(null, pos);
-                            return true;
-                        }
-                    }
+                for (Method method : minihudSenderMethods) {
+                    method.invoke(null, pos);
+                    return true;
                 }
             } catch (Throwable ignored) {}
         }

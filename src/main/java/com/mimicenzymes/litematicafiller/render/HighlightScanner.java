@@ -101,6 +101,7 @@ public class HighlightScanner {
             DATA_REQUEST_QUEUE.remove(key);
             QUEUED_DATA_REQUESTS.remove(key);
             if (HIGHLIGHT_MAP.remove(key) != null) {
+                highlightFingerprint = computeHighlightFingerprint(HIGHLIGHT_MAP);
                 highlightVersion++;
             }
             triggerBoost(BOOST_DURATION_TICKS);
@@ -378,6 +379,7 @@ public class HighlightScanner {
 
         boolean hasManualOverrides = ManualContainerOverrideManager.hasOverrides();
         int processed = 0;
+        boolean anyHighlightChanged = false;
         Set<BlockPos> processedRenderPositions = new HashSet<>();
         while (processed < MAX_DIRTY_HIGHLIGHT_UPDATES_PER_TICK && !DIRTY_HIGHLIGHT_QUEUE.isEmpty()) {
             BlockPos changedPos = DIRTY_HIGHLIGHT_QUEUE.poll();
@@ -403,11 +405,15 @@ public class HighlightScanner {
             }
 
             if (changedHighlight) {
-                highlightFingerprint = computeHighlightFingerprint(HIGHLIGHT_MAP);
-                highlightVersion++;
+                anyHighlightChanged = true;
             }
 
             processed++;
+        }
+
+        if (anyHighlightChanged) {
+            highlightFingerprint = computeHighlightFingerprint(HIGHLIGHT_MAP);
+            highlightVersion++;
         }
     }
 
