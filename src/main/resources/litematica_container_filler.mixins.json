@@ -8,7 +8,7 @@
     "ClientCommonNetworkHandlerMixin",
     "ClientPlayerInteractionManagerMixin",
     "ScreenInterceptorMixin",
-    "ClientPlayNetworkHandlerMixin",
+    "ClientPacketListenerMixin",
     "InGameHudMixin",
     "GuiMainMenuMixin",
     "GuiMaterialListMixin",
@@ -19,7 +19,7 @@
     "WidgetListMaterialListMixin",
     "WidgetMaterialListEntryMixin",
     "BlockEntityMixin",
-    "LootableContainerBlockEntityMixin",
+    "RandomizableContainerBlockEntityMixin",
     "CrafterBlockEntityMixin",
     "SchematicPlacementMixin",
     "MaterialListPlacementAccessor"
