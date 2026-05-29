@@ -195,7 +195,9 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
         this.drawString(drawContext, clippedTitle, this.panelX + ((this.panelWidth - this.getStringWidth(clippedTitle)) >> 1), this.panelY + 8, 0xFFFFFFFF);
 
         RenderUtils.drawRect(drawContext, this.gridX - 2, this.gridY - 2, this.gridColumns * CELL_SIZE + 4, this.gridRows * CELL_SIZE + 4, 0x6630353D);
+        drawContext.enableScissor(this.gridX, this.gridY, this.gridX + this.gridColumns * CELL_SIZE, this.gridY + this.gridRows * CELL_SIZE);
         this.drawItems(drawContext, mouseX, mouseY);
+        drawContext.disableScissor();
         this.drawScrollbar(drawContext);
 
         this.drawWidgets(drawContext, mouseX, mouseY);
@@ -250,9 +252,6 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
             int local = index - firstIndex;
             int x = this.gridX + (local % this.gridColumns) * CELL_SIZE;
             int y = this.gridY + (local / this.gridColumns) * CELL_SIZE - scrollOffset;
-            if (y < this.gridY || y + CELL_SIZE > this.gridY + this.gridRows * CELL_SIZE) {
-                continue;
-            }
             boolean hovered = index == hoveredIndex;
             boolean replaced = MaterialReplacer.getGlobalReplacementTarget(new ItemStack(item)).isPresent();
 
