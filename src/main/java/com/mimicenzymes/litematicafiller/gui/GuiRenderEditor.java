@@ -681,8 +681,8 @@ public class GuiRenderEditor extends GuiBase {
 
         if (stacked) {
             int panelW = Math.max(180, screenW - sideMargin * 2);
-            int minPreviewH = Math.min(128, Math.max(72, height / 3));
-            int previewH = clamp((int)(height * 0.42D), minPreviewH, Math.max(minPreviewH, height - 92));
+            int minPreviewH = Math.min(210, Math.max(118, height / 3));
+            int previewH = clamp((int)(height * 0.54D), minPreviewH, Math.max(minPreviewH, height - 104));
             int controlsH = Math.max(72, height - previewH - gap);
             Rect previewPanel = new Rect(sideMargin, top, panelW, previewH);
             Rect controlsPanel = new Rect(sideMargin, top + previewH + gap, panelW, controlsH);
@@ -721,6 +721,7 @@ public class GuiRenderEditor extends GuiBase {
         int gap = availableW < 360 ? 6 : 8;
         int minControlW = availableW < 260 ? 108 : availableW < 420 ? 126 : 150;
         int columns = Math.max(1, (availableW + gap) / (minControlW + gap));
+        columns = Math.min(columns, availableW < 300 ? 1 : 2);
         columns = Math.min(columns, Math.max(1, controlCount));
         int visibleRows = Math.max(1, availableH / rowH);
         int totalRows = Math.max(1, (int)Math.ceil(controlCount / (double)columns));
@@ -867,21 +868,22 @@ public class GuiRenderEditor extends GuiBase {
                 new StatePreview("manual_needs_fill", Configs.HIGHLIGHT_COLOR_UNFILLED)
         );
 
-        int columns = width < 360 ? 2 : Math.min(4, Math.max(2, width / 130));
+        int columns = width < 190 ? 1 : width < 360 ? 2 : 3;
         int rows = (int)Math.ceil(states.size() / (double)columns);
         int cellW = Math.max(72, width / columns);
-        int cellH = Math.max(72, (height - 34) / Math.max(1, rows));
+        int contentH = Math.max(24, height - 34);
+        int cellH = Math.max(24, contentH / Math.max(1, rows));
         int originY = y + 30;
         for (int i = 0; i < states.size(); i++) {
             StatePreview state = states.get(i);
             int col = i % columns;
             int row = i / columns;
             int cx = x + col * cellW + cellW / 2;
-            int cy = originY + row * cellH + Math.max(30, cellH / 2);
-            float size = Math.min(cellW, cellH) * 0.30f;
+            int cy = originY + row * cellH + Math.max(12, cellH / 2) - 4;
+            float size = clampFloat(Math.min(cellW, cellH) * 0.26f, 8.0f, 34.0f);
             boolean manual = state.key.startsWith("manual_");
             addHighlightModelCommands(rawCommands, cx, cy, size, state.color.getColor(), Configs.RENDER_STATE_GLASS.getBooleanValue(), Configs.RENDER_STATE_TOP_PLATE.getBooleanValue(), manual, state.key);
-            rawCommands.add(new PreviewLabelCommand(translateOrFallback("litematica_container_filler.gui.label.render_state." + state.key, state.key), cx, cy + Math.round(size * 0.86f) + 12, cellW));
+            rawCommands.add(new PreviewLabelCommand(translateOrFallback("litematica_container_filler.gui.label.render_state." + state.key, state.key), cx, cy + Math.round(size * 0.70f) + 8, cellW));
         }
 
         return compactPreviewCommands(rawCommands);
@@ -940,10 +942,10 @@ public class GuiRenderEditor extends GuiBase {
             return;
         }
 
-        int columns = Math.min(markers.size(), width < 330 ? 1 : 3);
+        int columns = Math.min(markers.size(), width < 260 ? 1 : width < 420 ? 2 : 3);
         int rows = (int)Math.ceil(markers.size() / (double)columns);
         int cellW = width / columns;
-        int cellH = Math.max(88, (height - 26) / Math.max(1, rows));
+        int cellH = Math.max(44, (height - 26) / Math.max(1, rows));
         int originY = y + 34;
         for (int i = 0; i < markers.size(); i++) {
             MarkerPreview marker = markers.get(i);
@@ -951,9 +953,9 @@ public class GuiRenderEditor extends GuiBase {
             int row = i / columns;
             int cx = x + col * cellW + cellW / 2;
             int cy = originY + row * cellH + cellH / 2;
-            float size = Math.min(cellW, cellH) * 0.42f * (float)Configs.TASK_OVERLAY_SCALE.getDoubleValue();
-            drawMarkerModel(context, cx, cy, Math.max(18.0f, size), time, marker.kind);
-            drawPreviewLabel(context, tr("litematica_container_filler.gui.label." + marker.key), cx, cy + Math.min(48, cellH / 3), cellW);
+            float size = clampFloat(Math.min(cellW, cellH) * 0.36f * (float)Configs.TASK_OVERLAY_SCALE.getDoubleValue(), 12.0f, 44.0f);
+            drawMarkerModel(context, cx, cy, size, time, marker.kind);
+            drawPreviewLabel(context, tr("litematica_container_filler.gui.label." + marker.key), cx, cy + Math.max(14, cellH / 4), cellW);
         }
     }
 
