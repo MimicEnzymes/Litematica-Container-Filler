@@ -1,6 +1,5 @@
 package com.mimicenzymes.litematicafiller.core;
 
-import com.mojang.logging.LogUtils;
 import com.mimicenzymes.litematicafiller.config.CarpetLargeBarrelMode;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
@@ -14,7 +13,6 @@ import net.minecraft.nbt.NbtCompound;
 import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import org.slf4j.Logger;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -23,8 +21,6 @@ import java.util.Map;
 import java.util.Set;
 
 public class LitematicaContainerReader {
-    private static final Logger LOGGER = LogUtils.getLogger();
-
     public static BlockPos[] getDoubleContainerHalves(net.minecraft.world.World world, BlockPos pos, BlockState state) {
         return getDoubleContainerHalves(world, pos, state, -1);
     }
@@ -243,16 +239,14 @@ public class LitematicaContainerReader {
 
             try {
                 com.mojang.serialization.DataResult<net.minecraft.item.ItemStack> result =
-                        net.minecraft.item.ItemStack.CODEC.parse(net.minecraft.nbt.NbtOps.INSTANCE, itemNbt);
+                        net.minecraft.item.ItemStack.OPTIONAL_CODEC.parse(registryManager.getOps(net.minecraft.nbt.NbtOps.INSTANCE), itemNbt);
 
                 result.result().ifPresent(stack -> {
                     if (!stack.isEmpty()) {
                         items.put(finalSlot, stack);
                     }
                 });
-            } catch (Exception e) {
-                LOGGER.warn("Failed to read required item stack from schematic NBT", e);
-            }
+            } catch (Exception ignored) {}
         }
 
         MaterialReplacer.replaceInMap(items);
