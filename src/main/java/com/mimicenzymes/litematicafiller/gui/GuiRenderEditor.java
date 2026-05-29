@@ -56,6 +56,7 @@ public class GuiRenderEditor extends GuiBase {
     private boolean draggingHudPosition = false;
     private int lastDragX = 0;
     private int lastDragY = 0;
+    private int controlScrollRow = 0;
     private long cachedHighlightPreviewKey = Long.MIN_VALUE;
     private List<PreviewDrawCommand> cachedHighlightPreviewCommands = List.of();
     private final List<ColorInputBinding> colorInputs = new ArrayList<>();
@@ -94,6 +95,9 @@ public class GuiRenderEditor extends GuiBase {
         List<ControlSpec> controls = getControlsForTab();
         ControlLayout layout = getControlLayout(controls.size());
         for (int i = 0; i < controls.size(); i++) {
+            if (!layout.isVisible(i)) {
+                continue;
+            }
             ControlRect rect = layout.rectFor(i);
             controls.get(i).addButtons.accept(rect);
         }
@@ -235,22 +239,21 @@ public class GuiRenderEditor extends GuiBase {
     }
 
     private int addStepper(int x, int y, int width, ConfigInteger config, int step) {
-        int resetW = Math.min(54, Math.max(44, width / 4));
-        int valueW = Math.max(70, width - resetW - 86);
-        this.addButton(new ButtonGeneric(x, y, 24, 20, ""), (button, mouseButton) -> {
+        StepperControlLayout layout = getStepperControlLayout(x, width);
+        this.addButton(new ButtonGeneric(layout.minusX, y, layout.buttonW, 20, ""), (button, mouseButton) -> {
             config.setIntegerValue(config.getIntegerValue() - step);
             Configs.saveToFile();
             this.initGui();
         });
-        ButtonGeneric value = new ButtonGeneric(x + 28, y, valueW, 20, "");
+        ButtonGeneric value = new ButtonGeneric(layout.valueX, y, layout.valueW, 20, "");
         value.setHoverStrings(tr(config.getComment()));
         this.addButton(value, (button, mouseButton) -> {});
-        this.addButton(new ButtonGeneric(x + 32 + valueW, y, 24, 20, ""), (button, mouseButton) -> {
+        this.addButton(new ButtonGeneric(layout.plusX, y, layout.buttonW, 20, ""), (button, mouseButton) -> {
             config.setIntegerValue(config.getIntegerValue() + step);
             Configs.saveToFile();
             this.initGui();
         });
-        this.addButton(new ButtonGeneric(x + width - resetW, y, resetW, 20, ""), (button, mouseButton) -> {
+        this.addButton(new ButtonGeneric(layout.resetX, y, layout.resetW, 20, ""), (button, mouseButton) -> {
             config.resetToDefault();
             Configs.saveToFile();
             this.initGui();
@@ -259,22 +262,21 @@ public class GuiRenderEditor extends GuiBase {
     }
 
     private int addStepper(int x, int y, int width, ConfigDouble config, double step) {
-        int resetW = Math.min(54, Math.max(44, width / 4));
-        int valueW = Math.max(70, width - resetW - 86);
-        this.addButton(new ButtonGeneric(x, y, 24, 20, ""), (button, mouseButton) -> {
+        StepperControlLayout layout = getStepperControlLayout(x, width);
+        this.addButton(new ButtonGeneric(layout.minusX, y, layout.buttonW, 20, ""), (button, mouseButton) -> {
             config.setDoubleValue(config.getDoubleValue() - step);
             Configs.saveToFile();
             this.initGui();
         });
-        ButtonGeneric value = new ButtonGeneric(x + 28, y, valueW, 20, "");
+        ButtonGeneric value = new ButtonGeneric(layout.valueX, y, layout.valueW, 20, "");
         value.setHoverStrings(tr(config.getComment()));
         this.addButton(value, (button, mouseButton) -> {});
-        this.addButton(new ButtonGeneric(x + 32 + valueW, y, 24, 20, ""), (button, mouseButton) -> {
+        this.addButton(new ButtonGeneric(layout.plusX, y, layout.buttonW, 20, ""), (button, mouseButton) -> {
             config.setDoubleValue(config.getDoubleValue() + step);
             Configs.saveToFile();
             this.initGui();
         });
-        this.addButton(new ButtonGeneric(x + width - resetW, y, resetW, 20, ""), (button, mouseButton) -> {
+        this.addButton(new ButtonGeneric(layout.resetX, y, layout.resetW, 20, ""), (button, mouseButton) -> {
             config.resetToDefault();
             Configs.saveToFile();
             this.initGui();
@@ -355,6 +357,16 @@ public class GuiRenderEditor extends GuiBase {
     }
 
     @Override
+    public boolean onMouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        EditorLayout editor = getEditorLayout();
+        if (isPointInside(mouseX, mouseY, editor.controlsPanel.x, editor.controlsPanel.y, editor.controlsPanel.width, editor.controlsPanel.height)
+                && scrollControls(verticalAmount < 0.0D ? 1 : -1)) {
+            return true;
+        }
+        return super.onMouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+    }
+
+    @Override
     public boolean onKeyTyped(KeyInput keyInput) {
         ColorInputBinding focused = getFocusedColorInput();
         if (focused != null) {
@@ -409,6 +421,7 @@ public class GuiRenderEditor extends GuiBase {
         super.drawContents(drawContext, mouseX, mouseY, partialTicks);
         drawTabButtonOverlay(drawContext, mouseX, mouseY);
         drawBackButtonOverlay(drawContext, mouseX, mouseY);
+        drawControlScrollbar(drawContext);
         drawTabControlsOverlay(drawContext, mouseX, mouseY);
     }
 
@@ -436,8 +449,11 @@ public class GuiRenderEditor extends GuiBase {
     }
 
     private void drawMaterialTitle(DrawContext context) {
-        drawString(context, this.title, 24, 17, TEXT);
-        drawString(context, tr("litematica_container_filler.gui.label.render_editor"), 168, 18, MUTED);
+        int maxTitleWidth = Math.max(80, this.getScreenWidth() - 180);
+        drawString(context, fitToWidth(this.title, maxTitleWidth), 24, 17, TEXT);
+        if (this.getScreenWidth() > 420) {
+            drawString(context, fitToWidth(tr("litematica_container_filler.gui.label.render_editor"), this.getScreenWidth() - 190), 168, 18, MUTED);
+        }
     }
 
     private void drawSectionHeader(DrawContext context, String label, int x, int y) {
@@ -449,14 +465,16 @@ public class GuiRenderEditor extends GuiBase {
     private void drawTabButtonOverlay(DrawContext context, int mouseX, int mouseY) {
         int x = 18;
         int y = 46;
+        int tabWidth = getTabWidth();
+        int tabGap = getTabGap();
         for (EditorTab value : EditorTab.values()) {
             boolean selected = value == this.tab;
-            boolean hovered = mouseX >= x && mouseX < x + 86 && mouseY >= y && mouseY < y + 20;
-            if (hovered) drawSoftRect(context, x, y, 86, 20, 0x55303A46);
-            int text = selected ? TEXT : hovered ? PRIMARY : MUTED;
-            drawString(context, tr("litematica_container_filler.gui.button.render_editor." + value.key), x + 10, y + 6, text);
-            if (selected) context.fill(x + 10, y + 18, x + 76, y + 20, PRIMARY);
-            x += 90;
+            boolean hovered = mouseX >= x && mouseX < x + tabWidth && mouseY >= y && mouseY < y + 20;
+            if (hovered) drawSoftRect(context, x, y, tabWidth, 20, 0x55303A46);
+            int textColor = selected ? TEXT : hovered ? PRIMARY : MUTED;
+            drawString(context, fitToWidth(tr("litematica_container_filler.gui.button.render_editor." + value.key), tabWidth - 12), x + 6, y + 6, textColor);
+            if (selected) context.fill(x + 6, y + 18, x + tabWidth - 6, y + 20, PRIMARY);
+            x += tabWidth + tabGap;
         }
     }
 
@@ -470,15 +488,18 @@ public class GuiRenderEditor extends GuiBase {
     private boolean handleChromeClick(double mouseX, double mouseY) {
         int x = 18;
         int y = 46;
+        int tabWidth = getTabWidth();
+        int tabGap = getTabGap();
         for (EditorTab value : EditorTab.values()) {
-            if (isPointInside(mouseX, mouseY, x, y, 86, 20)) {
+            if (isPointInside(mouseX, mouseY, x, y, tabWidth, 20)) {
                 if (value != this.tab) {
                     this.tab = value;
+                    this.controlScrollRow = 0;
                     this.initGui();
                 }
                 return true;
             }
-            x += 90;
+            x += tabWidth + tabGap;
         }
 
         int backX = this.getScreenWidth() - 106;
@@ -596,6 +617,9 @@ public class GuiRenderEditor extends GuiBase {
         List<ControlSpec> controls = getControlsForTab();
         ControlLayout layout = getControlLayout(controls.size());
         for (int i = 0; i < controls.size(); i++) {
+            if (!layout.isVisible(i)) {
+                continue;
+            }
             ControlRect rect = layout.rectFor(i);
             ControlSpec control = controls.get(i);
             if (control.kind == ControlKind.STEPPER) {
@@ -619,12 +643,11 @@ public class GuiRenderEditor extends GuiBase {
     }
 
     private int drawStepperOverlay(DrawContext context, int mouseX, int mouseY, int x, int y, int width, String label) {
-        int resetW = Math.min(54, Math.max(44, width / 4));
-        int valueW = Math.max(70, width - resetW - 86);
-        drawButtonOverlay(context, mouseX, mouseY, x, y, 24, "-");
-        drawButtonOverlay(context, mouseX, mouseY, x + 28, y, valueW, label);
-        drawButtonOverlay(context, mouseX, mouseY, x + 32 + valueW, y, 24, "+");
-        drawButtonOverlay(context, mouseX, mouseY, x + width - resetW, y, resetW, tr("litematica_container_filler.gui.button.reset"));
+        StepperControlLayout layout = getStepperControlLayout(x, width);
+        drawButtonOverlay(context, mouseX, mouseY, layout.minusX, y, layout.buttonW, "-");
+        drawButtonOverlay(context, mouseX, mouseY, layout.valueX, y, layout.valueW, label);
+        drawButtonOverlay(context, mouseX, mouseY, layout.plusX, y, layout.buttonW, "+");
+        drawButtonOverlay(context, mouseX, mouseY, layout.resetX, y, layout.resetW, tr("litematica_container_filler.gui.button.reset"));
         return y + 24;
     }
 
@@ -695,26 +718,22 @@ public class GuiRenderEditor extends GuiBase {
         int availableW = Math.max(120, editor.controlsPanel.width - 24);
         int availableH = Math.max(24, editor.controlsPanel.y + editor.controlsPanel.height - 34 - startY);
         int rowH = 24;
-        int rows = Math.max(1, availableH / rowH);
         int gap = availableW < 360 ? 6 : 8;
-        int minControlW = availableW < 360 ? 104 : 132;
-        int maxColumns = Math.max(1, (availableW + gap) / (minControlW + gap));
-        int columns = Math.max(1, (int)Math.ceil(controlCount / (double)rows));
-        columns = Math.min(columns, maxColumns);
-        rows = Math.max(1, (int)Math.ceil(controlCount / (double)columns));
-        int width = Math.max(112, (availableW - gap * (columns - 1)) / columns);
-        if (rows * rowH > availableH && columns < Math.max(1, (availableW + gap) / (104 + gap))) {
-            columns++;
-            rows = Math.max(1, (int)Math.ceil(controlCount / (double)columns));
-            width = Math.max(104, (availableW - gap * (columns - 1)) / columns);
-        }
-        return new ControlLayout(startX, startY, width, rowH, rows, gap);
+        int minControlW = availableW < 260 ? 108 : availableW < 420 ? 126 : 150;
+        int columns = Math.max(1, (availableW + gap) / (minControlW + gap));
+        columns = Math.min(columns, Math.max(1, controlCount));
+        int visibleRows = Math.max(1, availableH / rowH);
+        int totalRows = Math.max(1, (int)Math.ceil(controlCount / (double)columns));
+        int maxScroll = Math.max(0, totalRows - visibleRows);
+        this.controlScrollRow = clamp(this.controlScrollRow, 0, maxScroll);
+        int width = Math.max(96, (availableW - gap * (columns - 1)) / columns);
+        return new ControlLayout(startX, startY, width, rowH, visibleRows, columns, gap, this.controlScrollRow, totalRows);
     }
 
     private ColorControlLayout getColorControlLayout(int x, int y, int width) {
-        int resetW = Math.min(54, Math.max(44, width / 5));
-        int swatchW = Math.min(34, Math.max(28, width / 5));
-        int valueW = Math.max(64, width - swatchW - resetW - 8);
+        int resetW = width < 130 ? 30 : Math.min(54, Math.max(40, width / 5));
+        int swatchW = width < 130 ? 24 : Math.min(34, Math.max(28, width / 5));
+        int valueW = Math.max(24, width - swatchW - resetW - 8);
         return new ColorControlLayout(
                 x,
                 swatchW,
@@ -723,6 +742,63 @@ public class GuiRenderEditor extends GuiBase {
                 x + width - resetW,
                 resetW
         );
+    }
+
+    private StepperControlLayout getStepperControlLayout(int x, int width) {
+        int gap = width < 130 ? 3 : 4;
+        int buttonW = width < 130 ? 18 : 24;
+        int resetW = width < 150 ? 32 : Math.min(54, Math.max(42, width / 4));
+        int valueW = Math.max(28, width - resetW - buttonW * 2 - gap * 3);
+        int valueX = x + buttonW + gap;
+        int plusX = valueX + valueW + gap;
+        int resetX = x + width - resetW;
+        if (plusX + buttonW > resetX - gap) {
+            plusX = resetX - gap - buttonW;
+            valueW = Math.max(20, plusX - gap - valueX);
+        }
+        return new StepperControlLayout(x, buttonW, valueX, valueW, plusX, resetX, resetW);
+    }
+
+    private boolean scrollControls(int delta) {
+        ControlLayout layout = getControlLayout(getControlsForTab().size());
+        int maxScroll = layout.maxScrollRow();
+        if (maxScroll <= 0) {
+            return false;
+        }
+        int next = clamp(this.controlScrollRow + delta, 0, maxScroll);
+        if (next == this.controlScrollRow) {
+            return false;
+        }
+        this.controlScrollRow = next;
+        this.initGui();
+        return true;
+    }
+
+    private void drawControlScrollbar(DrawContext context) {
+        ControlLayout layout = getControlLayout(getControlsForTab().size());
+        if (layout.maxScrollRow() <= 0) {
+            return;
+        }
+        int barX = layout.x + layout.columns * layout.width + (layout.columns - 1) * layout.gap + 5;
+        EditorLayout editor = getEditorLayout();
+        barX = Math.min(barX, editor.controlsPanel.x + editor.controlsPanel.width - 9);
+        int barY = layout.y;
+        int barH = Math.max(18, layout.visibleRows * layout.rowHeight - 4);
+        int thumbH = Math.max(14, barH * layout.visibleRows / layout.totalRows);
+        int maxOffset = Math.max(1, barH - thumbH);
+        int thumbY = barY + (layout.scrollRow * maxOffset / layout.maxScrollRow());
+        context.fill(barX, barY, barX + 4, barY + barH, 0x663F4A58);
+        context.fill(barX, thumbY, barX + 4, thumbY + thumbH, 0xDD8AB4F8);
+    }
+
+    private int getTabWidth() {
+        int count = EditorTab.values().length;
+        int gap = getTabGap();
+        return clamp((this.getScreenWidth() - 36 - gap * (count - 1)) / count, 48, 86);
+    }
+
+    private int getTabGap() {
+        return this.getScreenWidth() < 520 ? 4 : 6;
     }
 
     private void resetHudPosition() {
@@ -1500,7 +1576,7 @@ public class GuiRenderEditor extends GuiBase {
         context.fill(x + 1, y + height - 1, x + width - 1, y + height, border);
         context.fill(x, y + 1, x + 1, y + height - 1, border);
         context.fill(x + width - 1, y + 1, x + width, y + height - 1, border);
-        if (!label.isEmpty()) drawString(context, label, x + 8, y + 6, primaryText || hovered ? PRIMARY : TEXT);
+        if (!label.isEmpty()) drawString(context, fitToWidth(label, width - 12), x + 6, y + 6, primaryText || hovered ? PRIMARY : TEXT);
     }
 
     private void drawPreviewLabel(DrawContext context, String label, int cx, int y, int cellWidth) {
@@ -1672,15 +1748,28 @@ public class GuiRenderEditor extends GuiBase {
     private record ControlRect(int x, int y, int width) {
     }
 
-    private record ControlLayout(int x, int y, int width, int rowHeight, int rows, int gap) {
+    private record ControlLayout(int x, int y, int width, int rowHeight, int visibleRows, int columns, int gap, int scrollRow, int totalRows) {
+        boolean isVisible(int index) {
+            int absoluteRow = index / this.columns;
+            int row = absoluteRow - this.scrollRow;
+            return row >= 0 && row < this.visibleRows;
+        }
+
         ControlRect rectFor(int index) {
-            int column = index / this.rows;
-            int row = index % this.rows;
+            int column = index % this.columns;
+            int row = index / this.columns - this.scrollRow;
             return new ControlRect(this.x + column * (this.width + this.gap), this.y + row * this.rowHeight, this.width);
+        }
+
+        int maxScrollRow() {
+            return Math.max(0, this.totalRows - this.visibleRows);
         }
     }
 
     private record ColorControlLayout(int swatchX, int swatchW, int valueX, int valueW, int resetX, int resetW) {
+    }
+
+    private record StepperControlLayout(int minusX, int buttonW, int valueX, int valueW, int plusX, int resetX, int resetW) {
     }
 
     private record ColorInputBinding(ConfigColor config, GuiTextFieldGeneric field) {
