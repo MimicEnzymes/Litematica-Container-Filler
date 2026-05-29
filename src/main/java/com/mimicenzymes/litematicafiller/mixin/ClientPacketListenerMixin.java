@@ -14,7 +14,7 @@ public class ClientPacketListenerMixin {
 
     @Inject(method = "handleTagQueryPacket", at = @At("HEAD"))
     private void onNbtQueryResponse(ClientboundTagQueryPacket packet, CallbackInfo ci) {
-        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
+        if (!Configs.ENABLE_MOD.getBooleanValue() || !RealContainerCache.hasActiveConsumers()) return;
         if (Configs.ENABLE_OP_NBT_QUERY.getBooleanValue()) {
             RealContainerCache.handleNbtResponse(packet.getTransactionId(), packet.getTag());
         }

@@ -48,12 +48,13 @@ public class LitematicaPlacementContainerData {
         }
 
         Map<Integer, ItemStack> items = RealContainerCache.parseNbtInventory(nbt.get(), registries);
-        MaterialReplacer.replaceInMap(items);
+        MaterialReplacer.replaceInMap(items, snapshot.schematicKeyByWorldPos().get(worldPos));
         return items;
     }
 
     private static Snapshot buildSnapshot() {
         Map<BlockPos, CompoundTag> nbtByWorldPos = new HashMap<>();
+        Map<BlockPos, String> schematicKeyByWorldPos = new HashMap<>();
         Set<BlockPos> positions = new HashSet<>();
         Minecraft client = Minecraft.getInstance();
 
@@ -88,6 +89,7 @@ public class LitematicaPlacementContainerData {
 
                         positions.add(worldPos.immutable());
                         nbtByWorldPos.put(worldPos.immutable(), nbt.copy());
+                        schematicKeyByWorldPos.put(worldPos.immutable(), SchematicMaterialReplacementContext.keyForPlacement(placement));
                     }
                 }
             }
@@ -97,6 +99,7 @@ public class LitematicaPlacementContainerData {
         return new Snapshot(
                 Collections.unmodifiableSet(positions),
                 Collections.unmodifiableMap(nbtByWorldPos),
+                Collections.unmodifiableMap(schematicKeyByWorldPos),
                 true
         );
     }
@@ -176,9 +179,9 @@ public class LitematicaPlacementContainerData {
         }
     }
 
-    private record Snapshot(Set<BlockPos> positions, Map<BlockPos, CompoundTag> nbtByWorldPos, boolean initialized) {
+    private record Snapshot(Set<BlockPos> positions, Map<BlockPos, CompoundTag> nbtByWorldPos, Map<BlockPos, String> schematicKeyByWorldPos, boolean initialized) {
         static Snapshot empty() {
-            return new Snapshot(Collections.emptySet(), Collections.emptyMap(), false);
+            return new Snapshot(Collections.emptySet(), Collections.emptyMap(), Collections.emptyMap(), false);
         }
     }
 }

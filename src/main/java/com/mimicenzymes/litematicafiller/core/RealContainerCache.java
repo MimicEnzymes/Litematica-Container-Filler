@@ -2,9 +2,11 @@ package com.mimicenzymes.litematicafiller.core;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
+import com.mimicenzymes.litematicafiller.materials.FillMaterialCalculator;
 import com.mimicenzymes.litematicafiller.network.ServuxSyncHandler;
 import com.mimicenzymes.litematicafiller.tool.ContainerToolStateMachine;
 import fi.dy.masa.litematica.data.EntitiesDataStorage;
+import fi.dy.masa.litematica.gui.GuiMaterialList;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.client.Minecraft;
@@ -83,6 +85,7 @@ public class RealContainerCache {
     }
 
     public static void rememberPendingScreenTarget(Level Level, BlockPos pos) {
+        if (!hasActiveConsumers()) return;
         if (Level == null || !Level.isClientSide() || pos == null) return;
         Minecraft client = Minecraft.getInstance();
         if (client.level != Level) return;
@@ -94,12 +97,7 @@ public class RealContainerCache {
 
     public static void tick(Minecraft client) {
         if (client.level == null || client.player == null) return;
-        boolean activeOperation = AutoFillerStateMachine.getInstance().isWorking() || ContainerToolStateMachine.getInstance().isWorking();
-        boolean hasConsumer = Configs.HIGHLIGHT_CONTAINERS.getBooleanValue() ||
-                Configs.WORKING_STATE.getBooleanValue() ||
-                activeOperation ||
-                Configs.TOOL_ENABLED.getBooleanValue();
-        if (!Configs.ENABLE_MOD.getBooleanValue() || !hasConsumer) {
+        if (!hasActiveConsumers()) {
             lastObservedHandler = null;
             lastObservedSyncId = Integer.MIN_VALUE;
             lastObservedSignature = Long.MIN_VALUE;
@@ -132,13 +130,31 @@ public class RealContainerCache {
         }
     }
 
+    public static boolean hasActiveConsumers() {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) return false;
+
+        boolean activeOperation = AutoFillerStateMachine.getInstance().isWorking() ||
+                ContainerToolStateMachine.getInstance().isWorking();
+        if (Configs.HIGHLIGHT_CONTAINERS.getBooleanValue() ||
+                Configs.WORKING_STATE.getBooleanValue() ||
+                activeOperation ||
+                Configs.TOOL_ENABLED.getBooleanValue()) {
+            return true;
+        }
+
+        Minecraft client = Minecraft.getInstance();
+        return FillMaterialCalculator.listMode != 0 && client.screen instanceof GuiMaterialList;
+    }
+
     public static void updateFromScreen(Minecraft client, AbstractContainerScreen<?> screen) {
+        if (!hasActiveConsumers()) return;
         if (screen != null) {
             updateFromHandler(client, screen.getMenu());
         }
     }
 
     public static void updateFromHandler(Minecraft client, AbstractContainerMenu handler) {
+        if (!hasActiveConsumers()) return;
         if (handler == null) return;
 
         if (isIgnoredHandlerType(client, handler)) {
@@ -616,7 +632,7 @@ public class RealContainerCache {
 
     public static void requestContainerData(BlockPos pos, long minIntervalMs, boolean preferOpQuery) {
         long now = System.currentTimeMillis();
-        if (pos == null || now - LAST_REQUEST_TIME.getOrDefault(pos, 0L) < minIntervalMs) return;
+        if (!hasActiveConsumers() || pos == null || now - LAST_REQUEST_TIME.getOrDefault(pos, 0L) < minIntervalMs) return;
 
         boolean isDouble = false;
         BlockPos[] halves = null;
@@ -698,6 +714,7 @@ public class RealContainerCache {
     public static void handleNbtResponse(int transactionId, CompoundTag nbt) {
         BlockPos pos = PENDING_NBT_REQUESTS.remove(transactionId);
         Long requestedAt = PENDING_NBT_REQUEST_TIME.remove(transactionId);
+        if (!hasActiveConsumers()) return;
         if (pos != null && nbt != null) {
             Minecraft client = Minecraft.getInstance();
             if (client.level != null) {

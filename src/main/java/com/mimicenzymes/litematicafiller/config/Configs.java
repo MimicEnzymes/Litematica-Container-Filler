@@ -40,7 +40,7 @@ public class Configs implements IConfigHandler {
     private static final ConfigBoolean CONTINUOUS_FILL              = new ConfigBoolean("litematica_container_filler.config.name.continuousFill", false, "litematica_container_filler.config.comment.continuousFill");
     private static final ConfigBoolean AREA_MODE                    = new ConfigBoolean("litematica_container_filler.config.name.areaMode", false, "litematica_container_filler.config.comment.areaMode");
     private static final ConfigBoolean LEGACY_ENABLE_CARPET_LARGE_BARRELS = new ConfigBoolean("litematica_container_filler.config.name.enableCarpetLargeBarrels", false, "litematica_container_filler.config.comment.enableCarpetLargeBarrels");
-    public static final ConfigOptionList CARPET_LARGE_BARREL_MODE   = new ConfigOptionList("litematica_container_filler.config.name.carpetLargeBarrelMode", CarpetLargeBarrelMode.AUTO, "litematica_container_filler.config.comment.carpetLargeBarrelMode");
+    public static final ConfigOptionList CARPET_LARGE_BARREL_MODE   = new ConfigOptionList("litematica_container_filler.config.name.carpetLargeBarrelMode", CarpetLargeBarrelMode.OFF, "litematica_container_filler.config.comment.carpetLargeBarrelMode");
     public static final ConfigInteger FILL_RADIUS                   = new ConfigInteger("litematica_container_filler.config.name.fillRadius", 5, 0, 1024, "litematica_container_filler.config.comment.fillRadius");
     public static final ConfigInteger FILL_DELAY                    = new ConfigInteger("litematica_container_filler.config.name.fillDelay", 0, 0, 100, "litematica_container_filler.config.comment.fillDelay");
     public static final ConfigBoolean ENABLE_SAFETY_DELAY           = new ConfigBoolean("litematica_container_filler.config.name.enableSafetyDelay", true, "litematica_container_filler.config.comment.enableSafetyDelay");
@@ -96,7 +96,6 @@ public class Configs implements IConfigHandler {
     public static final ConfigBooleanHotkeyed HIGHLIGHT_XRAY        = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightXray", false, "", "litematica_container_filler.config.comment.highlightXray");
     public static final ConfigInteger RENDER_RADIUS                 = new ConfigInteger("litematica_container_filler.config.name.renderRadius", 0, 0, 1024, "litematica_container_filler.config.comment.renderRadius");
     public static final ConfigBooleanHotkeyed SYNC_LITE_LAYER       = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.syncLiteLayer", true, "", "litematica_container_filler.config.comment.syncLiteLayer");
-    public static final ConfigBooleanHotkeyed HIDE_COMPLETED_CONTAINERS = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.hideCompletedContainers", true, "", "litematica_container_filler.config.comment.hideCompletedContainers");
     public static final ConfigBooleanHotkeyed HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.highlightEmptySchematicContainers", true, "", "litematica_container_filler.config.comment.highlightEmptySchematicContainers");
     public static final ConfigBooleanHotkeyed RENDER_STATE_UNFILLED = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderStateUnfilled", true, "", "litematica_container_filler.config.comment.renderStateUnfilled");
     public static final ConfigBooleanHotkeyed RENDER_STATE_PARTIAL  = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderStatePartial", true, "", "litematica_container_filler.config.comment.renderStatePartial");
@@ -201,7 +200,6 @@ public class Configs implements IConfigHandler {
                 HIGHLIGHT_XRAY,
                 RENDER_RADIUS,
                 SYNC_LITE_LAYER,
-                HIDE_COMPLETED_CONTAINERS,
                 HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS,
                 RENDER_STATE_UNFILLED,
                 RENDER_STATE_PARTIAL,
@@ -240,7 +238,6 @@ public class Configs implements IConfigHandler {
                 HIGHLIGHT_CONTAINERS,
                 HIGHLIGHT_XRAY,
                 SYNC_LITE_LAYER,
-                HIDE_COMPLETED_CONTAINERS,
                 HIGHLIGHT_EMPTY_SCHEMATIC_CONTAINERS,
                 RENDER_STATE_UNFILLED,
                 RENDER_STATE_PARTIAL,
@@ -361,6 +358,6 @@ public class Configs implements IConfigHandler {
         if (CARPET_LARGE_BARREL_MODE.getOptionListValue() instanceof CarpetLargeBarrelMode mode) {
             return mode;
         }
-        return CarpetLargeBarrelMode.AUTO;
+        return CarpetLargeBarrelMode.OFF;
     }
 }
