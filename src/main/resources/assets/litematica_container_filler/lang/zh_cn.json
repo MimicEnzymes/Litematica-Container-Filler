@@ -66,6 +66,8 @@
   "litematica_container_filler.gui.label.render_editor.highlights.desc": "调整容器高亮主体样式和状态颜色。修改会立即保存。",
   "litematica_container_filler.gui.label.render_editor.markers.desc": "调整正在填充、排队等待、缺少材料的动态标记。FPS 上限会控制动画重建频率。",
   "litematica_container_filler.gui.label.render_editor.hud.desc": "调整可选的容器工具 HUD。工具 HUD 默认关闭，可在这里启用。",
+  "litematica_container_filler.gui.label.render_editor.warning.title": "界面适配警告",
+  "litematica_container_filler.gui.label.render_editor.warning.body": "小窗、自定义分辨率或异常窗口比例下，本编辑器可能错位、按钮超出窗口或点击不到。\n遇到这种情况，请先切到较大窗口或默认界面缩放后再调整配置。",
   "litematica_container_filler.gui.label.render_state.unfilled": "未填充",
   "litematica_container_filler.gui.label.render_state.partial": "未满",
   "litematica_container_filler.gui.label.render_state.overfilled": "溢出",

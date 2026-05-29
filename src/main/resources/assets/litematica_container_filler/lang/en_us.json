@@ -66,6 +66,8 @@
   "litematica_container_filler.gui.label.render_editor.highlights.desc": "Tune the container body style and state colors. Changes are saved immediately.",
   "litematica_container_filler.gui.label.render_editor.markers.desc": "Tune the animated filling, queued, and missing-material markers. The FPS limit controls animation rebuild rate.",
   "litematica_container_filler.gui.label.render_editor.hud.desc": "Tune the optional container tool HUD. Tool HUD is off by default and can be enabled here.",
+  "litematica_container_filler.gui.label.render_editor.warning.title": "UI Layout Warning",
+  "litematica_container_filler.gui.label.render_editor.warning.body": "In small windows, custom resolutions, or unusual aspect ratios, this editor may be misaligned or hard to click.\nIf that happens, use a larger window or default GUI scale before editing these options.",
   "litematica_container_filler.gui.label.render_state.unfilled": "Unfilled",
   "litematica_container_filler.gui.label.render_state.partial": "Partial",
   "litematica_container_filler.gui.label.render_state.overfilled": "Overfilled",
