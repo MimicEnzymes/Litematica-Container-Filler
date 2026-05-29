@@ -43,6 +43,9 @@ public class ToolHudRenderer {
     private static final long SWITCH_HUD_SLIDE_NANOS = 360_000_000L;
     private static final long SWITCH_HUD_HOLD_NANOS = 180_000_000L;
     private static final long SWITCH_HUD_FADE_NANOS = 260_000_000L;
+    private static final long SWITCH_HUD_ROW_FADE_IN_NANOS = 70_000_000L;
+    private static final long SWITCH_HUD_ROW_HOLD_NANOS = 40_000_000L;
+    private static final long SWITCH_HUD_ROW_FADE_NANOS = 140_000_000L;
     private static final int SWITCH_HUD_EXTRA_HEIGHT = 12;
     private static final float SWITCH_HUD_CONTENT_FADE_BAND = 0.42f;
 
@@ -79,6 +82,8 @@ public class ToolHudRenderer {
     private static boolean switchHudActive = false;
     private static float switchVisualExpand = 0.0f;
     private static long lastSwitchVisualNanos = 0L;
+    private static float normalHintReveal = 1.0f;
+    private static long lastNormalHintRevealNanos = 0L;
 
     private ToolHudRenderer() {
     }
@@ -142,6 +147,8 @@ public class ToolHudRenderer {
         switchHudDirection = forward ? 1 : -1;
         switchHudStartNanos = System.nanoTime();
         switchHudActive = true;
+        normalHintReveal = 0.0f;
+        lastNormalHintRevealNanos = switchHudStartNanos;
     }
 
     public static void render(DrawContext context) {
@@ -151,6 +158,8 @@ public class ToolHudRenderer {
             switchHudActive = false;
             switchVisualExpand = 0.0f;
             lastSwitchVisualNanos = 0L;
+            normalHintReveal = 1.0f;
+            lastNormalHintRevealNanos = 0L;
             return;
         }
         if (client.options.hudHidden) {
@@ -158,6 +167,8 @@ public class ToolHudRenderer {
             switchHudActive = false;
             switchVisualExpand = 0.0f;
             lastSwitchVisualNanos = 0L;
+            normalHintReveal = 1.0f;
+            lastNormalHintRevealNanos = 0L;
             return;
         }
 
@@ -166,6 +177,8 @@ public class ToolHudRenderer {
             switchHudActive = false;
             switchVisualExpand = 0.0f;
             lastSwitchVisualNanos = 0L;
+            normalHintReveal = 1.0f;
+            lastNormalHintRevealNanos = 0L;
         }
 
         if (!Configs.ENABLE_TOOL_HUD.getBooleanValue()) {
@@ -534,16 +547,18 @@ public class ToolHudRenderer {
         int contentBottom = y + height - Math.max(5, Math.round(5.0f * scale)) - progressReserve;
         int normalHeight = height - Math.round(SWITCH_HUD_EXTRA_HEIGHT * switchExpand * scale);
         int normalContentBottom = y + normalHeight - Math.max(5, Math.round(5.0f * scale)) - progressReserve;
-        boolean switching = switchExpand > 0.0025f || isSwitchHudVisible(nowNanos);
+        float switchBlend = getSwitchRowsBlend(nowNanos, switchExpand);
+        boolean switchRowsActive = isSwitchRowsActive(nowNanos);
+        boolean expandedLayout = switchExpand > 0.01f || switchRowsActive;
+        float hintReveal = updateNormalHintReveal(nowNanos, switchRowsActive);
         int normalMaxLines = countFittingLines(labelY, lineGap, textHeight, normalContentBottom,
-                switching || cachedSecondaryHint.isEmpty() ? 2 : 3);
+                expandedLayout || hintReveal < 0.98f || cachedSecondaryHint.isEmpty() ? 2 : 3);
 
-        float switchBlend = getSwitchContentBlend(switchExpand);
         float normalFade = 1.0f - switchBlend;
         int normalAlpha = Math.round(alpha * normalFade);
         if (normalAlpha > 3) {
             drawNormalToolCardContent(context, client, iconCenterX, iconCenterY, iconScale, scale, normalAlpha, eased, nowNanos,
-                    textX, labelY, lineGap, normalContentBottom, headerHeight, textHeight, textMaxUnscaled, normalMaxLines, normalFade);
+                    textX, labelY, lineGap, normalContentBottom, headerHeight, textHeight, textMaxUnscaled, normalMaxLines, normalFade, hintReveal);
         }
         int switchAlpha = Math.round(alpha * switchBlend);
         if (switchAlpha > 3) {
@@ -564,19 +579,23 @@ public class ToolHudRenderer {
     private static void drawNormalToolCardContent(DrawContext context, MinecraftClient client, int iconCenterX, int iconCenterY,
                                                   float iconScale, float scale, int alpha, float eased, long nowNanos,
                                                   int textX, int labelY, int lineGap, int contentBottom, int headerHeight,
-                                                  int textHeight, int textMaxUnscaled, int maxLines, float contentFade) {
-        int hintAlpha = Math.round(alpha * smoothStep(contentFade));
+                                                  int textHeight, int textMaxUnscaled, int maxLines, float contentFade, float hintReveal) {
+        int textAlpha = Math.round(alpha * smoothStep(contentFade) * smoothStep(hintReveal));
         drawHudToolIcon(context, iconCenterX, iconCenterY, iconScale, alpha, eased, cachedMode, nowNanos);
         if (maxLines <= 1) {
-            drawScaledText(context, client, ellipsize(client, cachedHint, textMaxUnscaled), textX,
-                    Math.min(labelY, Math.max(labelY - Math.max(2, Math.round(7.0f * scale)), contentBottom - textHeight)),
-                    scale, withAlpha(0xFF55FF68, hintAlpha));
+            if (textAlpha > 3) {
+                drawScaledText(context, client, ellipsize(client, cachedHint, textMaxUnscaled), textX,
+                        Math.min(labelY, Math.max(labelY - Math.max(2, Math.round(7.0f * scale)), contentBottom - textHeight)),
+                        scale, withAlpha(0xFF55FF68, textAlpha));
+            }
         } else {
-            drawScaledText(context, client, ellipsize(client, cachedLabel, textMaxUnscaled), textX, labelY, scale, withAlpha(MUTED_TEXT, Math.round(alpha * 0.88f)));
-            drawScaledText(context, client, ellipsize(client, cachedHint, textMaxUnscaled), textX, labelY + lineGap, scale, withAlpha(0xFF55FF68, hintAlpha));
+            if (textAlpha > 3) {
+                drawScaledText(context, client, ellipsize(client, cachedLabel, textMaxUnscaled), textX, labelY, scale, withAlpha(MUTED_TEXT, Math.round(textAlpha * 0.88f)));
+                drawScaledText(context, client, ellipsize(client, cachedHint, textMaxUnscaled), textX, labelY + lineGap, scale, withAlpha(0xFF55FF68, textAlpha));
+            }
         }
-        if (maxLines >= 3 && !cachedSecondaryHint.isEmpty()) {
-            drawScaledText(context, client, ellipsize(client, cachedSecondaryHint, textMaxUnscaled), textX, labelY + lineGap * 2, scale, withAlpha(MUTED_TEXT, Math.round(hintAlpha * 0.78f)));
+        if (maxLines >= 3 && textAlpha > 3 && !cachedSecondaryHint.isEmpty()) {
+            drawScaledText(context, client, ellipsize(client, cachedSecondaryHint, textMaxUnscaled), textX, labelY + lineGap * 2, scale, withAlpha(MUTED_TEXT, Math.round(textAlpha * 0.78f)));
         }
     }
 
@@ -963,10 +982,12 @@ public class ToolHudRenderer {
         private final int panelWidth;
         private final boolean switchActive;
         private final long switchStartNanos;
+        private final float hintReveal;
+        private final long hintRevealNanos;
 
         private CacheSnapshot(ContainerToolMode mode, String hotkey, String switchHotkey, String closeHotkey,
                               String label, String hint, String secondaryHint, int panelWidth,
-                              boolean switchActive, long switchStartNanos) {
+                              boolean switchActive, long switchStartNanos, float hintReveal, long hintRevealNanos) {
             this.mode = mode;
             this.hotkey = hotkey;
             this.switchHotkey = switchHotkey;
@@ -977,11 +998,14 @@ public class ToolHudRenderer {
             this.panelWidth = panelWidth;
             this.switchActive = switchActive;
             this.switchStartNanos = switchStartNanos;
+            this.hintReveal = hintReveal;
+            this.hintRevealNanos = hintRevealNanos;
         }
 
         private static CacheSnapshot capture() {
             return new CacheSnapshot(cachedMode, cachedHotkey, cachedSwitchHotkey, cachedCloseHotkey,
-                    cachedLabel, cachedHint, cachedSecondaryHint, cachedPanelWidth, switchHudActive, switchHudStartNanos);
+                    cachedLabel, cachedHint, cachedSecondaryHint, cachedPanelWidth, switchHudActive, switchHudStartNanos,
+                    normalHintReveal, lastNormalHintRevealNanos);
         }
 
         private void restore() {
@@ -995,6 +1019,8 @@ public class ToolHudRenderer {
             cachedPanelWidth = this.panelWidth;
             switchHudActive = this.switchActive;
             switchHudStartNanos = this.switchStartNanos;
+            normalHintReveal = this.hintReveal;
+            lastNormalHintRevealNanos = this.hintRevealNanos;
         }
     }
 
@@ -1074,6 +1100,34 @@ public class ToolHudRenderer {
         return progress * progress * (3.0f - 2.0f * progress);
     }
 
+    private static float getSwitchRowsBlend(long nowNanos, float switchExpand) {
+        long elapsed = getSwitchElapsed(nowNanos);
+        if (elapsed < 0L || !isSwitchRowsActiveElapsed(elapsed)) {
+            return 0.0f;
+        }
+
+        float blend = getSwitchContentBlend(switchExpand);
+        float fadeIn = smoothStep(clamp(elapsed / (float) SWITCH_HUD_ROW_FADE_IN_NANOS, 0.0f, 1.0f));
+        long fadeStart = SWITCH_HUD_SLIDE_NANOS + SWITCH_HUD_ROW_HOLD_NANOS;
+        if (elapsed >= fadeStart) {
+            float fadeProgress = clamp((elapsed - fadeStart) / (float) SWITCH_HUD_ROW_FADE_NANOS, 0.0f, 1.0f);
+            blend *= 1.0f - smoothStep(fadeProgress);
+        }
+        return clamp(blend * fadeIn, 0.0f, 1.0f);
+    }
+
+    private static boolean isSwitchRowsActive(long nowNanos) {
+        long elapsed = getSwitchElapsed(nowNanos);
+        return isSwitchRowsActiveElapsed(elapsed);
+    }
+
+    private static boolean isSwitchRowsActiveElapsed(long elapsed) {
+        if (elapsed < 0L) {
+            return false;
+        }
+        return elapsed < SWITCH_HUD_SLIDE_NANOS + SWITCH_HUD_ROW_HOLD_NANOS + SWITCH_HUD_ROW_FADE_NANOS;
+    }
+
     private static float updateSwitchVisualExpand(long nowNanos) {
         float target = getSwitchExpand(nowNanos);
         if (lastSwitchVisualNanos <= 0L) {
@@ -1091,6 +1145,25 @@ public class ToolHudRenderer {
             switchVisualExpand = target;
         }
         return clamp(switchVisualExpand, 0.0f, 1.0f);
+    }
+
+    private static float updateNormalHintReveal(long nowNanos, boolean suppress) {
+        float target = suppress ? 0.0f : 1.0f;
+        if (lastNormalHintRevealNanos <= 0L) {
+            normalHintReveal = target;
+            lastNormalHintRevealNanos = nowNanos;
+            return normalHintReveal;
+        }
+
+        float deltaSeconds = clamp((nowNanos - lastNormalHintRevealNanos) / 1_000_000_000.0f, 0.0f, 0.08f);
+        lastNormalHintRevealNanos = nowNanos;
+        float speed = suppress ? 24.0f : 9.0f;
+        float blend = 1.0f - (float)Math.exp(-speed * deltaSeconds);
+        normalHintReveal += (target - normalHintReveal) * blend;
+        if (Math.abs(target - normalHintReveal) < 0.01f) {
+            normalHintReveal = target;
+        }
+        return clamp(normalHintReveal, 0.0f, 1.0f);
     }
 
     private static float getSwitchDeckOffset(long nowNanos, int rowGap) {
