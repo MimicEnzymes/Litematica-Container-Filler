@@ -19,6 +19,7 @@ import net.minecraft.component.type.ContainerComponent;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.screen.CrafterScreenHandler;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
@@ -588,7 +589,7 @@ public class AutoFillerStateMachine {
         }
         actionQueue.add(() -> {
             if (client.player != null && client.player.currentScreenHandler != client.player.playerScreenHandler) {
-                client.player.closeHandledScreen();
+                closeHandledScreen(client);
             }
         });
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
@@ -749,7 +750,7 @@ public class AutoFillerStateMachine {
         blacklistedSlots.clear();
         ClickPacketRateLimiter.reset();
         if (client != null && client.player != null && client.player.currentScreenHandler != client.player.playerScreenHandler) {
-            client.player.closeHandledScreen();
+            closeHandledScreen(client);
         }
         reset();
     }
@@ -1003,7 +1004,7 @@ public class AutoFillerStateMachine {
     }
 
     private void doInspectionPhase(MinecraftClient client) {
-        actionQueue.add(() -> client.player.closeHandledScreen());
+        actionQueue.add(() -> closeHandledScreen(client));
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
         actionQueue.add(() -> {
             currentTask.needsInspection = false;
@@ -1242,7 +1243,7 @@ public class AutoFillerStateMachine {
         sendFeedback(client, Text.translatable("litematica_container_filler.message.stashing_items").getString(), true);
 
         actionQueue.add(() -> {
-            client.player.closeHandledScreen();
+            closeHandledScreen(client);
             guiOpenedForPhase = false;
             silentlyExtracting = false;
             activeShulkerSlot = -1;
@@ -1324,16 +1325,18 @@ public class AutoFillerStateMachine {
             sendFeedback(client, Text.translatable("litematica_container_filler.message.opening_shulker_extract").getString(), true);
         }
 
-        actionQueue.add(() -> {
-            if (getQuickShulkerOpenMode() == QuickShulkerOpenMode.SIMULATE_CLICK) {
-                simulateOpenShulkerClick(client, slot);
-            } else {
-                shulkerExtractor.requestOpenShulker(slot);
-            }
-        });
+        actionQueue.add(() -> openQueuedShulker(client, slot));
         uiWaitTimer = 0;
         actionQueue.add(this::waitForUi);
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
+    }
+
+    private void openQueuedShulker(MinecraftClient client, int slot) {
+        if (getQuickShulkerOpenMode() == QuickShulkerOpenMode.SIMULATE_CLICK) {
+            simulateOpenShulkerClick(client, slot);
+        } else {
+            shulkerExtractor.requestOpenShulker(slot);
+        }
     }
 
     private boolean currentCrafterNeedsLocking(MinecraftClient client) {
@@ -1586,7 +1589,7 @@ public class AutoFillerStateMachine {
         final boolean forceDump = (remainingEmptySlots <= 0);
 
         actionQueue.add(() -> {
-            client.player.closeHandledScreen();
+            closeHandledScreen(client);
             guiOpenedForPhase = false;
             silentlyExtracting = false;
             activeShulkerSlot = -1;
@@ -1614,7 +1617,7 @@ public class AutoFillerStateMachine {
         if (Configs.STORE_ORDERLY.getBooleanValue()) {
             int[] stashAction = findStashAction(client, currentTask.requiredItems.values());
             if (stashAction != null) {
-                actionQueue.add(() -> client.player.closeHandledScreen());
+                actionQueue.add(() -> closeHandledScreen(client));
                 actionQueue.add(() -> actionWaitTicks = getDelay(1));
                 actionQueue.add(() -> {
                     stashShulkerSlot = stashAction[0];
@@ -1968,7 +1971,7 @@ public class AutoFillerStateMachine {
 
                 RealContainerCache.updateFromHandler(client, handler);
 
-                actionQueue.add(() -> client.player.closeHandledScreen());
+                actionQueue.add(() -> closeHandledScreen(client));
                 actionQueue.add(() -> actionWaitTicks = getDelay(1));
                 actionQueue.add(() -> checkAndStartGatheringOrFilling(client));
             } else {
@@ -1994,7 +1997,7 @@ public class AutoFillerStateMachine {
 
         sendFeedback(client, Text.translatable("litematica_container_filler.message.fill_completed").getString(), true);
 
-        actionQueue.add(() -> client.player.closeHandledScreen());
+        actionQueue.add(() -> closeHandledScreen(client));
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
 
         actionQueue.add(() -> {
@@ -2073,7 +2076,7 @@ public class AutoFillerStateMachine {
         }
 
         actionQueue.add(() -> {
-            client.player.closeHandledScreen();
+            closeHandledScreen(client);
             guiOpenedForPhase = false;
             silentlyExtracting = false;
             activeShulkerSlot = -1;
@@ -2135,7 +2138,7 @@ public class AutoFillerStateMachine {
         taskQueue.clear();
         if (currentTask != null && !currentTask.forcedManual) {
             if (client.player != null && client.player.currentScreenHandler != client.player.playerScreenHandler) {
-                client.player.closeHandledScreen();
+                closeHandledScreen(client);
             }
             reset();
         }
@@ -2148,7 +2151,7 @@ public class AutoFillerStateMachine {
         blacklistedSlots.clear();
         ClickPacketRateLimiter.reset();
         if (client.player != null && client.player.currentScreenHandler != client.player.playerScreenHandler) {
-            client.player.closeHandledScreen();
+            closeHandledScreen(client);
         }
         reset();
     }
@@ -2275,6 +2278,23 @@ public class AutoFillerStateMachine {
     private boolean isPassiveScreenOpen(MinecraftClient client) {
         Screen screen = client.currentScreen;
         return screen != null && !(screen instanceof HandledScreen<?>);
+    }
+
+    private void closeHandledScreen(MinecraftClient client) {
+        if (client == null || client.player == null) return;
+
+        ScreenHandler handler = client.player.currentScreenHandler;
+        if (handler == client.player.playerScreenHandler) return;
+
+        if (isPassiveScreenOpen(client) && client.getNetworkHandler() != null) {
+            client.getNetworkHandler().sendPacket(new CloseHandledScreenC2SPacket(handler.syncId));
+            client.player.currentScreenHandler = client.player.playerScreenHandler;
+            currentMapper = null;
+            mappedHandler = null;
+            return;
+        }
+
+        client.player.closeHandledScreen();
     }
 
     private boolean hasItemAnywhere(MinecraftClient client, ItemStack target) {

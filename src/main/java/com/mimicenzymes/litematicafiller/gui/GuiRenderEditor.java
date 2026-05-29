@@ -2,6 +2,7 @@ package com.mimicenzymes.litematicafiller.gui;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.config.ToolHudStyle;
+import com.mimicenzymes.litematicafiller.render.ToolHudRenderer;
 import com.mimicenzymes.litematicafiller.tool.ContainerToolMode;
 import fi.dy.masa.malilib.config.options.ConfigBoolean;
 import fi.dy.masa.malilib.config.options.ConfigColor;
@@ -136,6 +137,7 @@ public class GuiRenderEditor extends GuiBase {
             }
             case HUD -> {
                 controls.add(booleanControl(Configs.ENABLE_TOOL_HUD));
+                controls.add(booleanControl(Configs.ENABLE_TOOL_SWITCH_HUD));
                 controls.add(booleanControl(Configs.TOOL_HUD_BORDER));
                 controls.add(optionControl(Configs.TOOL_HUD_STYLE));
                 controls.add(doubleStepperControl(Configs.TOOL_HUD_OPACITY, 0.05D));
@@ -887,17 +889,25 @@ public class GuiRenderEditor extends GuiBase {
         int columns = Math.min(markers.size(), width < 330 ? 1 : 3);
         int rows = (int)Math.ceil(markers.size() / (double)columns);
         int cellW = width / columns;
-        int cellH = Math.max(88, (height - 26) / Math.max(1, rows));
-        int originY = y + 34;
+        int availableH = Math.max(72, height - 36);
+        int cellH = Math.max(76, availableH / Math.max(1, rows));
+        int originY = y + 30;
         for (int i = 0; i < markers.size(); i++) {
             MarkerPreview marker = markers.get(i);
             int col = i % columns;
             int row = i / columns;
             int cx = x + col * cellW + cellW / 2;
-            int cy = originY + row * cellH + cellH / 2;
-            float size = Math.min(cellW, cellH) * 0.42f * (float)Configs.TASK_OVERLAY_SCALE.getDoubleValue();
-            drawMarkerModel(context, cx, cy, Math.max(18.0f, size), time, marker.kind);
-            drawPreviewLabel(context, tr("litematica_container_filler.gui.label." + marker.key), cx, cy + Math.min(48, cellH / 3), cellW);
+            int cellTop = originY + row * cellH;
+            int cellBottom = Math.min(y + height - 4, cellTop + cellH);
+            int labelY = Math.max(cellTop + 54, cellBottom - 19);
+            int modelTop = cellTop + 4;
+            int modelBottom = Math.max(modelTop + 32, labelY - 5);
+            int cy = (modelTop + modelBottom) / 2;
+            float scale = (float)Configs.TASK_OVERLAY_SCALE.getDoubleValue();
+            float maxSize = Math.min(cellW * 0.38f, (modelBottom - modelTop) * 0.64f);
+            float size = clampFloat(maxSize * scale, 16.0f, Math.max(18.0f, maxSize));
+            drawMarkerModel(context, cx, cy, size, time, marker.kind);
+            drawPreviewLabel(context, tr("litematica_container_filler.gui.label." + marker.key), cx, labelY, cellW);
         }
     }
 
@@ -927,52 +937,58 @@ public class GuiRenderEditor extends GuiBase {
     }
 
     private Rect getHudPreviewCardRect(int x, int y, int width, int height) {
-        float scale = Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f;
-        int panelW = Math.round(184 * scale);
-        int panelH = Math.round(68 * scale);
+        ContainerToolMode mode = Configs.CONTAINER_TOOL_MODE.getOptionListValue() instanceof ContainerToolMode toolMode ? toolMode : ContainerToolMode.CLEAR;
+        int[] size = ToolHudRenderer.getEditorPreviewCardSize(mode, Math.max(72, width - 16), 0.0f);
+        int panelW = size[0];
+        int panelH = size[1];
         int panelX = x + width / 2 + Configs.TOOL_HUD_CUSTOM_X.getIntegerValue();
         int panelY = y + height / 2 + Configs.TOOL_HUD_CUSTOM_Y.getIntegerValue();
         panelX = clamp(panelX, x + 8, Math.max(x + 8, x + width - panelW - 8));
-        panelY = clamp(panelY, y + 22, Math.max(y + 22, y + height - panelH - 8));
+        panelY = clamp(panelY, y + 8, Math.max(y + 8, y + height - panelH - 8));
         return new Rect(panelX, panelY, panelW, panelH);
     }
 
     private void drawHudCard(DrawContext context, int panelX, int panelY, int panelW, int panelH, int alpha) {
-        drawSoftRect(context, panelX + 2, panelY + 3, panelW, panelH, withAlpha(0xFF000000, (int)(alpha * 0.32D)));
-        drawRoundedPreviewCard(context, panelX, panelY, panelW, panelH, withAlpha(0xFF050708, (int)(alpha * 0.92D)));
-        int headerH = Math.max(15, Math.min(20, panelH / 4));
-        drawRoundedPreviewCardSection(context, panelX, panelY, panelW, panelH, 0, headerH + 7, withAlpha(0xFF151F26, (int)(alpha * 0.56D)));
-        if (Configs.TOOL_HUD_BORDER.getBooleanValue()) {
-            drawRoundedPreviewCardOutline(context, panelX, panelY, panelW, panelH, withAlpha(0xFF6F7B86, (int)(alpha * 0.88D)));
-        }
-        float scale = Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f;
-        float iconScale = scale * clampFloat(Configs.TOOL_HUD_ICON_SCALE.getIntegerValue() / 100.0f, 0.5f, 1.5f);
-        int titleMaxWidth = Math.max(0, panelW - 20);
-        drawScaledString(context, fitToWidth(tr("litematica_container_filler.gui.label.hud_title"), unscaledWidth(titleMaxWidth, scale)), panelX + 10, panelY + 8, scale, withAlpha(TEXT, alpha));
-        double time = quantizedTime(Configs.TOOL_HUD_FRAME_RATE.getIntegerValue());
         ContainerToolMode mode = Configs.CONTAINER_TOOL_MODE.getOptionListValue() instanceof ContainerToolMode toolMode ? toolMode : ContainerToolMode.CLEAR;
-        int pulse = (int)(Math.sin(time * 5.0D) * 2.0D);
-        int textHeight = Math.max(1, (int)Math.ceil(this.textRenderer.fontHeight * scale));
-        int lineGap = Math.max(textHeight + 1, Math.round(11.0f * scale));
-        int iconX = panelX + Math.round(24 * scale) + (mode == ContainerToolMode.COPY ? pulse : 0);
-        int iconY = panelY + headerH + Math.round(29 * scale) + (mode == ContainerToolMode.COPY ? 0 : pulse);
-        drawMiniHudToolIcon(context, iconX, iconY, alpha, iconScale, mode);
-        int textX = panelX + Math.round(48 * scale);
-        int labelY = panelY + headerH + 8;
-        int textMaxWidth = Math.max(0, panelW - (textX - panelX) - 10);
-        int textMaxUnscaled = unscaledWidth(textMaxWidth, scale);
-        String actionText = tr("litematica_container_filler.hud.tool_action", "V");
-        String secondaryText = tr("litematica_container_filler.hud.tool_switch_close", "G", "H");
-        int contentBottom = panelY + panelH - Math.max(5, Math.round(5.0f * scale));
-        int maxLines = countFittingLines(labelY, lineGap, textHeight, contentBottom, 3);
-        if (maxLines <= 1) {
-            drawScaledString(context, fitToWidth(actionText, textMaxUnscaled), textX, Math.min(labelY, Math.max(panelY + headerH + 2, contentBottom - textHeight)), scale, withAlpha(0xFF55FF68, alpha));
-        } else {
-            drawScaledString(context, fitToWidth(mode.getDisplayName(), textMaxUnscaled), textX, labelY, scale, withAlpha(MUTED, alpha));
-            drawScaledString(context, fitToWidth(actionText, textMaxUnscaled), textX, labelY + lineGap, scale, withAlpha(0xFF55FF68, alpha));
+        ToolHudRenderer.renderEditorPreview(context, panelX, panelY, panelW, panelH, mode, 0.0f, System.nanoTime());
+    }
+
+    private void drawHudToolWheelPreview(DrawContext context, ContainerToolMode mode, int panelX, int panelW,
+                                         int iconX, int textX, int contentTop, int contentBottom, float iconScale,
+                                         float scale, int alpha, int textMaxUnscaled, String actionText) {
+        int clipTop = contentTop - Math.round(5.0f * scale);
+        int clipBottom = contentBottom + Math.round(2.0f * scale);
+        if (clipBottom <= clipTop) {
+            return;
         }
-        if (maxLines >= 3) {
-            drawScaledString(context, fitToWidth(secondaryText, textMaxUnscaled), textX, labelY + lineGap * 2, scale, withAlpha(MUTED, (int)(alpha * 0.78D)));
+
+        int centerY = (clipTop + clipBottom) / 2;
+        int rowGap = Math.max(17, Math.round(19.0f * scale));
+        ContainerToolMode previous = (ContainerToolMode) mode.cycle(false);
+        ContainerToolMode next = (ContainerToolMode) mode.cycle(true);
+        context.enableScissor(panelX + Math.round(7.0f * scale), clipTop, panelX + panelW - Math.round(7.0f * scale), clipBottom);
+        drawHudWheelPreviewRow(context, previous, iconX, textX, centerY - rowGap, centerY, rowGap, iconScale, scale, alpha, textMaxUnscaled, null, false);
+        drawHudWheelPreviewRow(context, mode, iconX, textX, centerY, centerY, rowGap, iconScale, scale, alpha, textMaxUnscaled, actionText, true);
+        drawHudWheelPreviewRow(context, next, iconX, textX, centerY + rowGap, centerY, rowGap, iconScale, scale, alpha, textMaxUnscaled, null, false);
+        context.disableScissor();
+    }
+
+    private void drawHudWheelPreviewRow(DrawContext context, ContainerToolMode mode, int iconX, int textX,
+                                        int rowY, int centerY, int rowGap, float iconScale, float scale, int alpha,
+                                        int textMaxUnscaled, String actionText, boolean current) {
+        float distance = Math.abs(rowY - centerY) / (float)Math.max(1, rowGap);
+        float focus = 1.0f - clampFloat(distance, 0.0f, 1.0f);
+        int rowAlpha = Math.round(alpha * (0.34f + focus * 0.66f));
+        float textScale = scale * (0.88f + focus * 0.12f);
+        float rowIconScale = iconScale * (0.62f + focus * 0.34f);
+        drawMiniHudToolIcon(context, iconX, rowY, rowAlpha, rowIconScale, mode);
+        drawScaledString(context, fitToWidth(mode.getDisplayName(), textMaxUnscaled),
+                textX, rowY - Math.round(this.textRenderer.fontHeight * textScale * 0.5f),
+                textScale, withAlpha(current ? TEXT : MUTED, rowAlpha));
+        if (current && actionText != null) {
+            drawScaledString(context, fitToWidth(actionText, textMaxUnscaled),
+                    textX, rowY + Math.round(8.5f * scale), Math.max(0.72f, scale * 0.82f),
+                    withAlpha(0xFF55FF68, rowAlpha));
         }
     }
 
@@ -1054,9 +1070,15 @@ public class GuiRenderEditor extends GuiBase {
     }
 
     private void drawMiniHudToolIcon(DrawContext context, int cx, int cy, int alpha, float scale, ContainerToolMode mode) {
+        if (mode == ContainerToolMode.COLLECT_MATERIALS) {
+            drawMiniCollectMaterialsIcon(context, cx, cy, alpha, scale);
+            return;
+        }
+
         ArrowDirection direction = switch (mode) {
             case CLEAR -> ArrowDirection.UP;
             case COPY -> ArrowDirection.RIGHT;
+            case COLLECT_MATERIALS -> ArrowDirection.DOWN;
             case PACK, FILL_FULL -> ArrowDirection.DOWN;
         };
 
@@ -1076,6 +1098,30 @@ public class GuiRenderEditor extends GuiBase {
         }
 
         drawMiniHudArrow(context, cx, cy, alpha, scale, direction);
+    }
+
+    private void drawMiniCollectMaterialsIcon(DrawContext context, int cx, int cy, int alpha, float scale) {
+        int trayW = Math.max(18, Math.round(24.0f * scale));
+        int trayH = Math.max(7, Math.round(8.0f * scale));
+        int trayX = cx - trayW / 2;
+        int trayY = cy + Math.round(7.0f * scale);
+        int edge = withAlpha(PRIMARY, Math.round(alpha * 0.82f));
+        context.fill(trayX + 1, trayY, trayX + trayW - 1, trayY + trayH, withAlpha(0xFF122C32, Math.round(alpha * 0.72f)));
+        context.fill(trayX, trayY + 1, trayX + 2, trayY + trayH, edge);
+        context.fill(trayX + trayW - 2, trayY + 1, trayX + trayW, trayY + trayH, edge);
+        context.fill(trayX + 2, trayY + trayH - 2, trayX + trayW - 2, trayY + trayH, edge);
+        for (int i = 0; i < 3; i++) {
+            int dotX = cx + Math.round((-8.0f + i * 8.0f) * scale);
+            int dotY = cy - Math.round((8.0f - i * 2.0f) * scale);
+            int dotColor = switch (i) {
+                case 0 -> withAlpha(0xFF55FF68, Math.round(alpha * 0.78f));
+                case 1 -> withAlpha(PRIMARY, Math.round(alpha * 0.82f));
+                default -> withAlpha(0xFFFFD45A, Math.round(alpha * 0.74f));
+            };
+            int size = Math.max(2, Math.round(2.4f * scale));
+            context.fill(dotX - size / 2, dotY - size / 2, dotX + size, dotY + size, dotColor);
+        }
+        drawMiniHudArrow(context, cx, cy - Math.round(7.0f * scale), Math.round(alpha * 0.72f), scale * 0.42f, ArrowDirection.DOWN);
     }
 
     private void drawMiniHudArrow(DrawContext context, int cx, int cy, int alpha, float scale, ArrowDirection direction) {

@@ -176,6 +176,26 @@ public class FillMaterialCalculator {
         return stack != null && !stack.isEmpty() && replacedMaterialKeys.contains(new ItemStackKey(stack));
     }
 
+    public static List<MaterialListEntry> getCurrentMissingMaterialsForCollection() {
+        MaterialListBase materialList = DataManager.getMaterialList();
+        if (materialList == null) return Collections.emptyList();
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player == null) return Collections.emptyList();
+
+        try {
+            fi.dy.masa.litematica.materials.MaterialListUtils.updateAvailableCounts(materialList.getMaterialsAll(), client.player);
+            return new ArrayList<>(materialList.getMaterialsMissingOnly(true));
+        } catch (Exception ignored) {
+            return Collections.emptyList();
+        }
+    }
+
+    public static int getCurrentMaterialListMultiplier() {
+        MaterialListBase materialList = DataManager.getMaterialList();
+        return materialList != null ? Math.max(1, materialList.getMultiplier()) : 1;
+    }
+
     public static void requestMaterialReplacementRefresh() {
         PLACEMENT_NBT_CACHE.clear();
         materialReplacementVersion++;
