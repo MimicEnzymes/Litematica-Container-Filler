@@ -36,8 +36,10 @@ public class GuiItemReplacementPicker extends GuiBase {
     private static final int MAX_GRID_COLUMNS = 11;
     private static final int MAX_GRID_ROWS = 7;
     private static final int TITLE_HEIGHT = 26;
-    private static final int SEARCH_Y = 36;
-    private static final int GRID_TOP_OFFSET = 72;
+    private static final int SEARCH_Y = 34;
+    private static final int GRID_TOP_OFFSET = 62;
+    private static final int GRID_SIDE_RESERVE = 36;
+    private static final int GRID_BOTTOM_RESERVE = 68;
 
     private final Screen parent;
     private final ItemStack source;
@@ -58,6 +60,9 @@ public class GuiItemReplacementPicker extends GuiBase {
     private int gridColumns = MAX_GRID_COLUMNS;
     private int gridRows = MAX_GRID_ROWS;
     private int rowIndex;
+    private double smoothRowIndex = 0.0D;
+    private long lastAnimationNanos = 0L;
+    private boolean smoothScrollInitialized = false;
     private Item selectedItem;
     private ButtonGeneric applyButton;
     private ButtonGeneric ignoreButton;
@@ -263,6 +268,7 @@ public class GuiItemReplacementPicker extends GuiBase {
     @Override
     public void drawContents(DrawContext drawContext, int mouseX, int mouseY, float partialTicks) {
         this.updateDrag(mouseX, mouseY);
+        this.updateScrollAnimation();
         this.drawParent(drawContext, mouseX, mouseY, partialTicks);
         RenderUtils.drawRect(drawContext, 0, 0, this.getScreenWidth(), this.getScreenHeight(), 0x66000000);
 
@@ -323,15 +329,18 @@ public class GuiItemReplacementPicker extends GuiBase {
     }
 
     private void drawItems(DrawContext drawContext, int mouseX, int mouseY) {
-        int firstIndex = this.rowIndex * this.gridColumns;
-        int endIndex = Math.min(firstIndex + this.gridRows * this.gridColumns, this.filteredItems.size());
+        int firstRow = Math.max(0, (int)Math.floor(this.smoothRowIndex));
+        double rowFraction = MathHelper.clamp(this.smoothRowIndex - firstRow, 0.0D, 0.999D);
+        int firstIndex = firstRow * this.gridColumns;
+        int endIndex = Math.min(firstIndex + (this.gridRows + 1) * this.gridColumns, this.filteredItems.size());
+        int scrollOffset = (int)Math.round(rowFraction * CELL_SIZE);
         int hoveredIndex = this.getHoveredIndex(mouseX, mouseY);
 
         for (int index = firstIndex; index < endIndex; index++) {
             Item item = this.filteredItems.get(index);
             int local = index - firstIndex;
             int x = this.gridX + (local % this.gridColumns) * CELL_SIZE;
-            int y = this.gridY + (local / this.gridColumns) * CELL_SIZE;
+            int y = this.gridY + (local / this.gridColumns) * CELL_SIZE - scrollOffset;
             boolean hovered = index == hoveredIndex;
             boolean selected = item == this.selectedItem;
 
@@ -352,7 +361,7 @@ public class GuiItemReplacementPicker extends GuiBase {
         int barHeight = this.gridRows * CELL_SIZE;
         RenderUtils.drawRect(drawContext, barX, barY, 5, barHeight, 0x88485058);
 
-        int thumbY = this.getScrollbarThumbY();
+        int thumbY = this.getScrollbarThumbY(this.smoothRowIndex);
         int thumbHeight = this.getScrollbarThumbHeight();
         RenderUtils.drawRect(drawContext, barX, thumbY, 5, thumbHeight, 0xFFE4E9F1);
     }
@@ -417,6 +426,7 @@ public class GuiItemReplacementPicker extends GuiBase {
         if (this.selectedItem != null) {
             this.moveRowTo(this.filteredItems.indexOf(this.selectedItem));
         }
+        this.snapScrollAnimation();
     }
 
     private void sortItems(String needle) {
@@ -510,13 +520,17 @@ public class GuiItemReplacementPicker extends GuiBase {
     }
 
     private int getScrollbarThumbY() {
+        return this.getScrollbarThumbY(this.rowIndex);
+    }
+
+    private int getScrollbarThumbY(double rowIndexValue) {
         int barHeight = this.gridRows * CELL_SIZE;
         int thumbHeight = this.getScrollbarThumbHeight();
         int totalRows = this.getTotalRows();
         if (totalRows <= this.gridRows) return this.gridY;
 
         int maxOffset = barHeight - thumbHeight;
-        return this.gridY + MathHelper.clamp(this.rowIndex * maxOffset / (totalRows - this.gridRows), 0, maxOffset);
+        return this.gridY + MathHelper.clamp((int)Math.round(rowIndexValue * maxOffset / (totalRows - this.gridRows)), 0, maxOffset);
     }
 
     private void moveRowTo(int index) {
@@ -545,6 +559,7 @@ public class GuiItemReplacementPicker extends GuiBase {
         this.gridX = this.panelX + Math.max(14, (this.panelWidth - gridWidth - 13) / 2);
         this.gridY = this.panelY + GRID_TOP_OFFSET;
         this.rowIndex = MathHelper.clamp(this.rowIndex, 0, this.getMaxRowIndex());
+        this.smoothRowIndex = MathHelper.clamp(this.smoothRowIndex, 0.0D, this.getMaxRowIndex());
     }
 
     private void repositionControls() {
@@ -610,9 +625,33 @@ public class GuiItemReplacementPicker extends GuiBase {
     private void updateDimensions() {
         this.panelWidth = MathHelper.clamp(PREFERRED_PANEL_WIDTH, MIN_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, this.getScreenWidth() - 8));
         this.panelHeight = MathHelper.clamp(PREFERRED_PANEL_HEIGHT, MIN_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, this.getScreenHeight() - 8));
-        this.gridColumns = MathHelper.clamp((this.panelWidth - 44) / CELL_SIZE, 4, MAX_GRID_COLUMNS);
-        int availableGridHeight = Math.max(CELL_SIZE, this.panelHeight - GRID_TOP_OFFSET - 76);
+        this.gridColumns = MathHelper.clamp((this.panelWidth - GRID_SIDE_RESERVE) / CELL_SIZE, 4, MAX_GRID_COLUMNS);
+        int availableGridHeight = Math.max(CELL_SIZE, this.panelHeight - GRID_TOP_OFFSET - GRID_BOTTOM_RESERVE);
         this.gridRows = MathHelper.clamp(availableGridHeight / CELL_SIZE, 1, MAX_GRID_ROWS);
+    }
+
+    private void updateScrollAnimation() {
+        long now = System.nanoTime();
+        if (!this.smoothScrollInitialized || this.lastAnimationNanos == 0L) {
+            this.snapScrollAnimation();
+            this.lastAnimationNanos = now;
+            return;
+        }
+
+        double dt = Math.min(0.05D, (now - this.lastAnimationNanos) / 1_000_000_000.0D);
+        this.lastAnimationNanos = now;
+        double speed = this.draggingScrollbar ? 28.0D : 16.0D;
+        double blend = 1.0D - Math.exp(-dt * speed);
+        this.smoothRowIndex += (this.rowIndex - this.smoothRowIndex) * blend;
+        if (Math.abs(this.smoothRowIndex - this.rowIndex) < 0.002D) {
+            this.smoothRowIndex = this.rowIndex;
+        }
+    }
+
+    private void snapScrollAnimation() {
+        this.smoothRowIndex = this.rowIndex;
+        this.smoothScrollInitialized = true;
+        this.lastAnimationNanos = System.nanoTime();
     }
 
     private String fitToWidth(String text, int maxWidth) {
