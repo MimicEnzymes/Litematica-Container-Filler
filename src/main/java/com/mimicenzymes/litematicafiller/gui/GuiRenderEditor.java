@@ -406,6 +406,7 @@ public class GuiRenderEditor extends GuiBase {
         drawSectionHeader(GuiContext, tr("litematica_container_filler.gui.label.render_editor_settings"), layout.controlsPanel.x + 16, layout.controlsPanel.y + 12);
         drawTabDescription(GuiContext, layout.controlsPanel.x + 16, layout.controlsPanel.y + 31, layout.controlsPanel.width - 32);
         drawPreview(GuiContext, layout.preview.x, layout.preview.y, layout.preview.width, layout.preview.height, partialTicks);
+        drawRenderWarning(GuiContext, layout.previewPanel.x + 14, layout.previewPanel.y + layout.previewPanel.height - 50, layout.previewPanel.width - 28);
         super.drawContents(GuiContext, mouseX, mouseY, partialTicks);
         drawTabButtonOverlay(GuiContext, mouseX, mouseY);
         drawBackButtonOverlay(GuiContext, mouseX, mouseY);
@@ -417,6 +418,20 @@ public class GuiRenderEditor extends GuiBase {
         for (String line : wrap(tr(key), Math.max(18, width / 6))) {
             drawString(context, line, x, y, MUTED);
             y += 11;
+        }
+    }
+
+    private void drawRenderWarning(GuiContext context, int x, int y, int width) {
+        if (width < 160 || y < 88) return;
+
+        drawRoundedOutline(context, x, y, width, 38, 6, 0x88FDD663, 0xDD1D242E);
+        drawString(context, tr("litematica_container_filler.gui.label.render_editor.warning.title"), x + 10, y + 7, WARNING);
+        int textY = y + 19;
+        int maxChars = Math.max(18, (width - 20) / 6);
+        for (String line : wrap(tr("litematica_container_filler.gui.label.render_editor.warning.body"), maxChars)) {
+            if (textY > y + 30) break;
+            drawString(context, line, x + 10, textY, MUTED);
+            textY += 10;
         }
     }
 
