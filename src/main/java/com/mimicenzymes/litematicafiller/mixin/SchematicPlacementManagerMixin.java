@@ -1,5 +1,6 @@
 package com.mimicenzymes.litematicafiller.mixin;
 
+import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.core.MaterialReplacer;
 import com.mimicenzymes.litematicafiller.core.SchematicMaterialReplacementContext;
 import com.mimicenzymes.litematicafiller.materials.FillMaterialCalculator;
@@ -24,6 +25,7 @@ public abstract class SchematicPlacementManagerMixin {
             require = 0)
     private void lcf$clearRemovedPlacementRules(SchematicPlacement placement, boolean removeFromJson,
                                                 CallbackInfoReturnable<Boolean> cir) {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         if (cir.getReturnValueZ()) {
             lcf$clearRulesForPlacement(placement);
         }
@@ -31,6 +33,7 @@ public abstract class SchematicPlacementManagerMixin {
 
     @Inject(method = "removeAllPlacementsOfSchematic", at = @At("HEAD"), require = 0)
     private void lcf$clearRemovedSchematicRules(LitematicaSchematic schematic, CallbackInfo ci) {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         for (SchematicPlacement placement : this.getAllPlacementsOfSchematic(schematic)) {
             lcf$clearRulesForPlacement(placement);
         }

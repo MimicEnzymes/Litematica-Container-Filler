@@ -602,7 +602,15 @@ public class HighlightScanner {
         isIndexing = true;
         CompletableFuture.runAsync(() -> {
             try {
+                if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
+                    return;
+                }
+
                 Set<BlockPos> found = LitematicaPlacementContainerData.rebuildIndex();
+                if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
+                    return;
+                }
+
                 if (!found.equals(SCHEMATIC_CONTAINERS)) {
                     SCHEMATIC_REQ_CACHE.clear();
                     SCHEMATIC_IGNORED_SLOT_CACHE.clear();

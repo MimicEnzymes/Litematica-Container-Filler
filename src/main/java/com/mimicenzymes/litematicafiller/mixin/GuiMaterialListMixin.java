@@ -42,6 +42,9 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
 
     @Override
     public void lcf$refreshMaterialReplacementList() {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
+        if (FillMaterialCalculator.listMode == 0) return;
+
         mimic_needsCalculation = true;
         mimic_forceReplacementRefresh = true;
         mimic_injectSilently();
@@ -59,34 +62,7 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
 
         if (FillMaterialCalculator.listMode != 0) {
             mimic_injectSilently();
-        }
-
-        if (!mimic_isMonitorRunning) {
-            mimic_isMonitorRunning = true;
-            Thread monitor = new Thread(() -> {
-                int tickCount = 0;
-                while (MinecraftClient.getInstance().currentScreen == this) {
-                    try {
-                        Thread.sleep(50);
-                        tickCount++;
-
-                        if (FillMaterialCalculator.listMode != 0) {
-                            final boolean forceRefresh = (tickCount % 10 == 0) && FillMaterialCalculator.hasMissingData;
-
-                            MinecraftClient.getInstance().execute(() -> {
-                                if (MinecraftClient.getInstance().currentScreen == this) {
-                                    if (forceRefresh) mimic_needsCalculation = true;
-                                    mimic_injectSilently();
-                                }
-                            });
-                        }
-                    } catch (Exception e) {}
-                }
-                mimic_isMonitorRunning = false;
-            });
-            monitor.setDaemon(true);
-            monitor.setName("LitematicaFiller-InjectionWatchdog");
-            monitor.start();
+            mimic_startMonitorIfNeeded();
         }
     }
 
@@ -148,7 +124,42 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
             mimic_lastInjectedRef = null;
 
             mimic_injectViaApi();
+            mimic_startMonitorIfNeeded();
         });
+    }
+
+    @Unique
+    private void mimic_startMonitorIfNeeded() {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
+        if (mimic_isMonitorRunning || FillMaterialCalculator.listMode == 0) return;
+
+        mimic_isMonitorRunning = true;
+        Thread monitor = new Thread(() -> {
+            int tickCount = 0;
+            while (Configs.ENABLE_MOD.getBooleanValue() &&
+                    MinecraftClient.getInstance().currentScreen == this &&
+                    FillMaterialCalculator.listMode != 0) {
+                try {
+                    Thread.sleep(50);
+                    tickCount++;
+
+                    final boolean forceRefresh = (tickCount % 10 == 0) && FillMaterialCalculator.hasMissingData;
+                    MinecraftClient.getInstance().execute(() -> {
+                        if (Configs.ENABLE_MOD.getBooleanValue() &&
+                                MinecraftClient.getInstance().currentScreen == this &&
+                                FillMaterialCalculator.listMode != 0) {
+                            if (forceRefresh) mimic_needsCalculation = true;
+                            mimic_injectSilently();
+                        }
+                    });
+                } catch (Exception ignored) {
+                }
+            }
+            mimic_isMonitorRunning = false;
+        });
+        monitor.setDaemon(true);
+        monitor.setName("LitematicaFiller-InjectionWatchdog");
+        monitor.start();
     }
 
     @Unique
@@ -158,6 +169,7 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
 
     @Unique
     private void mimic_injectViaApi() {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         try {
             if (!(materialList instanceof IMaterialList iMatList)) return;
             mimic_seenReplacementVersion = FillMaterialCalculator.getMaterialReplacementVersion();
@@ -167,8 +179,10 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
             }
             if (mimic_cachedVanillaList == null) return;
 
-            FillMaterialCalculator.calculate(this, true, mimic_cachedVanillaList);
-            mimic_needsCalculation = false;
+            if (FillMaterialCalculator.listMode != 0) {
+                FillMaterialCalculator.calculate(this, true, mimic_cachedVanillaList);
+                mimic_needsCalculation = false;
+            }
 
             List<MaterialListEntry> targetList = mimic_buildTargetList();
 
@@ -190,6 +204,9 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
     @Unique
     @SuppressWarnings("unchecked")
     private void mimic_injectSilently() {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
+        if (FillMaterialCalculator.listMode == 0) return;
+
         try {
             ImmutableList<MaterialListEntry> currentRef = mimic_readMaterialListAll();
             if (currentRef == null) return;

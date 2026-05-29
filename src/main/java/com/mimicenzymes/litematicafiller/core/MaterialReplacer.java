@@ -135,9 +135,9 @@ public class MaterialReplacer {
     public static ItemStack replaceSingleStack(ItemStack original, String schematicKey) {
         if (original == null || original.isEmpty()) return original;
         checkReload();
+        if (!hasReplacementRules(schematicKey)) return original;
 
-        Replacement replacement = findReplacement(original, schematicKey);
-        return replacement != null ? replacement.target.createStack(original.getCount()) : original;
+        return replaceSingleStackLoaded(original, schematicKey);
     }
 
     private static Replacement findReplacement(ItemStack original) {
@@ -174,6 +174,7 @@ public class MaterialReplacer {
     public static boolean isIgnored(ItemStack original, String schematicKey) {
         if (original == null || original.isEmpty()) return false;
         checkReload();
+        if (!hasReplacementRules(schematicKey)) return false;
 
         Replacement replacement = findReplacement(original, schematicKey);
         return replacement != null && replacement.target.item == Items.AIR;
@@ -186,7 +187,7 @@ public class MaterialReplacer {
     public static void replaceInMap(Map<Integer, ItemStack> inventory, String schematicKey) {
         if (inventory == null || inventory.isEmpty()) return;
         checkReload();
-        if (REPLACEMENTS.isEmpty() && (schematicKey == null || !SCHEMATIC_REPLACEMENTS.containsKey(schematicKey))) return;
+        if (!hasReplacementRules(schematicKey)) return;
         Iterator<Map.Entry<Integer, ItemStack>> iterator = inventory.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<Integer, ItemStack> entry = iterator.next();
@@ -203,11 +204,15 @@ public class MaterialReplacer {
     }
 
     public static void replaceInNbtList(net.minecraft.nbt.NbtList itemsList, net.minecraft.registry.RegistryWrapper.WrapperLookup registries) {
+        String schematicKey = SchematicMaterialReplacementContext.getActiveKey();
+        checkReload();
+        if (!hasReplacementRules(schematicKey)) return;
+
         for (int i = 0; i < itemsList.size(); i++) {
             if (itemsList.get(i) instanceof net.minecraft.nbt.NbtCompound itemTag) {
                 ItemStack original = ItemStack.OPTIONAL_CODEC.parse(registries.getOps(net.minecraft.nbt.NbtOps.INSTANCE), itemTag).resultOrPartial().orElse(ItemStack.EMPTY);
                 if (!original.isEmpty()) {
-                    ItemStack replaced = replaceSingleStack(original);
+                    ItemStack replaced = replaceSingleStackLoaded(original, schematicKey);
                     if (replaced != original && !ItemStack.areEqual(replaced, original)) {
                         if (replaced == null || replaced.isEmpty()) {
                             itemsList.remove(i);
@@ -227,6 +232,19 @@ public class MaterialReplacer {
         }
     }
 
+    private static boolean hasReplacementRules(String schematicKey) {
+        if (!REPLACEMENTS.isEmpty()) return true;
+        if (schematicKey == null) return false;
+
+        List<Replacement> local = SCHEMATIC_REPLACEMENTS.get(schematicKey);
+        return local != null && !local.isEmpty();
+    }
+
+    private static ItemStack replaceSingleStackLoaded(ItemStack original, String schematicKey) {
+        Replacement replacement = findReplacement(original, schematicKey);
+        return replacement != null ? replacement.target.createStack(original.getCount()) : original;
+    }
+
     public static Optional<ItemStack> getReplacementTarget(ItemStack source) {
         return getReplacementTarget(source, SchematicMaterialReplacementContext.getActiveKey());
     }
@@ -234,6 +252,7 @@ public class MaterialReplacer {
     public static Optional<ItemStack> getReplacementTarget(ItemStack source, String schematicKey) {
         if (source == null || source.isEmpty()) return Optional.empty();
         checkReload();
+        if (!hasReplacementRules(schematicKey)) return Optional.empty();
 
         Replacement replacement = findReplacement(source, schematicKey);
         if (replacement != null) return Optional.of(replacement.target.createStack(1));

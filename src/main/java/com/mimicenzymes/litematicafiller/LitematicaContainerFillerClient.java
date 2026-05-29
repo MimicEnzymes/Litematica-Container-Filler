@@ -47,6 +47,7 @@ public class LitematicaContainerFillerClient implements ClientModInitializer {
             }
 
             if (!com.mimicenzymes.litematicafiller.config.Configs.ENABLE_MOD.getBooleanValue()) {
+                stopActiveWorkForDisabledMod(client);
                 ClickPacketRateLimiter.reset();
                 updateFillProtectionSnapshot(client);
                 return;
@@ -61,9 +62,11 @@ public class LitematicaContainerFillerClient implements ClientModInitializer {
                 boolean workEnabled = Configs.WORKING_STATE.getBooleanValue();
                 boolean fillerActive = filler.isWorking() || workEnabled;
                 boolean toolActive = tool.isWorking() || Configs.TOOL_ENABLED.getBooleanValue();
-                boolean needsContainerData = highlightEnabled || fillerActive || toolActive;
+                boolean needsContainerData = RealContainerCache.hasActiveConsumers();
 
-                ClickPacketRateLimiter.tick(client);
+                if (Configs.RATE_LIMIT_CLICK_PACKETS.getBooleanValue() || ClickPacketRateLimiter.hasPendingPackets()) {
+                    ClickPacketRateLimiter.tick(client);
+                }
                 if (fillerActive || !filler.isIdle()) {
                     filler.tick(client);
                 } else {
@@ -100,6 +103,20 @@ public class LitematicaContainerFillerClient implements ClientModInitializer {
             }
         });
         InitializationHandler.getInstance().registerInitializationHandler(new InitHandler());
+    }
+
+    private static void stopActiveWorkForDisabledMod(MinecraftClient client) {
+        AutoFillerStateMachine filler = AutoFillerStateMachine.getInstance();
+        if (Configs.WORKING_STATE.getBooleanValue() || !filler.isIdle()) {
+            Configs.WORKING_STATE.setBooleanValue(false);
+            filler.emergencyStop(client);
+            workerTickTimer = 0;
+        }
+
+        ContainerToolStateMachine tool = ContainerToolStateMachine.getInstance();
+        if (tool.isWorking()) {
+            tool.stopForDisabledMod(client);
+        }
     }
 
     private static boolean isPlayerMovingFast(net.minecraft.client.MinecraftClient client) {

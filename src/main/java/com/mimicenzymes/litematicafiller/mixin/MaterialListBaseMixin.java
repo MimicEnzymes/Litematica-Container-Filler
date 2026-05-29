@@ -1,5 +1,6 @@
 package com.mimicenzymes.litematicafiller.mixin;
 
+import com.mimicenzymes.litematicafiller.config.Configs;
 import fi.dy.masa.litematica.materials.MaterialListBase;
 import fi.dy.masa.litematica.materials.MaterialListEntry;
 import net.minecraft.item.ItemStack;
@@ -26,6 +27,7 @@ public abstract class MaterialListBaseMixin {
 
     @Inject(method = "ignoreEntry", at = @At("HEAD"), cancellable = true)
     private void mimic_ignoreEntryPrecisely(MaterialListEntry entry, CallbackInfo ci) {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         if (entry != null) {
             this.mimic_preciselyIgnored.add(new MimicPreciseIgnoredKey(entry.getStack()));
             this.mimic_applyPreciseIgnoreFilter();
@@ -36,16 +38,19 @@ public abstract class MaterialListBaseMixin {
 
     @Inject(method = "clearIgnored", at = @At("HEAD"))
     private void mimic_clearPreciseIgnored(CallbackInfo ci) {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         this.mimic_preciselyIgnored.clear();
     }
 
     @Inject(method = "refreshPreFilteredList", at = @At("TAIL"))
     private void mimic_refreshPreciseIgnored(CallbackInfo ci) {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         this.mimic_applyPreciseIgnoreFilter();
     }
 
     @Unique
     private void mimic_applyPreciseIgnoreFilter() {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         if (this.mimic_preciselyIgnored.isEmpty()) {
             return;
         }
