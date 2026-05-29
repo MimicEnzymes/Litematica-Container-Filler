@@ -93,21 +93,21 @@ public class GuiContainerFilter extends GuiBase {
         }
 
         FooterLayout footer = getFooterLayout();
-        ButtonGeneric defaults = new ButtonGeneric(footer.defaultsX, footer.y, footer.defaultsW, 20, StringUtils.translate("litematica_container_filler.gui.button.defaults"));
+        ButtonGeneric defaults = new ButtonGeneric(footer.defaultsX, footer.y, footer.defaultsW, 20, "");
         this.addButton(defaults, (button, mouseButton) -> {
             Configs.CONTAINER_FILTER_LIST.setStrings(new ArrayList<>(Configs.CONTAINER_FILTER_LIST.getDefaultStrings()));
             Configs.saveToFile();
             this.initGui();
         });
 
-        ButtonGeneric clear = new ButtonGeneric(footer.clearX, footer.y, footer.clearW, 20, StringUtils.translate("litematica_container_filler.gui.button.clear"));
+        ButtonGeneric clear = new ButtonGeneric(footer.clearX, footer.y, footer.clearW, 20, "");
         this.addButton(clear, (button, mouseButton) -> {
             Configs.CONTAINER_FILTER_LIST.setStrings(List.of());
             Configs.saveToFile();
             this.initGui();
         });
 
-        ButtonGeneric back = new ButtonGeneric(footer.backX, footer.y, footer.backW, 20, StringUtils.translate("litematica_container_filler.gui.button.back"));
+        ButtonGeneric back = new ButtonGeneric(footer.backX, footer.y, footer.backW, 20, "");
         this.addButton(back, (button, mouseButton) -> GuiBase.openGui(parent));
     }
 
