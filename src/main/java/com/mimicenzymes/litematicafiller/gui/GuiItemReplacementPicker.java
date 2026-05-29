@@ -29,12 +29,14 @@ import java.util.Locale;
 import java.util.Optional;
 
 public class GuiItemReplacementPicker extends GuiBase {
-    private static final int PANEL_WIDTH = 304;
-    private static final int PANEL_HEIGHT = 310;
+    private static final int PREFERRED_PANEL_WIDTH = 304;
+    private static final int PREFERRED_PANEL_HEIGHT = 310;
+    private static final int MIN_PANEL_WIDTH = 212;
+    private static final int MIN_PANEL_HEIGHT = 188;
     private static final int CELL_SIZE = 24;
     private static final int ICON_SIZE = 18;
-    private static final int GRID_COLUMNS = 11;
-    private static final int GRID_ROWS = 7;
+    private static final int MAX_GRID_COLUMNS = 11;
+    private static final int MAX_GRID_ROWS = 7;
     private static final int TITLE_HEIGHT = 26;
     private static final int SEARCH_Y = 36;
     private static final int GRID_TOP_OFFSET = 72;
@@ -51,8 +53,12 @@ public class GuiItemReplacementPicker extends GuiBase {
     private String targetName = "";
     private int panelX;
     private int panelY;
+    private int panelWidth = PREFERRED_PANEL_WIDTH;
+    private int panelHeight = PREFERRED_PANEL_HEIGHT;
     private int gridX;
     private int gridY;
+    private int gridColumns = MAX_GRID_COLUMNS;
+    private int gridRows = MAX_GRID_ROWS;
     private int rowIndex;
     private Item selectedItem;
     private ButtonGeneric applyButton;
@@ -107,6 +113,7 @@ public class GuiItemReplacementPicker extends GuiBase {
     @Override
     public void initGui() {
         super.initGui();
+        this.updateDimensions();
 
         if (this.panelX == 0 && this.panelY == 0) {
             if (this.parent instanceof GuiGlobalMaterialReplacementPicker picker) {
@@ -114,8 +121,8 @@ public class GuiItemReplacementPicker extends GuiBase {
                 this.panelY = picker.getPanelY();
                 this.clampPanel();
             } else {
-                this.panelX = Math.max(6, (this.getScreenWidth() - PANEL_WIDTH) >> 1);
-                this.panelY = Math.max(6, (this.getScreenHeight() - PANEL_HEIGHT) >> 1);
+                this.panelX = Math.max(4, (this.getScreenWidth() - this.panelWidth) >> 1);
+                this.panelY = Math.max(4, (this.getScreenHeight() - this.panelHeight) >> 1);
             }
         } else {
             this.clampPanel();
@@ -123,7 +130,7 @@ public class GuiItemReplacementPicker extends GuiBase {
 
         this.reflow();
 
-        this.searchField = new GuiTextFieldGeneric(this.panelX + 14, this.panelY + SEARCH_Y, PANEL_WIDTH - 28, 20, this.textRenderer);
+        this.searchField = new GuiTextFieldGeneric(this.panelX + 14, this.panelY + SEARCH_Y, this.panelWidth - 28, 20, this.textRenderer);
         this.searchField.setTextWrapper(this.searchText);
         this.searchField.setMaxLengthWrapper(80);
         this.addTextField(this.searchField, field -> {
@@ -133,15 +140,16 @@ public class GuiItemReplacementPicker extends GuiBase {
             return true;
         });
 
-        int bottomY = this.panelY + PANEL_HEIGHT - 34;
+        int bottomY = this.panelY + this.panelHeight - 34;
         String applyText = StringUtils.translate("litematica_container_filler.gui.button.apply");
         String cancelText = StringUtils.translate("litematica_container_filler.gui.button.cancel");
-        int applyWidth = this.getButtonWidth(applyText, 42);
-        int cancelWidth = this.getButtonWidth(cancelText, 40);
-        int cancelX = this.panelX + PANEL_WIDTH - 14 - cancelWidth;
+        int availableW = this.panelWidth - 28;
+        int applyWidth = this.getButtonWidth(applyText, 42, Math.max(42, availableW / 4));
+        int cancelWidth = this.getButtonWidth(cancelText, 40, Math.max(40, availableW / 4));
+        int cancelX = this.panelX + this.panelWidth - 14 - cancelWidth;
         int applyX = cancelX - 6 - applyWidth;
         int nameFieldX = this.panelX + 58;
-        this.nameField = new GuiTextFieldGeneric(nameFieldX, bottomY, Math.max(64, applyX - nameFieldX - 8), 20, this.textRenderer);
+        this.nameField = new GuiTextFieldGeneric(nameFieldX, bottomY, Math.max(36, applyX - nameFieldX - 8), 20, this.textRenderer);
         this.nameField.setTextWrapper(this.targetName);
         this.nameField.setMaxLengthWrapper(64);
         this.addTextField(this.nameField, field -> {
@@ -152,16 +160,17 @@ public class GuiItemReplacementPicker extends GuiBase {
         this.applyButton = new ButtonGeneric(applyX, bottomY - 1, applyWidth, 22, applyText);
         this.addButton(this.applyButton, (button, mouseButton) -> this.applySelected());
 
-        int buttonY = this.panelY + PANEL_HEIGHT - 66;
+        int buttonY = this.panelY + this.panelHeight - 66;
         String scopeText = this.getScopeButtonText();
         String ignoreText = StringUtils.translate("litematica_container_filler.gui.button.material_replace_ignore");
         String resetText = StringUtils.translate("litematica_container_filler.gui.button.material_replace_reset");
-        int scopeWidth = this.getButtonWidth(scopeText, 42);
-        int ignoreWidth = this.getButtonWidth(ignoreText, 48);
-        int resetWidth = this.getButtonWidth(resetText, 48);
+        int rowButtonMax = Math.max(42, (availableW - 12) / 3);
+        int scopeWidth = this.getButtonWidth(scopeText, 42, rowButtonMax);
+        int ignoreWidth = this.getButtonWidth(ignoreText, 48, rowButtonMax);
+        int resetWidth = this.getButtonWidth(resetText, 48, rowButtonMax);
         int scopeX = this.panelX + 14;
         int ignoreX = scopeX + scopeWidth + 6;
-        int resetX = this.panelX + PANEL_WIDTH - 14 - resetWidth;
+        int resetX = this.panelX + this.panelWidth - 14 - resetWidth;
 
         this.scopeButton = new ButtonGeneric(scopeX, buttonY, scopeWidth, 22, scopeText);
         this.scopeButton.setEnabled(this.schematicKey != null && !this.schematicKey.isBlank());
@@ -286,15 +295,16 @@ public class GuiItemReplacementPicker extends GuiBase {
         this.drawParent(drawContext, mouseX, mouseY, partialTicks);
         RenderUtils.drawRect(drawContext, 0, 0, this.getScreenWidth(), this.getScreenHeight(), 0x66000000);
 
-        RenderUtils.drawOutlinedBox(drawContext, this.panelX, this.panelY, PANEL_WIDTH, PANEL_HEIGHT, 0xEF11151B, 0xFF98A7B8);
-        RenderUtils.drawRect(drawContext, this.panelX + 1, this.panelY + 1, PANEL_WIDTH - 2, TITLE_HEIGHT, 0xAA1B2028);
+        RenderUtils.drawOutlinedBox(drawContext, this.panelX, this.panelY, this.panelWidth, this.panelHeight, 0xEF11151B, 0xFF98A7B8);
+        RenderUtils.drawRect(drawContext, this.panelX + 1, this.panelY + 1, this.panelWidth - 2, TITLE_HEIGHT, 0xAA1B2028);
 
         String titleText = StringUtils.translate("litematica_container_filler.gui.title.material_replace", this.source.getName().getString());
-        this.drawString(drawContext, titleText, this.panelX + ((PANEL_WIDTH - this.getStringWidth(titleText)) >> 1), this.panelY + 8, 0xFFFFFFFF);
+        String clippedTitle = this.fitToWidth(titleText, this.panelWidth - 28);
+        this.drawString(drawContext, clippedTitle, this.panelX + ((this.panelWidth - this.getStringWidth(clippedTitle)) >> 1), this.panelY + 8, 0xFFFFFFFF);
         this.drawString(drawContext, StringUtils.translate("litematica_container_filler.gui.label.material_replace_rename"),
-                this.panelX + 14, this.panelY + PANEL_HEIGHT - 29, 0xFFC8D0DA);
+                this.panelX + 14, this.panelY + this.panelHeight - 29, 0xFFC8D0DA);
 
-        RenderUtils.drawRect(drawContext, this.gridX - 2, this.gridY - 2, GRID_COLUMNS * CELL_SIZE + 4, GRID_ROWS * CELL_SIZE + 4, 0x6630353D);
+        RenderUtils.drawRect(drawContext, this.gridX - 2, this.gridY - 2, this.gridColumns * CELL_SIZE + 4, this.gridRows * CELL_SIZE + 4, 0x6630353D);
         this.drawItems(drawContext, mouseX, mouseY);
         this.drawScrollbar(drawContext);
 
@@ -331,15 +341,15 @@ public class GuiItemReplacementPicker extends GuiBase {
     }
 
     private void drawItems(DrawContext drawContext, int mouseX, int mouseY) {
-        int firstIndex = this.rowIndex * GRID_COLUMNS;
-        int endIndex = Math.min(firstIndex + GRID_ROWS * GRID_COLUMNS, this.filteredItems.size());
+        int firstIndex = this.rowIndex * this.gridColumns;
+        int endIndex = Math.min(firstIndex + this.gridRows * this.gridColumns, this.filteredItems.size());
         int hoveredIndex = this.getHoveredIndex(mouseX, mouseY);
 
         for (int index = firstIndex; index < endIndex; index++) {
             Item item = this.filteredItems.get(index);
             int local = index - firstIndex;
-            int x = this.gridX + (local % GRID_COLUMNS) * CELL_SIZE;
-            int y = this.gridY + (local / GRID_COLUMNS) * CELL_SIZE;
+            int x = this.gridX + (local % this.gridColumns) * CELL_SIZE;
+            int y = this.gridY + (local / this.gridColumns) * CELL_SIZE;
             boolean hovered = index == hoveredIndex;
             boolean selected = item == this.selectedItem;
 
@@ -357,7 +367,7 @@ public class GuiItemReplacementPicker extends GuiBase {
     private void drawScrollbar(DrawContext drawContext) {
         int barX = this.getScrollbarX();
         int barY = this.gridY;
-        int barHeight = GRID_ROWS * CELL_SIZE;
+        int barHeight = this.gridRows * CELL_SIZE;
         RenderUtils.drawRect(drawContext, barX, barY, 5, barHeight, 0x88485058);
 
         int thumbY = this.getScrollbarThumbY();
@@ -386,7 +396,11 @@ public class GuiItemReplacementPicker extends GuiBase {
     }
 
     private int getButtonWidth(String text, int minWidth) {
-        return Math.max(minWidth, this.getStringWidth(text) + 12);
+        return this.getButtonWidth(text, minWidth, Integer.MAX_VALUE);
+    }
+
+    private int getButtonWidth(String text, int minWidth, int maxWidth) {
+        return Math.min(Math.max(minWidth, this.getStringWidth(text) + 12), Math.max(minWidth, maxWidth));
     }
 
     private void updateScopeButtonTextAndLayout() {
@@ -394,7 +408,6 @@ public class GuiItemReplacementPicker extends GuiBase {
 
         String text = this.getScopeButtonText();
         this.scopeButton.setDisplayString(text);
-        this.scopeButton.setWidth(this.getButtonWidth(text, 42));
         this.repositionControls();
     }
 
@@ -451,31 +464,31 @@ public class GuiItemReplacementPicker extends GuiBase {
 
         int col = (mouseX - this.gridX) / CELL_SIZE;
         int row = (mouseY - this.gridY) / CELL_SIZE;
-        int index = (this.rowIndex + row) * GRID_COLUMNS + col;
+        int index = (this.rowIndex + row) * this.gridColumns + col;
         return index >= 0 && index < this.filteredItems.size() ? index : -1;
     }
 
     private boolean isMouseOverGrid(int mouseX, int mouseY) {
         return mouseX >= this.gridX
                 && mouseY >= this.gridY
-                && mouseX < this.gridX + GRID_COLUMNS * CELL_SIZE
-                && mouseY < this.gridY + GRID_ROWS * CELL_SIZE;
+                && mouseX < this.gridX + this.gridColumns * CELL_SIZE
+                && mouseY < this.gridY + this.gridRows * CELL_SIZE;
     }
 
     private boolean isMouseOverPanel(int mouseX, int mouseY) {
         return mouseX >= this.panelX && mouseY >= this.panelY
-                && mouseX < this.panelX + PANEL_WIDTH && mouseY < this.panelY + PANEL_HEIGHT;
+                && mouseX < this.panelX + this.panelWidth && mouseY < this.panelY + this.panelHeight;
     }
 
     private boolean isMouseOverTitle(int mouseX, int mouseY) {
         return mouseX >= this.panelX && mouseY >= this.panelY
-                && mouseX < this.panelX + PANEL_WIDTH && mouseY < this.panelY + TITLE_HEIGHT;
+                && mouseX < this.panelX + this.panelWidth && mouseY < this.panelY + TITLE_HEIGHT;
     }
 
     private boolean isMouseOverScrollbar(int mouseX, int mouseY) {
         int barX = this.getScrollbarX();
         return mouseX >= barX - 2 && mouseX < barX + 8
-                && mouseY >= this.gridY && mouseY < this.gridY + GRID_ROWS * CELL_SIZE;
+                && mouseY >= this.gridY && mouseY < this.gridY + this.gridRows * CELL_SIZE;
     }
 
     private boolean isMouseOverScrollbarThumb(int mouseX, int mouseY) {
@@ -492,12 +505,12 @@ public class GuiItemReplacementPicker extends GuiBase {
 
     private void updateScrollFromMouse(int mouseY) {
         int totalRows = this.getTotalRows();
-        if (totalRows <= GRID_ROWS) {
+        if (totalRows <= this.gridRows) {
             this.rowIndex = 0;
             return;
         }
 
-        int barHeight = GRID_ROWS * CELL_SIZE;
+        int barHeight = this.gridRows * CELL_SIZE;
         int thumbHeight = this.getScrollbarThumbHeight();
         int maxOffset = Math.max(1, barHeight - thumbHeight);
         int offset = MathHelper.clamp(mouseY - this.gridY - this.scrollbarDragOffsetY, 0, maxOffset);
@@ -505,48 +518,51 @@ public class GuiItemReplacementPicker extends GuiBase {
     }
 
     private int getScrollbarX() {
-        return this.gridX + GRID_COLUMNS * CELL_SIZE + 8;
+        return this.gridX + this.gridColumns * CELL_SIZE + 8;
     }
 
     private int getScrollbarThumbHeight() {
-        int barHeight = GRID_ROWS * CELL_SIZE;
+        int barHeight = this.gridRows * CELL_SIZE;
         int totalRows = this.getTotalRows();
-        return totalRows > GRID_ROWS ? Math.max(14, barHeight * GRID_ROWS / totalRows) : barHeight;
+        return totalRows > this.gridRows ? Math.max(14, barHeight * this.gridRows / totalRows) : barHeight;
     }
 
     private int getScrollbarThumbY() {
-        int barHeight = GRID_ROWS * CELL_SIZE;
+        int barHeight = this.gridRows * CELL_SIZE;
         int thumbHeight = this.getScrollbarThumbHeight();
         int totalRows = this.getTotalRows();
-        if (totalRows <= GRID_ROWS) return this.gridY;
+        if (totalRows <= this.gridRows) return this.gridY;
 
         int maxOffset = barHeight - thumbHeight;
-        return this.gridY + MathHelper.clamp(this.rowIndex * maxOffset / (totalRows - GRID_ROWS), 0, maxOffset);
+        return this.gridY + MathHelper.clamp(this.rowIndex * maxOffset / (totalRows - this.gridRows), 0, maxOffset);
     }
 
     private void moveRowTo(int index) {
         if (index < 0) return;
 
-        while (index < this.rowIndex * GRID_COLUMNS) {
+        while (index < this.rowIndex * this.gridColumns) {
             this.rowIndex--;
         }
-        while (index >= (this.rowIndex + GRID_ROWS) * GRID_COLUMNS) {
+        while (index >= (this.rowIndex + this.gridRows) * this.gridColumns) {
             this.rowIndex++;
         }
         this.rowIndex = MathHelper.clamp(this.rowIndex, 0, this.getMaxRowIndex());
     }
 
     private int getTotalRows() {
-        return Math.max(1, (this.filteredItems.size() + GRID_COLUMNS - 1) / GRID_COLUMNS);
+        return Math.max(1, (this.filteredItems.size() + this.gridColumns - 1) / this.gridColumns);
     }
 
     private int getMaxRowIndex() {
-        return Math.max(0, this.getTotalRows() - GRID_ROWS);
+        return Math.max(0, this.getTotalRows() - this.gridRows);
     }
 
     private void reflow() {
-        this.gridX = this.panelX + 20;
+        this.updateDimensions();
+        int gridWidth = this.gridColumns * CELL_SIZE;
+        this.gridX = this.panelX + Math.max(14, (this.panelWidth - gridWidth - 13) / 2);
         this.gridY = this.panelY + GRID_TOP_OFFSET;
+        this.rowIndex = MathHelper.clamp(this.rowIndex, 0, this.getMaxRowIndex());
     }
 
     private void repositionControls() {
@@ -557,18 +573,19 @@ public class GuiItemReplacementPicker extends GuiBase {
             this.searchField.setYWrapper(this.panelY + SEARCH_Y);
         }
 
-        if (this.nameField != null) {
-            this.nameField.setXWrapper(this.panelX + 58);
-            this.nameField.setYWrapper(this.panelY + PANEL_HEIGHT - 34);
-        }
-
-        int bottomY = this.panelY + PANEL_HEIGHT - 35;
+        int availableW = this.panelWidth - 28;
         String applyText = StringUtils.translate("litematica_container_filler.gui.button.apply");
         String cancelText = StringUtils.translate("litematica_container_filler.gui.button.cancel");
-        int applyWidth = this.getButtonWidth(applyText, 42);
-        int cancelWidth = this.getButtonWidth(cancelText, 40);
-        int cancelX = this.panelX + PANEL_WIDTH - 14 - cancelWidth;
+        int applyWidth = this.getButtonWidth(applyText, 42, Math.max(42, availableW / 4));
+        int cancelWidth = this.getButtonWidth(cancelText, 40, Math.max(40, availableW / 4));
+        int cancelX = this.panelX + this.panelWidth - 14 - cancelWidth;
         int applyX = cancelX - 6 - applyWidth;
+        int bottomY = this.panelY + this.panelHeight - 35;
+
+        if (this.nameField != null) {
+            this.nameField.setXWrapper(this.panelX + 58);
+            this.nameField.setYWrapper(this.panelY + this.panelHeight - 34);
+        }
 
         if (this.applyButton != null) {
             this.applyButton.setWidth(applyWidth);
@@ -579,21 +596,56 @@ public class GuiItemReplacementPicker extends GuiBase {
             this.cancelButton.setPosition(cancelX, bottomY);
         }
 
-        int buttonY = this.panelY + PANEL_HEIGHT - 66;
+        int buttonY = this.panelY + this.panelHeight - 66;
         int scopeX = this.panelX + 14;
-        int scopeWidth = this.scopeButton != null ? this.scopeButton.getWidth() : this.getButtonWidth(this.getScopeButtonText(), 42);
-        int ignoreWidth = this.ignoreButton != null ? this.ignoreButton.getWidth() : this.getButtonWidth(StringUtils.translate("litematica_container_filler.gui.button.material_replace_ignore"), 48);
-        int resetWidth = this.resetButton != null ? this.resetButton.getWidth() : this.getButtonWidth(StringUtils.translate("litematica_container_filler.gui.button.material_replace_reset"), 48);
+        int rowButtonMax = Math.max(42, (availableW - 12) / 3);
+        int scopeWidth = this.getButtonWidth(this.getScopeButtonText(), 42, rowButtonMax);
+        int ignoreWidth = this.getButtonWidth(StringUtils.translate("litematica_container_filler.gui.button.material_replace_ignore"), 48, rowButtonMax);
+        int resetWidth = this.getButtonWidth(StringUtils.translate("litematica_container_filler.gui.button.material_replace_reset"), 48, rowButtonMax);
         int ignoreX = scopeX + scopeWidth + 6;
-        int resetX = this.panelX + PANEL_WIDTH - 14 - resetWidth;
+        int resetX = this.panelX + this.panelWidth - 14 - resetWidth;
 
-        if (this.scopeButton != null) this.scopeButton.setPosition(scopeX, buttonY);
-        if (this.ignoreButton != null) this.ignoreButton.setPosition(ignoreX, buttonY);
-        if (this.resetButton != null) this.resetButton.setPosition(resetX, buttonY);
+        if (this.scopeButton != null) {
+            this.scopeButton.setWidth(scopeWidth);
+            this.scopeButton.setPosition(scopeX, buttonY);
+        }
+        if (this.ignoreButton != null) {
+            this.ignoreButton.setWidth(ignoreWidth);
+            this.ignoreButton.setPosition(ignoreX, buttonY);
+        }
+        if (this.resetButton != null) {
+            this.resetButton.setWidth(resetWidth);
+            this.resetButton.setPosition(resetX, buttonY);
+        }
     }
 
     private void clampPanel() {
-        this.panelX = MathHelper.clamp(this.panelX, 4, Math.max(4, this.getScreenWidth() - PANEL_WIDTH - 4));
-        this.panelY = MathHelper.clamp(this.panelY, 4, Math.max(4, this.getScreenHeight() - PANEL_HEIGHT - 4));
+        this.updateDimensions();
+        this.panelX = MathHelper.clamp(this.panelX, 4, Math.max(4, this.getScreenWidth() - this.panelWidth - 4));
+        this.panelY = MathHelper.clamp(this.panelY, 4, Math.max(4, this.getScreenHeight() - this.panelHeight - 4));
+    }
+
+    private void updateDimensions() {
+        this.panelWidth = MathHelper.clamp(PREFERRED_PANEL_WIDTH, MIN_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, this.getScreenWidth() - 8));
+        this.panelHeight = MathHelper.clamp(PREFERRED_PANEL_HEIGHT, MIN_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, this.getScreenHeight() - 8));
+        this.gridColumns = MathHelper.clamp((this.panelWidth - 44) / CELL_SIZE, 4, MAX_GRID_COLUMNS);
+        int availableGridHeight = Math.max(CELL_SIZE, this.panelHeight - GRID_TOP_OFFSET - 76);
+        this.gridRows = MathHelper.clamp(availableGridHeight / CELL_SIZE, 1, MAX_GRID_ROWS);
+    }
+
+    private String fitToWidth(String text, int maxWidth) {
+        if (text == null || text.isEmpty() || maxWidth <= 0) {
+            return "";
+        }
+        if (this.getStringWidth(text) <= maxWidth) {
+            return text;
+        }
+        String suffix = "...";
+        int suffixWidth = this.getStringWidth(suffix);
+        int end = text.length();
+        while (end > 0 && this.getStringWidth(text.substring(0, end)) + suffixWidth > maxWidth) {
+            end--;
+        }
+        return end <= 0 ? suffix : text.substring(0, end) + suffix;
     }
 }
