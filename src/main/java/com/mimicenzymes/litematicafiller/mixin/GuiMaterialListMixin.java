@@ -196,9 +196,7 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
             ImmutableList<MaterialListEntry> newRef = mimic_readMaterialListAll();
             mimic_lastInjectedRef = newRef;
 
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        } catch (Exception ignored) {}
     }
 
     @Unique
@@ -249,9 +247,7 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
 
             mimic_setScrollPosition(scroll);
 
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        } catch (Exception ignored) {}
     }
 
     @Unique
@@ -274,9 +270,7 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
         try {
             mimic_materialListAllField = MaterialListBase.class.getDeclaredField("materialListAll");
             mimic_materialListAllField.setAccessible(true);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        } catch (Exception ignored) {}
     }
 
     @Unique
@@ -297,9 +291,7 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
         if (mimic_materialListAllField == null) return;
         try {
             mimic_materialListAllField.set(materialList, list);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        } catch (Exception ignored) {}
     }
 
     @Unique

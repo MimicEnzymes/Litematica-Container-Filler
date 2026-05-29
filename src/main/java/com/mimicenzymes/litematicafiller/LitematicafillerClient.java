@@ -1,7 +1,7 @@
 package com.mimicenzymes.litematicafiller;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
-import com.mimicenzymes.litematicafiller.config.GuiConfigs;
+import com.mimicenzymes.litematicafiller.gui.GuiConfigs;
 import com.mimicenzymes.litematicafiller.core.*;
 import com.mimicenzymes.litematicafiller.network.ClickPacketRateLimiter;
 import com.mimicenzymes.litematicafiller.network.ServuxSyncHandler;

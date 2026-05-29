@@ -12,8 +12,7 @@ public class QuickShulkerWrapper implements IShulkerExtractor {
             ClientPlayNetworking.send(new OpenShulkerPacket(packetSlot));
             return true;
 
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (Exception ignored) {
             return false;
         }
     }

@@ -837,7 +837,8 @@ public class RealContainerCache {
 
                     ItemStack stack = ItemStack.EMPTY;
                     try {
-                        stack = ItemStack.OPTIONAL_CODEC.parse(NbtOps.INSTANCE, itemTag).resultOrPartial().orElse(ItemStack.EMPTY);
+                        var ops = registries != null ? registries.createSerializationContext(NbtOps.INSTANCE) : NbtOps.INSTANCE;
+                        stack = ItemStack.OPTIONAL_CODEC.parse(ops, itemTag).result().orElse(ItemStack.EMPTY);
                     } catch (Exception ignored) {}
 
                     if (stack.isEmpty() && itemTag.contains("id")) {

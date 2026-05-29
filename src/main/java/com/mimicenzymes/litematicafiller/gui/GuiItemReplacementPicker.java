@@ -426,6 +426,7 @@ public class GuiItemReplacementPicker extends GuiBase {
         String query = needle == null ? "" : needle.toLowerCase(Locale.ROOT);
         Comparator<Item> comparator = Comparator
                 .comparingInt((Item item) -> this.matchRank(item, query))
+                .thenComparingInt(BuiltInRegistries.ITEM::getId)
                 .thenComparing(item -> BuiltInRegistries.ITEM.getKey(item).toString());
 
         this.allItems.sort(comparator);

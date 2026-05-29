@@ -2417,6 +2417,6 @@ public class AutoFillerStateMachine {
             } else {
                 client.gameMode.handleContainerInput(screen.getMenu().containerId, slotId, button, actionType, client.player);
             }
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception ignored) {}
     }
 }

@@ -211,7 +211,7 @@ public class MaterialReplacer {
         for (int i = 0; i < itemsList.size(); i++) {
             if (itemsList.get(i) instanceof net.minecraft.nbt.CompoundTag itemTag) {
                 DynamicOps<Tag> ops = registries.createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE);
-                ItemStack original = ItemStack.OPTIONAL_CODEC.parse(ops, itemTag).resultOrPartial().orElse(ItemStack.EMPTY);
+                ItemStack original = ItemStack.OPTIONAL_CODEC.parse(ops, itemTag).result().orElse(ItemStack.EMPTY);
                 if (!original.isEmpty()) {
                     ItemStack replaced = replaceSingleStackLoaded(original, schematicKey);
                     if (replaced != original && !ItemStack.matches(replaced, original)) {
@@ -220,7 +220,7 @@ public class MaterialReplacer {
                             i--;
                             continue;
                         }
-                        net.minecraft.nbt.Tag newTag = ItemStack.OPTIONAL_CODEC.encodeStart(ops, replaced).resultOrPartial().orElse(null);
+                        net.minecraft.nbt.Tag newTag = ItemStack.OPTIONAL_CODEC.encodeStart(ops, replaced).result().orElse(null);
                         if (newTag instanceof net.minecraft.nbt.CompoundTag newCompound) {
                             if (itemTag.contains("Slot")) {
                                 newCompound.put("Slot", itemTag.get("Slot"));
@@ -380,7 +380,7 @@ public class MaterialReplacer {
         ItemStack normalized = normalizeStack(stack);
         DynamicOps<Tag> ops = getNbtOps();
         if (ops != null) {
-            Tag encoded = ItemStack.OPTIONAL_CODEC.encodeStart(ops, normalized).resultOrPartial().orElse(null);
+            Tag encoded = ItemStack.OPTIONAL_CODEC.encodeStart(ops, normalized).result().orElse(null);
             if (encoded != null) {
                 String payload = Base64.getUrlEncoder().withoutPadding()
                         .encodeToString(encoded.toString().getBytes(StandardCharsets.UTF_8));
@@ -437,7 +437,7 @@ public class MaterialReplacer {
         try {
             String nbtText = new String(Base64.getUrlDecoder().decode(payload), StandardCharsets.UTF_8);
             CompoundTag nbt = TagParser.parseCompoundFully(nbtText);
-            return ItemStack.OPTIONAL_CODEC.parse(ops, nbt).resultOrPartial().orElse(ItemStack.EMPTY);
+            return ItemStack.OPTIONAL_CODEC.parse(ops, nbt).result().orElse(ItemStack.EMPTY);
         } catch (Exception ignored) {
             return ItemStack.EMPTY;
         }
