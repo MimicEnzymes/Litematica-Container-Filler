@@ -4,9 +4,14 @@ import com.mimicenzymes.litematicafiller.Reference;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.config.Hotkeys;
 import com.mimicenzymes.litematicafiller.core.ManualContainerOverrideManager;
+import fi.dy.masa.malilib.config.IConfigBase;
+import fi.dy.masa.malilib.config.IConfigResettable;
+import fi.dy.masa.malilib.config.IConfigStringList;
 import fi.dy.masa.malilib.gui.GuiBase;
 import fi.dy.masa.malilib.gui.GuiConfigsBase;
+import fi.dy.masa.malilib.gui.button.ConfigButtonStringList;
 import fi.dy.masa.malilib.gui.interfaces.IKeybindConfigGui;
+import fi.dy.masa.malilib.gui.interfaces.IConfigInfoProvider;
 import fi.dy.masa.malilib.gui.widgets.WidgetConfigOption;
 import fi.dy.masa.malilib.gui.widgets.WidgetKeybindSettings;
 import fi.dy.masa.malilib.gui.widgets.WidgetListConfigOptions;
@@ -47,11 +52,7 @@ public class GuiConfigs extends GuiConfigsBase {
             x += botton.getWidth() + 2;
         }
 
-        if (tab == Tab.FILTER) {
-            String label = fi.dy.masa.malilib.util.StringUtils.translate("litematica_container_filler.gui.button.container_filter_picker");
-            ButtonGeneric button = new ButtonGeneric(10, 50, 180, 20, label);
-            this.addButton(button, (clickedButton, mouseButton) -> GuiBase.openGui(new GuiContainerFilter(this)));
-        } else if (tab == Tab.RENDER) {
+        if (tab == Tab.RENDER) {
             String label = fi.dy.masa.malilib.util.StringUtils.translate("litematica_container_filler.gui.button.render_editor");
             ButtonGeneric button = new ButtonGeneric(10, 50, 180, 20, label);
             this.addButton(button, (clickedButton, mouseButton) -> GuiBase.openGui(new GuiRenderEditor(this)));
@@ -100,8 +101,116 @@ public class GuiConfigs extends GuiConfigsBase {
                 return new TriggerHotkeyConfigOption(x, y, this.browserEntryWidth, this.browserEntryHeight,
                         this.maxLabelWidth, this.configWidth, entry, listIndex, this.parent, this);
             }
+            if (entry.getConfig() == Configs.MATERIAL_REPLACEMENTS) {
+                return new GlobalMaterialReplacementConfigOption(x, y, this.browserEntryWidth, this.browserEntryHeight,
+                        this.maxLabelWidth, this.configWidth, entry, listIndex, this.parent, this);
+            }
+            if (entry.getConfig() == Configs.CONTAINER_FILTER_LIST) {
+                return new ContainerFilterListConfigOption(x, y, this.browserEntryWidth, this.browserEntryHeight,
+                        this.maxLabelWidth, this.configWidth, entry, listIndex, this.parent, this);
+            }
 
             return super.createListEntryWidget(x, y, listIndex, isOdd, entry);
+        }
+    }
+
+    private static class ContainerFilterListConfigOption extends WidgetConfigOption {
+        public ContainerFilterListConfigOption(int x, int y, int width, int height, int maxNameWidth, int configWidth,
+                                               ConfigOptionWrapper wrapper, int listIndex, IKeybindConfigGui host,
+                                               WidgetListConfigOptionsBase<?, ?> parent) {
+            super(x, y, width, height, maxNameWidth, configWidth, wrapper, listIndex, host, parent);
+        }
+
+        @Override
+        protected void addConfigOption(int x, int y, int labelWidth, int configWidth, IConfigBase config) {
+            if (config != Configs.CONTAINER_FILTER_LIST) {
+                super.addConfigOption(x, y, labelWidth, configWidth, config);
+                return;
+            }
+
+            String displayName = config.getConfigGuiDisplayName();
+            this.addLabel(x, y + 7, labelWidth, 8, -1, displayName);
+
+            IConfigInfoProvider hoverInfoProvider = this.host.getHoverInfoProvider();
+            String comment = hoverInfoProvider != null ? hoverInfoProvider.getHoverInfo(config) : config.getComment();
+            if (comment != null) {
+                this.addConfigComment(x, y + 5, labelWidth, 12, comment);
+            }
+
+            int buttonX = x + labelWidth + 10;
+            int gap = 4;
+            String visualText = fi.dy.masa.malilib.util.StringUtils.translate("litematica_container_filler.gui.button.container_filter_visual");
+            int visualWidth = Math.max(68, this.getStringWidth(visualText) + 12);
+            visualWidth = Math.min(visualWidth, Math.max(68, configWidth - 56));
+            int rawWidth = Math.max(48, configWidth - visualWidth - gap);
+
+            ButtonGeneric visualButton = new ButtonGeneric(buttonX, y, visualWidth, 20, visualText);
+            visualButton.setHoverStrings(fi.dy.masa.malilib.util.StringUtils.translate("litematica_container_filler.gui.tooltip.container_filter_visual"));
+            this.addButton(visualButton, (clickedButton, mouseButton) -> {
+                Screen screen = this.host instanceof Screen hostScreen ? hostScreen : MinecraftClient.getInstance().currentScreen;
+                GuiBase.openGui(new GuiContainerFilter(screen));
+            });
+
+            ConfigButtonStringList rawButton = new ConfigButtonStringList(
+                    buttonX + visualWidth + gap,
+                    y,
+                    rawWidth,
+                    20,
+                    (IConfigStringList) config,
+                    this.host,
+                    this.host.getDialogHandler()
+            );
+            this.addConfigButtonEntry(buttonX + visualWidth + gap + rawWidth + 2, y, (IConfigResettable) config, rawButton);
+        }
+    }
+
+    private static class GlobalMaterialReplacementConfigOption extends WidgetConfigOption {
+        public GlobalMaterialReplacementConfigOption(int x, int y, int width, int height, int maxNameWidth, int configWidth,
+                                                     ConfigOptionWrapper wrapper, int listIndex, IKeybindConfigGui host,
+                                                     WidgetListConfigOptionsBase<?, ?> parent) {
+            super(x, y, width, height, maxNameWidth, configWidth, wrapper, listIndex, host, parent);
+        }
+
+        @Override
+        protected void addConfigOption(int x, int y, int labelWidth, int configWidth, IConfigBase config) {
+            if (config != Configs.MATERIAL_REPLACEMENTS) {
+                super.addConfigOption(x, y, labelWidth, configWidth, config);
+                return;
+            }
+
+            String displayName = config.getConfigGuiDisplayName();
+            this.addLabel(x, y + 7, labelWidth, 8, -1, displayName);
+
+            IConfigInfoProvider hoverInfoProvider = this.host.getHoverInfoProvider();
+            String comment = hoverInfoProvider != null ? hoverInfoProvider.getHoverInfo(config) : config.getComment();
+            if (comment != null) {
+                this.addConfigComment(x, y + 5, labelWidth, 12, comment);
+            }
+
+            int buttonX = x + labelWidth + 10;
+            int gap = 4;
+            String visualText = fi.dy.masa.malilib.util.StringUtils.translate("litematica_container_filler.gui.button.global_material_replace_visual");
+            int visualWidth = Math.max(68, this.getStringWidth(visualText) + 12);
+            visualWidth = Math.min(visualWidth, Math.max(68, configWidth - 56));
+            int rawWidth = Math.max(48, configWidth - visualWidth - gap);
+
+            ButtonGeneric visualButton = new ButtonGeneric(buttonX, y, visualWidth, 20, visualText);
+            visualButton.setHoverStrings(fi.dy.masa.malilib.util.StringUtils.translate("litematica_container_filler.gui.tooltip.global_material_replace_visual"));
+            this.addButton(visualButton, (clickedButton, mouseButton) -> {
+                Screen screen = this.host instanceof Screen hostScreen ? hostScreen : MinecraftClient.getInstance().currentScreen;
+                GuiBase.openGui(new GuiGlobalMaterialReplacementPicker(screen));
+            });
+
+            ConfigButtonStringList rawButton = new ConfigButtonStringList(
+                    buttonX + visualWidth + gap,
+                    y,
+                    rawWidth,
+                    20,
+                    (IConfigStringList) config,
+                    this.host,
+                    this.host.getDialogHandler()
+            );
+            this.addConfigButtonEntry(buttonX + visualWidth + gap + rawWidth + 2, y, (IConfigResettable) config, rawButton);
         }
     }
 

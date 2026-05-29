@@ -1,7 +1,9 @@
 package com.mimicenzymes.litematicafiller.mixin;
 
 import com.mimicenzymes.litematicafiller.config.Configs;
+import com.mimicenzymes.litematicafiller.core.MaterialReplacementUi;
 import com.mimicenzymes.litematicafiller.materials.FillMaterialCalculator;
+import com.mimicenzymes.litematicafiller.materials.MaterialListReplacementRefresh;
 import fi.dy.masa.litematica.gui.GuiMaterialList;
 import fi.dy.masa.litematica.materials.MaterialListBase;
 import fi.dy.masa.litematica.materials.MaterialListEntry;
@@ -23,7 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Mixin(value = GuiMaterialList.class, remap = false)
-public abstract class GuiMaterialListMixin extends GuiBase {
+public abstract class GuiMaterialListMixin extends GuiBase implements MaterialListReplacementRefresh {
 
     @Shadow @Final private MaterialListBase materialList;
 
@@ -35,6 +37,15 @@ public abstract class GuiMaterialListMixin extends GuiBase {
     @Unique private List<MaterialListEntry> mimic_cachedVanillaList = null;
     @Unique private ImmutableList<MaterialListEntry> mimic_lastInjectedRef = null;
     @Unique private boolean mimic_isInjecting = false;
+    @Unique private boolean mimic_forceReplacementRefresh = false;
+    @Unique private int mimic_seenReplacementVersion = -1;
+
+    @Override
+    public void lcf$refreshMaterialReplacementList() {
+        mimic_needsCalculation = true;
+        mimic_forceReplacementRefresh = true;
+        mimic_injectSilently();
+    }
 
     @Inject(method = "initGui", at = @At("RETURN"))
     private void onInitGui(CallbackInfo ci) {
@@ -112,7 +123,23 @@ public abstract class GuiMaterialListMixin extends GuiBase {
             }
         } catch (Exception ignored) {}
 
-        ButtonGeneric toggleBtn = new ButtonGeneric(maxX + 1, targetY, 80, 20, text);
+        String clearText = StringUtils.translate("litematica_container_filler.gui.button.clear_schematic_replacements");
+        int clearWidth = mimic_getButtonWidth(clearText, 44);
+        ButtonGeneric clearBtn = new ButtonGeneric(maxX + 1, targetY, clearWidth, 20, clearText);
+        clearBtn.setEnabled(MaterialReplacementUi.findSchematicKey((GuiMaterialList) (Object) this) != null);
+        clearBtn.setHoverStrings(StringUtils.translate("litematica_container_filler.gui.tooltip.clear_schematic_replacements"));
+
+        this.addButton(clearBtn, (button, mouseButton) -> {
+            MaterialReplacementUi.clearCurrentSchematicReplacementRules((GuiMaterialList) (Object) this);
+            mimic_needsCalculation = true;
+            mimic_forceReplacementRefresh = true;
+            mimic_lastInjectedRef = null;
+            mimic_injectViaApi();
+        });
+
+        int toggleWidth = mimic_getButtonWidth(text, 44);
+        ButtonGeneric toggleBtn = new ButtonGeneric(maxX + clearWidth + 2, targetY, toggleWidth, 20, text);
+        toggleBtn.setHoverStrings(StringUtils.translate("litematica_container_filler.gui.tooltip.material_list_mode"));
 
         this.addButton(toggleBtn, (button, mouseButton) -> {
             FillMaterialCalculator.listMode = (FillMaterialCalculator.listMode + 1) % 3;
@@ -125,9 +152,15 @@ public abstract class GuiMaterialListMixin extends GuiBase {
     }
 
     @Unique
+    private int mimic_getButtonWidth(String text, int minWidth) {
+        return Math.max(minWidth, this.getStringWidth(text) + 12);
+    }
+
+    @Unique
     private void mimic_injectViaApi() {
         try {
             if (!(materialList instanceof IMaterialList iMatList)) return;
+            mimic_seenReplacementVersion = FillMaterialCalculator.getMaterialReplacementVersion();
             if (mimic_cachedVanillaList == null) {
                 ImmutableList<MaterialListEntry> current = mimic_readMaterialListAll();
                 if (current != null) mimic_cachedVanillaList = new ArrayList<>(current);
@@ -161,12 +194,20 @@ public abstract class GuiMaterialListMixin extends GuiBase {
             ImmutableList<MaterialListEntry> currentRef = mimic_readMaterialListAll();
             if (currentRef == null) return;
 
-            if (currentRef != mimic_lastInjectedRef) {
+            int replacementVersion = FillMaterialCalculator.getMaterialReplacementVersion();
+            if (replacementVersion != mimic_seenReplacementVersion) {
+                mimic_seenReplacementVersion = replacementVersion;
+                mimic_needsCalculation = true;
+                mimic_forceReplacementRefresh = true;
+            }
+
+            if (mimic_cachedVanillaList == null) {
+                mimic_cachedVanillaList = new ArrayList<>(currentRef);
+                mimic_needsCalculation = true;
+            } else if (!mimic_forceReplacementRefresh && currentRef != mimic_lastInjectedRef) {
                 mimic_cachedVanillaList = new ArrayList<>(currentRef);
                 mimic_needsCalculation = true;
             }
-
-            if (mimic_cachedVanillaList == null) return;
 
             if (mimic_needsCalculation) {
                 FillMaterialCalculator.calculate(this, true, mimic_cachedVanillaList);
@@ -185,6 +226,7 @@ public abstract class GuiMaterialListMixin extends GuiBase {
             materialList.updateCounts();
 
             mimic_lastInjectedRef = mimic_readMaterialListAll();
+            mimic_forceReplacementRefresh = false;
 
             mimic_refreshWidget();
 
