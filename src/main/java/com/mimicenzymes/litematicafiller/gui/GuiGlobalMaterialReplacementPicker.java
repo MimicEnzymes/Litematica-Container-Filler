@@ -1,0 +1,417 @@
+package com.mimicenzymes.litematicafiller.gui;
+
+import com.mimicenzymes.litematicafiller.core.MaterialReplacementUi;
+import com.mimicenzymes.litematicafiller.core.MaterialReplacer;
+import fi.dy.masa.malilib.gui.GuiBase;
+import fi.dy.masa.malilib.gui.GuiTextFieldGeneric;
+import fi.dy.masa.malilib.gui.button.ButtonGeneric;
+import fi.dy.masa.malilib.render.RenderUtils;
+import fi.dy.masa.malilib.util.StringUtils;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.registry.Registries;
+import net.minecraft.util.Identifier;
+import net.minecraft.util.math.MathHelper;
+import org.lwjgl.glfw.GLFW;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+
+public class GuiGlobalMaterialReplacementPicker extends GuiBase {
+    private static final int PANEL_WIDTH = 304;
+    private static final int PANEL_HEIGHT = 310;
+    private static final int CELL_SIZE = 24;
+    private static final int ICON_SIZE = 18;
+    private static final int GRID_COLUMNS = 11;
+    private static final int GRID_ROWS = 7;
+    private static final int TITLE_HEIGHT = 26;
+    private static final int SEARCH_Y = 36;
+    private static final int GRID_TOP_OFFSET = 72;
+
+    private final Screen parent;
+    private final List<Item> allItems = new ArrayList<>();
+    private final List<Item> filteredItems = new ArrayList<>();
+    private GuiTextFieldGeneric searchField;
+    private ButtonGeneric closeButton;
+    private String searchText = "";
+    private int panelX;
+    private int panelY;
+    private int gridX;
+    private int gridY;
+    private int rowIndex;
+    private boolean draggingPanel;
+    private boolean draggingScrollbar;
+    private int dragOffsetX;
+    private int dragOffsetY;
+    private int scrollbarDragOffsetY;
+
+    public GuiGlobalMaterialReplacementPicker(Screen parent) {
+        this.parent = parent;
+        this.title = "";
+        this.useTitleHierarchy = false;
+
+        for (Item item : Registries.ITEM) {
+            if (item != Items.AIR) {
+                this.allItems.add(item);
+            }
+        }
+
+        this.sortItems("");
+        this.refreshFilter();
+    }
+
+    public Screen getParentScreen() {
+        return this.parent;
+    }
+
+    int getPanelX() {
+        return this.panelX;
+    }
+
+    int getPanelY() {
+        return this.panelY;
+    }
+
+    @Override
+    public void initGui() {
+        super.initGui();
+
+        if (this.panelX == 0 && this.panelY == 0) {
+            this.panelX = Math.max(6, (this.getScreenWidth() - PANEL_WIDTH) >> 1);
+            this.panelY = Math.max(6, (this.getScreenHeight() - PANEL_HEIGHT) >> 1);
+        } else {
+            this.clampPanel();
+        }
+
+        this.reflow();
+
+        this.searchField = new GuiTextFieldGeneric(this.panelX + 14, this.panelY + SEARCH_Y, PANEL_WIDTH - 28, 20, this.textRenderer);
+        this.searchField.setTextWrapper(this.searchText);
+        this.searchField.setMaxLengthWrapper(80);
+        this.addTextField(this.searchField, field -> {
+            this.searchText = field.getTextWrapper();
+            this.rowIndex = 0;
+            this.refreshFilter();
+            return true;
+        });
+
+        String closeText = StringUtils.translate("litematica_container_filler.gui.button.close");
+        int closeWidth = Math.max(52, this.getStringWidth(closeText) + 12);
+        this.closeButton = new ButtonGeneric(this.panelX + PANEL_WIDTH - 14 - closeWidth, this.panelY + PANEL_HEIGHT - 28, closeWidth, 20, closeText);
+        this.addButton(this.closeButton, (button, mouseButton) -> this.closeToParent());
+    }
+
+    @Override
+    public boolean onMouseClicked(int mouseX, int mouseY, int mouseButton) {
+        if (this.isMouseOverScrollbarThumb(mouseX, mouseY)) {
+            this.draggingScrollbar = true;
+            this.scrollbarDragOffsetY = mouseY - this.getScrollbarThumbY();
+            return true;
+        }
+
+        if (this.isMouseOverScrollbar(mouseX, mouseY)) {
+            this.draggingScrollbar = true;
+            this.scrollbarDragOffsetY = this.getScrollbarThumbHeight() >> 1;
+            this.updateScrollFromMouse(mouseY);
+            return true;
+        }
+
+        if (this.isMouseOverTitle(mouseX, mouseY)) {
+            this.draggingPanel = true;
+            this.dragOffsetX = mouseX - this.panelX;
+            this.dragOffsetY = mouseY - this.panelY;
+            return true;
+        }
+
+        if (super.onMouseClicked(mouseX, mouseY, mouseButton)) {
+            return true;
+        }
+
+        int index = this.getHoveredIndex(mouseX, mouseY);
+        if (index >= 0) {
+            MaterialReplacementUi.open(this, new ItemStack(this.filteredItems.get(index)));
+            return true;
+        }
+
+        return this.isMouseOverPanel(mouseX, mouseY);
+    }
+
+    @Override
+    public boolean onMouseReleased(int mouseX, int mouseY, int mouseButton) {
+        this.draggingPanel = false;
+        this.draggingScrollbar = false;
+        return super.onMouseReleased(mouseX, mouseY, mouseButton);
+    }
+
+    @Override
+    public boolean onMouseScrolled(int mouseX, int mouseY, double horizontalAmount, double verticalAmount) {
+        if (this.isMouseOverPanel(mouseX, mouseY)) {
+            this.scrollRows(verticalAmount < 0.0 ? 1 : -1);
+            return true;
+        }
+
+        return super.onMouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+    }
+
+    @Override
+    public boolean onKeyTyped(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+            this.closeToParent();
+            return true;
+        }
+        return super.onKeyTyped(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    protected void drawContents(DrawContext drawContext, int mouseX, int mouseY, float partialTicks) {
+        this.updateDrag(mouseX, mouseY);
+        this.drawParent(drawContext, mouseX, mouseY, partialTicks);
+        RenderUtils.drawRect(0, 0, this.getScreenWidth(), this.getScreenHeight(), 0x66000000);
+
+        RenderUtils.drawOutlinedBox(this.panelX, this.panelY, PANEL_WIDTH, PANEL_HEIGHT, 0xEF11151B, 0xFF98A7B8);
+        RenderUtils.drawRect(this.panelX + 1, this.panelY + 1, PANEL_WIDTH - 2, TITLE_HEIGHT, 0xAA1B2028);
+
+        String titleText = StringUtils.translate("litematica_container_filler.gui.title.global_material_replace");
+        this.drawString(drawContext, titleText, this.panelX + ((PANEL_WIDTH - this.getStringWidth(titleText)) >> 1), this.panelY + 8, 0xFFFFFFFF);
+
+        RenderUtils.drawRect(this.gridX - 2, this.gridY - 2, GRID_COLUMNS * CELL_SIZE + 4, GRID_ROWS * CELL_SIZE + 4, 0x6630353D);
+        this.drawItems(drawContext, mouseX, mouseY);
+        this.drawScrollbar(drawContext);
+
+        this.drawWidgets(mouseX, mouseY, drawContext);
+        this.drawButtons(mouseX, mouseY, partialTicks, drawContext);
+        this.searchField.renderWrapper(drawContext, mouseX, mouseY, partialTicks);
+
+        int hoveredIndex = this.getHoveredIndex(mouseX, mouseY);
+        if (hoveredIndex >= 0) {
+            ItemStack hoveredStack = new ItemStack(this.filteredItems.get(hoveredIndex));
+            Identifier id = Registries.ITEM.getId(hoveredStack.getItem());
+            List<String> lines = new ArrayList<>();
+            lines.add(hoveredStack.getName().getString());
+            lines.add(GuiBase.TXT_DARK_GRAY + id);
+            Optional<ItemStack> target = MaterialReplacer.getGlobalReplacementTarget(hoveredStack);
+            target.ifPresent(stack -> lines.add(StringUtils.translate(
+                    "litematica_container_filler.gui.tooltip.global_material_replace_target",
+                    stack.isEmpty() ? StringUtils.translate("litematica_container_filler.gui.label.material_replace_ignored") : stack.getName().getString()
+            )));
+            RenderUtils.drawHoverText(mouseX, mouseY, lines, drawContext);
+        }
+    }
+
+    private void updateDrag(int mouseX, int mouseY) {
+        if (this.draggingPanel) {
+            this.panelX = mouseX - this.dragOffsetX;
+            this.panelY = mouseY - this.dragOffsetY;
+            this.clampPanel();
+            this.repositionControls();
+        } else if (this.draggingScrollbar) {
+            this.updateScrollFromMouse(mouseY);
+        }
+    }
+
+    private void drawParent(DrawContext drawContext, int mouseX, int mouseY, float partialTicks) {
+        if (this.parent instanceof GuiBase guiBase) {
+            guiBase.render(drawContext, mouseX, mouseY, partialTicks);
+        } else if (this.parent != null) {
+            this.parent.render(drawContext, mouseX, mouseY, partialTicks);
+        }
+    }
+
+    private void drawItems(DrawContext drawContext, int mouseX, int mouseY) {
+        int firstIndex = this.rowIndex * GRID_COLUMNS;
+        int endIndex = Math.min(firstIndex + GRID_ROWS * GRID_COLUMNS, this.filteredItems.size());
+        int hoveredIndex = this.getHoveredIndex(mouseX, mouseY);
+
+        for (int index = firstIndex; index < endIndex; index++) {
+            Item item = this.filteredItems.get(index);
+            int local = index - firstIndex;
+            int x = this.gridX + (local % GRID_COLUMNS) * CELL_SIZE;
+            int y = this.gridY + (local / GRID_COLUMNS) * CELL_SIZE;
+            boolean hovered = index == hoveredIndex;
+            boolean replaced = MaterialReplacer.getGlobalReplacementTarget(new ItemStack(item)).isPresent();
+
+            RenderUtils.drawOutlinedBox(
+                    x + 2, y + 2,
+                    ICON_SIZE, ICON_SIZE,
+                    replaced ? 0x664AA3FF : hovered ? 0x44FFFFFF : 0x222A2F36,
+                    replaced ? 0xFF7DC7FF : hovered ? 0xCCFFFFFF : 0x44656D78
+            );
+            drawContext.drawItem(new ItemStack(item), x + 3, y + 3);
+
+            if (replaced) {
+                RenderUtils.drawRect(x + 14, y + 3, 6, 6, 0xDD36A3FF);
+            }
+        }
+    }
+
+    private void drawScrollbar(DrawContext drawContext) {
+        int barX = this.getScrollbarX();
+        int barY = this.gridY;
+        int barHeight = GRID_ROWS * CELL_SIZE;
+        RenderUtils.drawRect(barX, barY, 5, barHeight, 0x88485058);
+
+        int thumbY = this.getScrollbarThumbY();
+        int thumbHeight = this.getScrollbarThumbHeight();
+        RenderUtils.drawRect(barX, thumbY, 5, thumbHeight, 0xFFE4E9F1);
+    }
+
+    private void closeToParent() {
+        GuiBase.openGui(this.parent);
+    }
+
+    private void refreshFilter() {
+        String needle = this.searchText == null ? "" : this.searchText.trim().toLowerCase(Locale.ROOT);
+        this.filteredItems.clear();
+
+        for (Item item : this.allItems) {
+            ItemStack stack = new ItemStack(item);
+            Identifier id = Registries.ITEM.getId(item);
+            String idText = id == null ? "" : id.toString().toLowerCase(Locale.ROOT);
+            String nameText = stack.getName().getString().toLowerCase(Locale.ROOT);
+            if (needle.isEmpty() || idText.contains(needle) || nameText.contains(needle)) {
+                this.filteredItems.add(item);
+            }
+        }
+
+        this.sortItems(needle);
+        this.rowIndex = MathHelper.clamp(this.rowIndex, 0, this.getMaxRowIndex());
+    }
+
+    private void sortItems(String needle) {
+        String query = needle == null ? "" : needle.toLowerCase(Locale.ROOT);
+        Comparator<Item> comparator = Comparator
+                .comparingInt((Item item) -> this.matchRank(item, query))
+                .thenComparingInt(Registries.ITEM::getRawId)
+                .thenComparing(item -> Registries.ITEM.getId(item).toString());
+
+        this.allItems.sort(comparator);
+        this.filteredItems.sort(comparator);
+    }
+
+    private int matchRank(Item item, String query) {
+        if (query.isBlank()) return 0;
+
+        String name = new ItemStack(item).getName().getString().toLowerCase(Locale.ROOT);
+        String id = Registries.ITEM.getId(item).toString().toLowerCase(Locale.ROOT);
+        if (name.equals(query) || id.equals(query)) return 0;
+        if (name.startsWith(query) || id.endsWith(":" + query)) return 1;
+        if (name.contains(query) || id.contains(query)) return 2;
+        return 3;
+    }
+
+    private int getHoveredIndex(int mouseX, int mouseY) {
+        if (!this.isMouseOverGrid(mouseX, mouseY)) return -1;
+
+        int col = (mouseX - this.gridX) / CELL_SIZE;
+        int row = (mouseY - this.gridY) / CELL_SIZE;
+        int index = (this.rowIndex + row) * GRID_COLUMNS + col;
+        return index >= 0 && index < this.filteredItems.size() ? index : -1;
+    }
+
+    private boolean isMouseOverGrid(int mouseX, int mouseY) {
+        return mouseX >= this.gridX
+                && mouseY >= this.gridY
+                && mouseX < this.gridX + GRID_COLUMNS * CELL_SIZE
+                && mouseY < this.gridY + GRID_ROWS * CELL_SIZE;
+    }
+
+    private boolean isMouseOverPanel(int mouseX, int mouseY) {
+        return mouseX >= this.panelX && mouseY >= this.panelY
+                && mouseX < this.panelX + PANEL_WIDTH && mouseY < this.panelY + PANEL_HEIGHT;
+    }
+
+    private boolean isMouseOverTitle(int mouseX, int mouseY) {
+        return mouseX >= this.panelX && mouseY >= this.panelY
+                && mouseX < this.panelX + PANEL_WIDTH && mouseY < this.panelY + TITLE_HEIGHT;
+    }
+
+    private boolean isMouseOverScrollbar(int mouseX, int mouseY) {
+        int barX = this.getScrollbarX();
+        return mouseX >= barX - 2 && mouseX < barX + 8
+                && mouseY >= this.gridY && mouseY < this.gridY + GRID_ROWS * CELL_SIZE;
+    }
+
+    private boolean isMouseOverScrollbarThumb(int mouseX, int mouseY) {
+        int barX = this.getScrollbarX();
+        int thumbY = this.getScrollbarThumbY();
+        int thumbHeight = this.getScrollbarThumbHeight();
+        return mouseX >= barX - 3 && mouseX < barX + 9
+                && mouseY >= thumbY && mouseY < thumbY + thumbHeight;
+    }
+
+    private void scrollRows(int delta) {
+        this.rowIndex = MathHelper.clamp(this.rowIndex + delta, 0, this.getMaxRowIndex());
+    }
+
+    private void updateScrollFromMouse(int mouseY) {
+        int totalRows = this.getTotalRows();
+        if (totalRows <= GRID_ROWS) {
+            this.rowIndex = 0;
+            return;
+        }
+
+        int barHeight = GRID_ROWS * CELL_SIZE;
+        int thumbHeight = this.getScrollbarThumbHeight();
+        int maxOffset = Math.max(1, barHeight - thumbHeight);
+        int offset = MathHelper.clamp(mouseY - this.gridY - this.scrollbarDragOffsetY, 0, maxOffset);
+        this.rowIndex = MathHelper.clamp((int) Math.round((double) offset * this.getMaxRowIndex() / maxOffset), 0, this.getMaxRowIndex());
+    }
+
+    private int getScrollbarX() {
+        return this.gridX + GRID_COLUMNS * CELL_SIZE + 8;
+    }
+
+    private int getScrollbarThumbHeight() {
+        int barHeight = GRID_ROWS * CELL_SIZE;
+        int totalRows = this.getTotalRows();
+        return totalRows > GRID_ROWS ? Math.max(14, barHeight * GRID_ROWS / totalRows) : barHeight;
+    }
+
+    private int getScrollbarThumbY() {
+        int barHeight = GRID_ROWS * CELL_SIZE;
+        int thumbHeight = this.getScrollbarThumbHeight();
+        int totalRows = this.getTotalRows();
+        if (totalRows <= GRID_ROWS) return this.gridY;
+
+        int maxOffset = barHeight - thumbHeight;
+        return this.gridY + MathHelper.clamp(this.rowIndex * maxOffset / (totalRows - GRID_ROWS), 0, maxOffset);
+    }
+
+    private int getTotalRows() {
+        return Math.max(1, (this.filteredItems.size() + GRID_COLUMNS - 1) / GRID_COLUMNS);
+    }
+
+    private int getMaxRowIndex() {
+        return Math.max(0, this.getTotalRows() - GRID_ROWS);
+    }
+
+    private void reflow() {
+        this.gridX = this.panelX + 20;
+        this.gridY = this.panelY + GRID_TOP_OFFSET;
+    }
+
+    private void repositionControls() {
+        this.reflow();
+
+        if (this.searchField != null) {
+            this.searchField.setXWrapper(this.panelX + 14);
+            this.searchField.setYWrapper(this.panelY + SEARCH_Y);
+        }
+
+        if (this.closeButton != null) {
+            int closeWidth = this.closeButton.getWidth();
+            this.closeButton.setPosition(this.panelX + PANEL_WIDTH - 14 - closeWidth, this.panelY + PANEL_HEIGHT - 28);
+        }
+    }
+
+    private void clampPanel() {
+        this.panelX = MathHelper.clamp(this.panelX, 4, Math.max(4, this.getScreenWidth() - PANEL_WIDTH - 4));
+        this.panelY = MathHelper.clamp(this.panelY, 4, Math.max(4, this.getScreenHeight() - PANEL_HEIGHT - 4));
+    }
+}

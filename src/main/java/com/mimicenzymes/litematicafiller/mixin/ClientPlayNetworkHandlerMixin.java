@@ -14,7 +14,7 @@ public class ClientPlayNetworkHandlerMixin {
 
     @Inject(method = "onNbtQueryResponse", at = @At("HEAD"))
     private void onNbtQueryResponse(NbtQueryResponseS2CPacket packet, CallbackInfo ci) {
-        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
+        if (!Configs.ENABLE_MOD.getBooleanValue() || !RealContainerCache.hasActiveConsumers()) return;
         if (Configs.ENABLE_OP_NBT_QUERY.getBooleanValue()) {
             RealContainerCache.handleNbtResponse(packet.getTransactionId(), packet.getNbt());
         }
