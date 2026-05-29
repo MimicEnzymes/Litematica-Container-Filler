@@ -33,10 +33,12 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
     private static final int CELL_SIZE = 24;
     private static final int ICON_SIZE = 18;
     private static final int MAX_GRID_COLUMNS = 11;
-    private static final int MAX_GRID_ROWS = 7;
+    private static final int MAX_GRID_ROWS = 9;
     private static final int TITLE_HEIGHT = 26;
-    private static final int SEARCH_Y = 36;
-    private static final int GRID_TOP_OFFSET = 72;
+    private static final int SEARCH_Y = 34;
+    private static final int GRID_TOP_OFFSET = 62;
+    private static final int GRID_SIDE_RESERVE = 36;
+    private static final int GRID_BOTTOM_RESERVE = 30;
 
     private final Screen parent;
     private final List<Item> allItems = new ArrayList<>();
@@ -53,6 +55,9 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
     private int gridColumns = MAX_GRID_COLUMNS;
     private int gridRows = MAX_GRID_ROWS;
     private int rowIndex;
+    private double smoothRowIndex = 0.0D;
+    private long lastAnimationNanos = 0L;
+    private boolean smoothScrollInitialized = false;
     private boolean draggingPanel;
     private boolean draggingScrollbar;
     private int dragOffsetX;
@@ -112,7 +117,7 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
 
         String closeText = StringUtils.translate("litematica_container_filler.gui.button.close");
         int closeWidth = Math.min(Math.max(52, this.getStringWidth(closeText) + 12), Math.max(52, this.panelWidth - 28));
-        this.closeButton = new ButtonGeneric(this.panelX + this.panelWidth - 14 - closeWidth, this.panelY + this.panelHeight - 28, closeWidth, 20, closeText);
+        this.closeButton = new ButtonGeneric(this.panelX + this.panelWidth - 14 - closeWidth, this.panelY + this.panelHeight - 26, closeWidth, 20, closeText);
         this.addButton(this.closeButton, (button, mouseButton) -> this.closeToParent());
     }
 
@@ -207,6 +212,7 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
 
     @Override
     protected void drawContents(GuiContext drawContext, int mouseX, int mouseY, float partialTicks) {
+        this.updateScrollAnimation();
         this.drawParent(drawContext, mouseX, mouseY, partialTicks);
         RenderUtils.drawRect(drawContext, 0, 0, this.getScreenWidth(), this.getScreenHeight(), 0x66000000);
 
@@ -248,15 +254,18 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
     }
 
     private void drawItems(GuiContext drawContext, int mouseX, int mouseY) {
-        int firstIndex = this.rowIndex * this.gridColumns;
-        int endIndex = Math.min(firstIndex + this.gridRows * this.gridColumns, this.filteredItems.size());
+        int firstRow = Math.max(0, (int)Math.floor(this.smoothRowIndex));
+        double rowFraction = Mth.clamp(this.smoothRowIndex - firstRow, 0.0D, 0.999D);
+        int firstIndex = firstRow * this.gridColumns;
+        int endIndex = Math.min(firstIndex + (this.gridRows + 1) * this.gridColumns, this.filteredItems.size());
+        int scrollOffset = (int)Math.round(rowFraction * CELL_SIZE);
         int hoveredIndex = this.getHoveredIndex(mouseX, mouseY);
 
         for (int index = firstIndex; index < endIndex; index++) {
             Item item = this.filteredItems.get(index);
             int local = index - firstIndex;
             int x = this.gridX + (local % this.gridColumns) * CELL_SIZE;
-            int y = this.gridY + (local / this.gridColumns) * CELL_SIZE;
+            int y = this.gridY + (local / this.gridColumns) * CELL_SIZE - scrollOffset;
             boolean hovered = index == hoveredIndex;
             boolean replaced = MaterialReplacer.getGlobalReplacementTarget(new ItemStack(item)).isPresent();
 
@@ -281,7 +290,7 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
         int barHeight = this.gridRows * CELL_SIZE;
         RenderUtils.drawRect(drawContext, barX, barY, 5, barHeight, 0x88485058);
 
-        int thumbY = this.getScrollbarThumbY();
+        int thumbY = this.getScrollbarThumbY(this.smoothRowIndex);
         int thumbHeight = this.getScrollbarThumbHeight();
         RenderUtils.drawRect(drawContext, barX, thumbY, 5, thumbHeight, 0xFFE4E9F1);
     }
@@ -306,6 +315,7 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
 
         this.sortItems(needle);
         this.rowIndex = Mth.clamp(this.rowIndex, 0, this.getMaxRowIndex());
+        this.snapScrollAnimation();
     }
 
     private void sortItems(String needle) {
@@ -399,13 +409,17 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
     }
 
     private int getScrollbarThumbY() {
+        return this.getScrollbarThumbY(this.rowIndex);
+    }
+
+    private int getScrollbarThumbY(double rowIndexValue) {
         int barHeight = this.gridRows * CELL_SIZE;
         int thumbHeight = this.getScrollbarThumbHeight();
         int totalRows = this.getTotalRows();
         if (totalRows <= this.gridRows) return this.gridY;
 
         int maxOffset = barHeight - thumbHeight;
-        return this.gridY + Mth.clamp(this.rowIndex * maxOffset / (totalRows - this.gridRows), 0, maxOffset);
+        return this.gridY + Mth.clamp((int)Math.round(rowIndexValue * maxOffset / (totalRows - this.gridRows)), 0, maxOffset);
     }
 
     private int getTotalRows() {
@@ -422,6 +436,7 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
         this.gridX = this.panelX + Math.max(14, (this.panelWidth - gridWidth - 13) / 2);
         this.gridY = this.panelY + GRID_TOP_OFFSET;
         this.rowIndex = Mth.clamp(this.rowIndex, 0, this.getMaxRowIndex());
+        this.smoothRowIndex = Mth.clamp(this.smoothRowIndex, 0.0D, this.getMaxRowIndex());
     }
 
     private void repositionControls() {
@@ -435,7 +450,7 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
         if (this.closeButton != null) {
             int closeWidth = Math.min(this.closeButton.getWidth(), Math.max(52, this.panelWidth - 28));
             this.closeButton.setWidth(closeWidth);
-            this.closeButton.setPosition(this.panelX + this.panelWidth - 14 - closeWidth, this.panelY + this.panelHeight - 28);
+            this.closeButton.setPosition(this.panelX + this.panelWidth - 14 - closeWidth, this.panelY + this.panelHeight - 26);
         }
     }
 
@@ -448,9 +463,33 @@ public class GuiGlobalMaterialReplacementPicker extends GuiBase {
     private void updateDimensions() {
         this.panelWidth = Mth.clamp(PREFERRED_PANEL_WIDTH, MIN_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, this.getScreenWidth() - 8));
         this.panelHeight = Mth.clamp(PREFERRED_PANEL_HEIGHT, MIN_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, this.getScreenHeight() - 8));
-        this.gridColumns = Mth.clamp((this.panelWidth - 44) / CELL_SIZE, 4, MAX_GRID_COLUMNS);
-        int availableGridHeight = Math.max(CELL_SIZE, this.panelHeight - GRID_TOP_OFFSET - 42);
+        this.gridColumns = Mth.clamp((this.panelWidth - GRID_SIDE_RESERVE) / CELL_SIZE, 4, MAX_GRID_COLUMNS);
+        int availableGridHeight = Math.max(CELL_SIZE, this.panelHeight - GRID_TOP_OFFSET - GRID_BOTTOM_RESERVE);
         this.gridRows = Mth.clamp(availableGridHeight / CELL_SIZE, 1, MAX_GRID_ROWS);
+    }
+
+    private void updateScrollAnimation() {
+        long now = System.nanoTime();
+        if (!this.smoothScrollInitialized || this.lastAnimationNanos == 0L) {
+            this.snapScrollAnimation();
+            this.lastAnimationNanos = now;
+            return;
+        }
+
+        double dt = Math.min(0.05D, (now - this.lastAnimationNanos) / 1_000_000_000.0D);
+        this.lastAnimationNanos = now;
+        double speed = this.draggingScrollbar ? 28.0D : 16.0D;
+        double blend = 1.0D - Math.exp(-dt * speed);
+        this.smoothRowIndex += (this.rowIndex - this.smoothRowIndex) * blend;
+        if (Math.abs(this.smoothRowIndex - this.rowIndex) < 0.002D) {
+            this.smoothRowIndex = this.rowIndex;
+        }
+    }
+
+    private void snapScrollAnimation() {
+        this.smoothRowIndex = this.rowIndex;
+        this.smoothScrollInitialized = true;
+        this.lastAnimationNanos = System.nanoTime();
     }
 
     private String fitToWidth(String text, int maxWidth) {
