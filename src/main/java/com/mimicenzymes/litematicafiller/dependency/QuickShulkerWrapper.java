@@ -14,8 +14,7 @@ public class QuickShulkerWrapper implements IShulkerExtractor {
             ClientPlayNetworking.send(new OpenShulkerPacket(packetSlot));
             return true;
 
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (Exception ignored) {
             return false;
         }
     }
@@ -25,8 +24,7 @@ public class QuickShulkerWrapper implements IShulkerExtractor {
         try {
             int packetSlot = playerSlotIndex < 9 ? playerSlotIndex + 36 : playerSlotIndex;
             return ClientUtil.CheckAndSend(stack, packetSlot);
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (Exception ignored) {
             return false;
         }
     }

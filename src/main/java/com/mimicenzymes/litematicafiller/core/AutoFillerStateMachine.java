@@ -2441,6 +2441,6 @@ public class AutoFillerStateMachine {
             } else {
                 client.interactionManager.clickSlot(screen.getScreenHandler().syncId, slotId, button, actionType, client.player);
             }
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception ignored) {}
     }
 }
