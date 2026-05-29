@@ -18,10 +18,14 @@ public class ScreenInterceptorMixin {
     private void interceptScreen(Screen screen, CallbackInfo ci) {
         if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         if (screen instanceof HandledScreen) {
+            Screen currentScreen = ((MinecraftClient)(Object)this).currentScreen;
             boolean shouldHideProjectionFillGui = Configs.HIDE_PROJECTION_FILL_GUI.getBooleanValue() &&
                     AutoFillerStateMachine.getInstance().shouldBlockScreens();
             boolean shouldHideToolGui = ContainerToolStateMachine.getInstance().shouldBlockScreens();
-            if (shouldHideProjectionFillGui || shouldHideToolGui) {
+            boolean shouldPreservePassiveScreen = currentScreen != null &&
+                    !(currentScreen instanceof HandledScreen) &&
+                    (AutoFillerStateMachine.getInstance().isWorking() || ContainerToolStateMachine.getInstance().isWorking());
+            if (shouldHideProjectionFillGui || shouldHideToolGui || shouldPreservePassiveScreen) {
                 ci.cancel();
             }
         }

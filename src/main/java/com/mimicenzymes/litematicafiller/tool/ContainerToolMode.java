@@ -10,7 +10,8 @@ public enum ContainerToolMode implements IConfigOptionListEntry {
     CLEAR("clear", "litematica_container_filler.config.option.containerToolMode.clear"),
     FILL_FULL("fill_full", "litematica_container_filler.config.option.containerToolMode.fillFull"),
     COPY("copy", "litematica_container_filler.config.option.containerToolMode.copy"),
-    PACK("pack", "litematica_container_filler.config.option.containerToolMode.pack");
+    PACK("pack", "litematica_container_filler.config.option.containerToolMode.pack"),
+    COLLECT_MATERIALS("collect_materials", "litematica_container_filler.config.option.containerToolMode.collectMaterials");
 
     private final String configString;
     private final String translationKey;

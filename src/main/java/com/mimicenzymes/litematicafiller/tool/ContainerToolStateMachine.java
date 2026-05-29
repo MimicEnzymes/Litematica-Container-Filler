@@ -11,16 +11,22 @@ import com.mimicenzymes.litematicafiller.dependency.DependencyChecker;
 import com.mimicenzymes.litematicafiller.dependency.DummyExtractor;
 import com.mimicenzymes.litematicafiller.dependency.IShulkerExtractor;
 import com.mimicenzymes.litematicafiller.dependency.QuickShulkerWrapper;
+import com.mimicenzymes.litematicafiller.materials.FillMaterialCalculator;
 import com.mimicenzymes.litematicafiller.network.ClickPacketRateLimiter;
 import com.mimicenzymes.litematicafiller.network.TakeItOutCompat;
+import com.mimicenzymes.litematicafiller.render.ToolHudRenderer;
+import fi.dy.masa.litematica.materials.MaterialListEntry;
 import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.screen.PlayerScreenHandler;
 import net.minecraft.screen.ScreenHandler;
@@ -144,14 +150,22 @@ public class ContainerToolStateMachine {
     }
 
     public void switchMode(MinecraftClient client) {
+        switchMode(client, true);
+    }
+
+    public void switchMode(MinecraftClient client, boolean forward) {
         if (!Configs.ENABLE_MOD.getBooleanValue()) {
             return;
         }
 
-        ContainerToolMode next = (ContainerToolMode) getActiveMode().cycle(true);
+        ContainerToolMode previous = getActiveMode();
+        ContainerToolMode next = (ContainerToolMode) previous.cycle(forward);
         Configs.CONTAINER_TOOL_MODE.setOptionListValue(next);
         Configs.TOOL_ENABLED.setBooleanValue(true);
-        send(client, "litematica_container_filler.message.tool_mode_switched", next.getDisplayName());
+        ToolHudRenderer.showToolSwitch(previous, next, forward);
+        if (!Configs.ENABLE_TOOL_SWITCH_HUD.getBooleanValue()) {
+            send(client, "litematica_container_filler.message.tool_mode_switched", next.getDisplayName());
+        }
     }
 
     public void closeAll(MinecraftClient client) {
@@ -271,7 +285,7 @@ public class ContainerToolStateMachine {
                 syncTemplatePos = currentPos;
                 syncTemplateBlockId = Registries.BLOCK.getId(client.world.getBlockState(currentPos).getBlock());
                 RealContainerCache.updateFromHandler(client, handler);
-                client.player.closeHandledScreen();
+                closeHandledScreen(client);
                 send(client, "litematica_container_filler.message.tool_sync_template_saved");
                 reset(client, false, true);
             }
@@ -294,6 +308,7 @@ public class ContainerToolStateMachine {
                     case CLEAR -> completed = clearContainer(client, handler);
                     case FILL_FULL -> completed = fillContainerFull(client, handler);
                     case COPY -> completed = syncIntoContainer(client, handler);
+                    case COLLECT_MATERIALS -> completed = collectMaterialListItems(client, handler);
                     case PACK -> {
                         if (packContainerBatch(client, handler)) {
                             return;
@@ -307,18 +322,20 @@ public class ContainerToolStateMachine {
                         return;
                     }
                     RealContainerCache.updateFromHandler(client, handler);
-                    client.player.closeHandledScreen();
+                    closeHandledScreen(client);
                     reset(client, false, true);
                     return;
                 }
 
                 RealContainerCache.updateFromHandler(client, handler);
-                client.player.closeHandledScreen();
+                if (mode != ContainerToolMode.COLLECT_MATERIALS || Configs.COLLECT_MATERIAL_LIST_ITEMS_CLOSE_GUI.getBooleanValue()) {
+                    closeHandledScreen(client);
+                }
                 finish(client);
             }
             case WAITING_SYNC_TAKEITOUT -> {
                 if (inContainer) {
-                    client.player.closeHandledScreen();
+                    closeHandledScreen(client);
                     return;
                 }
 
@@ -341,7 +358,7 @@ public class ContainerToolStateMachine {
             case OPENING_SYNC_SHULKER -> {
                 if (!openedByTool) {
                     if (inContainer) {
-                        client.player.closeHandledScreen();
+                        closeHandledScreen(client);
                         if (++uiWaitTicks > 20) {
                             fail(client, "litematica_container_filler.message.container_timeout");
                         }
@@ -367,7 +384,7 @@ public class ContainerToolStateMachine {
                 }
 
                 extractSyncItemsFromShulker(client, handler);
-                client.player.closeHandledScreen();
+                closeHandledScreen(client);
                 openedByTool = false;
                 syncActiveShulkerSlot = -1;
                 uiWaitTicks = 0;
@@ -385,7 +402,7 @@ public class ContainerToolStateMachine {
             case OPENING_PACK_SHULKER -> {
                 if (!openedByTool) {
                     if (inContainer) {
-                        client.player.closeHandledScreen();
+                        closeHandledScreen(client);
                         if (++uiWaitTicks > 20) {
                             failPackingSupport(client);
                         }
@@ -414,7 +431,7 @@ public class ContainerToolStateMachine {
 
                 stashPackedStackIntoShulker(client, handler);
                 RealContainerCache.remove(currentPos);
-                client.player.closeHandledScreen();
+                closeHandledScreen(client);
                 openedByTool = false;
                 uiWaitTicks = 0;
                 phase = Phase.OPENING_TARGET;
@@ -463,6 +480,7 @@ public class ContainerToolStateMachine {
                 case CLEAR -> "litematica_container_filler.message.tool_clear_started";
                 case FILL_FULL -> "litematica_container_filler.message.tool_fill_full_started";
                 case PACK -> "litematica_container_filler.message.tool_pack_started";
+                case COLLECT_MATERIALS -> "litematica_container_filler.message.tool_collect_materials_started";
                 case COPY -> "litematica_container_filler.message.tool_sync_started";
             });
         }
@@ -504,7 +522,7 @@ public class ContainerToolStateMachine {
         if (!continuousTriggerReady || continuousTriggerSuppressedUntilRelease || !isToolEnabled()) return;
 
         ContainerToolMode toolMode = getActiveMode();
-        if (toolMode == ContainerToolMode.PACK || !toolMode.isAvailable()) return;
+        if ((toolMode == ContainerToolMode.PACK || toolMode == ContainerToolMode.COLLECT_MATERIALS) || !toolMode.isAvailable()) return;
 
         BlockPos looked = getLookedContainerPos(client);
         if (looked == null) return;
@@ -589,6 +607,63 @@ public class ContainerToolStateMachine {
         return changed;
     }
 
+    private boolean collectMaterialListItems(MinecraftClient client, ScreenHandler handler) {
+        if (!handler.getCursorStack().isEmpty()) {
+            send(client, "litematica_container_filler.message.cursor_stuck");
+            return false;
+        }
+
+        List<MaterialListEntry> missingEntries = FillMaterialCalculator.getCurrentMissingMaterialsForCollection();
+        if (missingEntries.isEmpty()) {
+            send(client, "litematica_container_filler.message.tool_collect_no_material_list");
+            return false;
+        }
+
+        List<Slot> containerSlots = getContainerSlots(handler, client);
+        boolean changed = false;
+        int totalTaken = 0;
+        int multiplier = FillMaterialCalculator.getCurrentMaterialListMultiplier();
+
+        for (MaterialListEntry entry : missingEntries) {
+            if (entry == null || entry.getStack().isEmpty()) continue;
+
+            ItemStack target = entry.getStack();
+            int missing = Math.max(0, entry.getCountMissing() * multiplier - entry.getCountAvailable());
+            if (missing <= 0) continue;
+
+            for (Slot slot : containerSlots) {
+                if (missing <= 0) break;
+                if (!slot.hasStack() || !slot.canTakeItems(client.player)) continue;
+                ItemStack stack = slot.getStack();
+                if (!ItemMatcher.isSameItem(stack, target)) continue;
+
+                int available = stack.getCount();
+                if (Configs.COLLECT_MATERIAL_LIST_ITEMS_RETAIN.getBooleanValue()) {
+                    available -= Configs.COLLECT_MATERIAL_LIST_ITEMS_RETAIN_AMOUNT.getIntegerValue();
+                }
+                int toMove = Math.min(missing, Math.max(0, available));
+                if (toMove <= 0) continue;
+
+                int moved = moveFromContainerToPlayer(client, handler, slot, target, toMove);
+                if (moved <= 0) {
+                    break;
+                }
+
+                missing -= moved;
+                totalTaken += moved;
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            send(client, "litematica_container_filler.message.tool_collect_materials_done", totalTaken);
+        } else {
+            send(client, "litematica_container_filler.message.tool_collect_materials_none");
+        }
+
+        return true;
+    }
+
     private boolean syncIntoContainer(MinecraftClient client, ScreenHandler handler) {
         if (syncTemplate.isEmpty()) {
             send(client, "litematica_container_filler.message.tool_sync_no_template");
@@ -659,7 +734,7 @@ public class ContainerToolStateMachine {
 
         if (tryStartSyncTakeItOutFetch(client, neededToFetch)) {
             RealContainerCache.updateFromHandler(client, handler);
-            client.player.closeHandledScreen();
+            closeHandledScreen(client);
             openedByTool = false;
             uiWaitTicks = 0;
             phase = Phase.WAITING_SYNC_TAKEITOUT;
@@ -675,7 +750,7 @@ public class ContainerToolStateMachine {
         }
 
         RealContainerCache.updateFromHandler(client, handler);
-        client.player.closeHandledScreen();
+        closeHandledScreen(client);
         openedByTool = false;
         syncActiveShulkerSlot = -1;
         uiWaitTicks = 0;
@@ -702,7 +777,7 @@ public class ContainerToolStateMachine {
 
         if (source == null) {
             RealContainerCache.updateFromHandler(client, handler);
-            client.player.closeHandledScreen();
+            closeHandledScreen(client);
             finish(client);
             return true;
         }
@@ -756,7 +831,7 @@ public class ContainerToolStateMachine {
         }
 
         RealContainerCache.updateFromHandler(client, handler);
-        client.player.closeHandledScreen();
+        closeHandledScreen(client);
 
         if (packingMovedCount <= 0) {
             fail(client, "litematica_container_filler.message.tool_pack_no_inventory_space");
@@ -1034,21 +1109,22 @@ public class ContainerToolStateMachine {
     }
 
     private Slot findMostCommonPlayerSlot(ScreenHandler handler, MinecraftClient client, List<Slot> containerSlots) {
-        Map<Item, Integer> counts = new HashMap<>();
-        Map<Item, Slot> firstSlot = new HashMap<>();
+        Map<StrictItemStackKey, Integer> counts = new HashMap<>();
+        Map<StrictItemStackKey, Slot> firstSlot = new HashMap<>();
 
         for (Slot slot : handler.slots) {
             if (slot.inventory != client.player.getInventory() || !slot.hasStack()) continue;
             ItemStack stack = slot.getStack();
             if (!canAnyContainerSlotReceive(containerSlots, stack)) continue;
-            counts.put(stack.getItem(), counts.getOrDefault(stack.getItem(), 0) + 1);
-            firstSlot.putIfAbsent(stack.getItem(), slot);
+            StrictItemStackKey key = new StrictItemStackKey(stack);
+            counts.put(key, counts.getOrDefault(key, 0) + 1);
+            firstSlot.putIfAbsent(key, slot);
         }
 
-        Item best = null;
-        int bestCount = 0;
+        StrictItemStackKey best = null;
+        int bestCount = Math.max(0, Configs.TOOL_FILL_FULL_THRESHOLD.getIntegerValue() - 1);
         boolean tied = false;
-        for (Map.Entry<Item, Integer> entry : counts.entrySet()) {
+        for (Map.Entry<StrictItemStackKey, Integer> entry : counts.entrySet()) {
             if (entry.getValue() > bestCount) {
                 best = entry.getKey();
                 bestCount = entry.getValue();
@@ -1059,6 +1135,54 @@ public class ContainerToolStateMachine {
         }
 
         return best == null || tied ? null : firstSlot.get(best);
+    }
+
+    private int moveFromContainerToPlayer(MinecraftClient client, ScreenHandler handler, Slot sourceSlot, ItemStack target, int amount) {
+        if (amount <= 0 || sourceSlot == null || !sourceSlot.hasStack()) return 0;
+
+        int before = countItemInPlayerInv(client, target);
+        if (amount >= sourceSlot.getStack().getCount()) {
+            client.interactionManager.clickSlot(handler.syncId, sourceSlot.id, 0, SlotActionType.QUICK_MOVE, client.player);
+            return Math.max(0, countItemInPlayerInv(client, target) - before);
+        }
+
+        int remaining = amount;
+        client.interactionManager.clickSlot(handler.syncId, sourceSlot.id, 0, SlotActionType.PICKUP, client.player);
+        if (handler.getCursorStack().isEmpty()) {
+            return 0;
+        }
+
+        for (Slot playerSlot : getPlayerSlotsReverse(handler, client)) {
+            if (remaining <= 0) break;
+            ItemStack stack = playerSlot.getStack();
+            int clickAmount;
+            if (!stack.isEmpty() && ItemMatcher.isSameItem(stack, target)) {
+                clickAmount = Math.min(Math.max(0, stack.getMaxCount() - stack.getCount()), remaining);
+            } else if (stack.isEmpty()) {
+                clickAmount = Math.min(target.getMaxCount(), remaining);
+            } else {
+                continue;
+            }
+
+            for (int i = 0; i < clickAmount && !handler.getCursorStack().isEmpty(); i++) {
+                client.interactionManager.clickSlot(handler.syncId, playerSlot.id, 1, SlotActionType.PICKUP, client.player);
+                remaining--;
+            }
+        }
+
+        client.interactionManager.clickSlot(handler.syncId, sourceSlot.id, 0, SlotActionType.PICKUP, client.player);
+        return Math.max(0, countItemInPlayerInv(client, target) - before);
+    }
+
+    private List<Slot> getPlayerSlotsReverse(ScreenHandler handler, MinecraftClient client) {
+        List<Slot> slots = new ArrayList<>();
+        for (Slot slot : handler.slots) {
+            if (slot.inventory == client.player.getInventory()) {
+                slots.add(slot);
+            }
+        }
+        java.util.Collections.reverse(slots);
+        return slots;
     }
 
     private boolean canAnyContainerSlotReceive(List<Slot> slots, ItemStack stack) {
@@ -1433,7 +1557,7 @@ public class ContainerToolStateMachine {
 
     private void reset(MinecraftClient client, boolean closeScreen, boolean keepTemplate) {
         if (closeScreen && client != null && client.player != null && !(client.player.currentScreenHandler instanceof PlayerScreenHandler)) {
-            client.player.closeHandledScreen();
+            closeHandledScreen(client);
         }
 
         scheduleContinuousCooldown();
@@ -1462,6 +1586,26 @@ public class ContainerToolStateMachine {
             syncTemplatePos = null;
             syncTemplateBlockId = null;
         }
+    }
+
+    private void closeHandledScreen(MinecraftClient client) {
+        if (client == null || client.player == null) return;
+
+        ScreenHandler handler = client.player.currentScreenHandler;
+        if (handler instanceof PlayerScreenHandler) return;
+
+        if (isPassiveScreenOpen(client) && client.getNetworkHandler() != null) {
+            client.getNetworkHandler().sendPacket(new CloseHandledScreenC2SPacket(handler.syncId));
+            client.player.currentScreenHandler = client.player.playerScreenHandler;
+            return;
+        }
+
+        client.player.closeHandledScreen();
+    }
+
+    private boolean isPassiveScreenOpen(MinecraftClient client) {
+        Screen screen = client.currentScreen;
+        return screen != null && !(screen instanceof HandledScreen<?>);
     }
 
     private void scheduleContinuousCooldown() {
