@@ -28,10 +28,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class GuiConfigs extends GuiConfigsBase {
+    private static final int LIST_X = 10;
+    private static final int LIST_Y_COMPACT = 50;
+    private static final int LIST_Y_WITH_EXTRA_BUTTON = 74;
+    private static final int LIST_BOTTOM_MARGIN = 6;
     private static Tab tab = Tab.FEATURE;
 
     public GuiConfigs(Screen parent) {
-        super(10, 74, Reference.MOD_ID, parent, "litematica_container_filler.gui.title.configs");
+        super(LIST_X, getListYForTab(), Reference.MOD_ID, parent, "litematica_container_filler.gui.title.configs");
     }
 
     public GuiConfigs() {
@@ -40,6 +44,7 @@ public class GuiConfigs extends GuiConfigsBase {
 
     @Override
     public void initGui() {
+        this.setListPosition(LIST_X, getListYForTab());
         super.initGui();
         this.clearOptions();
         int x = 10;
@@ -65,6 +70,11 @@ public class GuiConfigs extends GuiConfigsBase {
     }
 
     @Override
+    protected int getBrowserHeight() {
+        return Math.max(40, fi.dy.masa.malilib.util.GuiUtils.getScaledWindowHeight() - this.getListY() - LIST_BOTTOM_MARGIN);
+    }
+
+    @Override
     public List<ConfigOptionWrapper> getConfigs() {
         List<ConfigOptionWrapper> list = new ArrayList<>();
         switch (tab) {
@@ -86,6 +96,10 @@ public class GuiConfigs extends GuiConfigsBase {
     }
 
     public enum Tab { FEATURE, LOGISTICS, DATA, FILTER, TOOLS, RENDER, HOTKEYS }
+
+    private static int getListYForTab() {
+        return tab == Tab.RENDER ? LIST_Y_WITH_EXTRA_BUTTON : LIST_Y_COMPACT;
+    }
 
     private static class ConfigListWidget extends WidgetListConfigOptions {
         private final GuiConfigs parent;
@@ -257,6 +271,7 @@ public class GuiConfigs extends GuiConfigsBase {
         public void actionPerformedWithButton(ButtonBase button, int mouseButton) {
             GuiConfigs.tab = this.tab;
 
+            this.parent.setListPosition(LIST_X, getListYForTab());
             this.parent.reCreateListWidget();
             if (this.parent.getListWidget() != null) {
                 this.parent.getListWidget().resetScrollbarPosition();

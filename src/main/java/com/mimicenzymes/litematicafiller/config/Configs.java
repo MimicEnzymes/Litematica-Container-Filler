@@ -72,18 +72,23 @@ public class Configs implements IConfigHandler {
     public static final ConfigBoolean ENABLE_SYNC_TOOL_QS_EXTRACTION = new ConfigBoolean("litematica_container_filler.config.name.enableSyncToolQsExtraction", true, "litematica_container_filler.config.comment.enableSyncToolQsExtraction");
     public static final ConfigBoolean ENABLE_TOOL_HOLD_REPEAT       = new ConfigBoolean("litematica_container_filler.config.name.enableToolHoldRepeat", false, "litematica_container_filler.config.comment.enableToolHoldRepeat");
     public static final ConfigInteger TOOL_REPEAT_SAME_CONTAINER_COOLDOWN = new ConfigInteger("litematica_container_filler.config.name.toolRepeatSameContainerCooldown", 20, 0, 200, "litematica_container_filler.config.comment.toolRepeatSameContainerCooldown");
+    public static final ConfigInteger TOOL_FILL_FULL_THRESHOLD       = new ConfigInteger("litematica_container_filler.config.name.toolFillFullThreshold", 2, 1, 36, "litematica_container_filler.config.comment.toolFillFullThreshold");
+    public static final ConfigBoolean COLLECT_MATERIAL_LIST_ITEMS_RETAIN = new ConfigBoolean("litematica_container_filler.config.name.collectMaterialListItemsRetain", false, "litematica_container_filler.config.comment.collectMaterialListItemsRetain");
+    public static final ConfigInteger COLLECT_MATERIAL_LIST_ITEMS_RETAIN_AMOUNT = new ConfigInteger("litematica_container_filler.config.name.collectMaterialListItemsRetainAmount", 1, 1, 63, "litematica_container_filler.config.comment.collectMaterialListItemsRetainAmount");
+    public static final ConfigBoolean COLLECT_MATERIAL_LIST_ITEMS_CLOSE_GUI = new ConfigBoolean("litematica_container_filler.config.name.collectMaterialListItemsCloseGui", true, "litematica_container_filler.config.comment.collectMaterialListItemsCloseGui");
     public static final ConfigOptionList CONTAINER_CLEAR_OUTPUT_MODE = new ConfigOptionList("litematica_container_filler.config.name.containerClearOutputMode", ContainerClearOutputMode.DROP, "litematica_container_filler.config.comment.containerClearOutputMode");
     public static final ConfigBoolean HIDE_TOOL_GUI                 = new ConfigBoolean("litematica_container_filler.config.name.hideToolGui", true, "litematica_container_filler.config.comment.hideToolGui");
     public static final ConfigBooleanHotkeyed ENABLE_TOOL_HUD       = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.enableToolHud", false, "", "litematica_container_filler.config.comment.enableToolHud");
+    public static final ConfigBoolean ENABLE_TOOL_SWITCH_HUD        = new ConfigBoolean("litematica_container_filler.config.name.enableToolSwitchHud", true, "litematica_container_filler.config.comment.enableToolSwitchHud");
     public static final ConfigBoolean TOOL_HUD_BORDER               = new ConfigBoolean("litematica_container_filler.config.name.toolHudBorder", false, "litematica_container_filler.config.comment.toolHudBorder");
     public static final ConfigOptionList TOOL_HUD_STYLE             = new ConfigOptionList("litematica_container_filler.config.name.toolHudStyle", ToolHudStyle.FIXED_CARD, "litematica_container_filler.config.comment.toolHudStyle");
     public static final ConfigDouble TOOL_HUD_OPACITY               = new ConfigDouble("litematica_container_filler.config.name.toolHudOpacity", 0.52D, 0.1D, 1.0D, "litematica_container_filler.config.comment.toolHudOpacity");
     public static final ConfigDouble TOOL_HUD_SMOOTHING             = new ConfigDouble("litematica_container_filler.config.name.toolHudSmoothing", 0.22D, 0.05D, 0.8D, "litematica_container_filler.config.comment.toolHudSmoothing");
     public static final ConfigInteger TOOL_HUD_OFFSET               = new ConfigInteger("litematica_container_filler.config.name.toolHudOffset", 34, 12, 120, "litematica_container_filler.config.comment.toolHudOffset");
-    public static final ConfigInteger TOOL_HUD_SCALE                = new ConfigInteger("litematica_container_filler.config.name.toolHudScale", 100, 70, 150, "litematica_container_filler.config.comment.toolHudScale");
-    public static final ConfigInteger TOOL_HUD_ICON_SCALE           = new ConfigInteger("litematica_container_filler.config.name.toolHudIconScale", 82, 50, 150, "litematica_container_filler.config.comment.toolHudIconScale");
-    public static final ConfigInteger TOOL_HUD_CUSTOM_X             = new ConfigInteger("litematica_container_filler.config.name.toolHudCustomX", 112, -1000, 1000, "litematica_container_filler.config.comment.toolHudCustomX");
-    public static final ConfigInteger TOOL_HUD_CUSTOM_Y             = new ConfigInteger("litematica_container_filler.config.name.toolHudCustomY", -86, -1000, 1000, "litematica_container_filler.config.comment.toolHudCustomY");
+    public static final ConfigInteger TOOL_HUD_SCALE                = new ConfigInteger("litematica_container_filler.config.name.toolHudScale", 80, 70, 150, "litematica_container_filler.config.comment.toolHudScale");
+    public static final ConfigInteger TOOL_HUD_ICON_SCALE           = new ConfigInteger("litematica_container_filler.config.name.toolHudIconScale", 62, 50, 150, "litematica_container_filler.config.comment.toolHudIconScale");
+    public static final ConfigInteger TOOL_HUD_CUSTOM_X             = new ConfigInteger("litematica_container_filler.config.name.toolHudCustomX", 100, -1000, 1000, "litematica_container_filler.config.comment.toolHudCustomX");
+    public static final ConfigInteger TOOL_HUD_CUSTOM_Y             = new ConfigInteger("litematica_container_filler.config.name.toolHudCustomY", -110, -1000, 1000, "litematica_container_filler.config.comment.toolHudCustomY");
     public static final ConfigInteger TOOL_HUD_FRAME_RATE           = new ConfigInteger("litematica_container_filler.config.name.toolHudFrameRate", 30, 0, 240, "litematica_container_filler.config.comment.toolHudFrameRate");
 
     // Container tool hotkeys
@@ -180,9 +185,14 @@ public class Configs implements IConfigHandler {
                 ENABLE_SYNC_TOOL_QS_EXTRACTION,
                 ENABLE_TOOL_HOLD_REPEAT,
                 TOOL_REPEAT_SAME_CONTAINER_COOLDOWN,
+                TOOL_FILL_FULL_THRESHOLD,
+                COLLECT_MATERIAL_LIST_ITEMS_RETAIN,
+                COLLECT_MATERIAL_LIST_ITEMS_RETAIN_AMOUNT,
+                COLLECT_MATERIAL_LIST_ITEMS_CLOSE_GUI,
                 CONTAINER_CLEAR_OUTPUT_MODE,
                 HIDE_TOOL_GUI,
                 ENABLE_TOOL_HUD,
+                ENABLE_TOOL_SWITCH_HUD,
                 TOOL_HUD_BORDER,
                 TOOL_HUD_STYLE,
                 TOOL_HUD_OPACITY,

@@ -41,6 +41,11 @@ public class ToolHudRenderer {
     private static final int[] SCRATCH_XS = new int[8];
     private static final int[] SCRATCH_YS = new int[8];
     private static final int[] SCRATCH_INTERSECTIONS = new int[16];
+    private static final long SWITCH_HUD_SLIDE_NANOS = 360_000_000L;
+    private static final long SWITCH_HUD_HOLD_NANOS = 180_000_000L;
+    private static final long SWITCH_HUD_FADE_NANOS = 260_000_000L;
+    private static final int SWITCH_HUD_EXTRA_HEIGHT = 12;
+    private static final float SWITCH_HUD_CONTENT_FADE_BAND = 0.42f;
 
     private static float visibility = 0.0f;
     private static float centerX = -1.0f;
@@ -67,22 +72,112 @@ public class ToolHudRenderer {
     private static float fixedPanelX = -1.0f;
     private static float fixedPanelY = -1.0f;
     private static float progressAnimation = 0.0f;
+    private static ContainerToolMode switchPreviousMode = ContainerToolMode.CLEAR;
+    private static ContainerToolMode switchCurrentMode = ContainerToolMode.CLEAR;
+    private static ContainerToolMode switchNextMode = ContainerToolMode.FILL_FULL;
+    private static long switchHudStartNanos = 0L;
+    private static int switchHudDirection = 1;
+    private static boolean switchHudActive = false;
+    private static float switchVisualExpand = 0.0f;
+    private static long lastSwitchVisualNanos = 0L;
 
     private ToolHudRenderer() {
     }
 
+    public static int[] getEditorPreviewCardSize(ContainerToolMode mode, int availableWidth, float switchExpand) {
+        Minecraft client = Minecraft.getInstance();
+        float scale = clamp(Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f, 0.7f, 1.5f);
+        float clampedSwitchExpand = clamp(switchExpand, 0.0f, 1.0f);
+        int maxPanelW = Math.max(72, availableWidth);
+        int minPanelW = Math.min(Math.round(MIN_PANEL_WIDTH * scale), maxPanelW);
+        int panelW = minPanelW;
+
+        if (client != null) {
+            CacheSnapshot snapshot = CacheSnapshot.capture();
+            try {
+                ContainerToolMode previewMode = mode != null ? mode : ContainerToolMode.CLEAR;
+                updateTextCache(client, previewMode);
+                int normalPanelW = clamp(Math.round(cachedPanelWidth * scale), minPanelW, maxPanelW);
+                int expandedPanelW = clamp(Math.round(Math.max(cachedPanelWidth, getSwitchPanelWidth(client, previewMode)) * scale), minPanelW, maxPanelW);
+                panelW = Math.round(lerp(normalPanelW, expandedPanelW, clampedSwitchExpand));
+            } finally {
+                snapshot.restore();
+            }
+        }
+
+        int panelH = Math.round((FIXED_PANEL_BASE_HEIGHT + SWITCH_HUD_EXTRA_HEIGHT * clampedSwitchExpand) * scale);
+        return new int[]{panelW, panelH};
+    }
+
+    public static void renderEditorPreview(GuiGraphicsExtractor context, int x, int y, int width, int height,
+                                           ContainerToolMode mode, float switchExpand, long nowNanos) {
+        Minecraft client = Minecraft.getInstance();
+        if (client == null) {
+            return;
+        }
+
+        CacheSnapshot snapshot = CacheSnapshot.capture();
+        try {
+            ContainerToolMode previewMode = mode != null ? mode : ContainerToolMode.CLEAR;
+            float scale = clamp(Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f, 0.7f, 1.5f);
+            float opacity = clamp((float) Configs.TOOL_HUD_OPACITY.getDoubleValue(), 0.1f, 1.0f);
+            int alpha = Math.round(255.0f * opacity);
+
+            updateTextCache(client, previewMode);
+            switchHudActive = false;
+            switchHudStartNanos = 0L;
+            drawToolCard(context, client, x, y, width, height, scale, alpha, 1.0f, false, nowNanos, clamp(switchExpand, 0.0f, 1.0f));
+        } finally {
+            snapshot.restore();
+        }
+    }
+
+    public static void showToolSwitch(ContainerToolMode previousMode, ContainerToolMode currentMode, boolean forward) {
+        if (currentMode == null) {
+            return;
+        }
+
+        switchPreviousMode = (ContainerToolMode) currentMode.cycle(false);
+        switchCurrentMode = currentMode;
+        switchNextMode = (ContainerToolMode) currentMode.cycle(true);
+        switchHudDirection = forward ? 1 : -1;
+        switchHudStartNanos = System.nanoTime();
+        switchHudActive = true;
+    }
+
     public static void render(GuiGraphicsExtractor context) {
         Minecraft client = Minecraft.getInstance();
-        if (client == null || client.player == null || client.level == null ||
-                !Configs.ENABLE_MOD.getBooleanValue() || !Configs.ENABLE_TOOL_HUD.getBooleanValue()) {
+        if (client == null || client.player == null || client.level == null || !Configs.ENABLE_MOD.getBooleanValue()) {
             visibility = 0.0f;
+            switchHudActive = false;
+            switchVisualExpand = 0.0f;
+            lastSwitchVisualNanos = 0L;
+            return;
+        }
+        if (client.options.hideGui) {
+            visibility = 0.0f;
+            switchHudActive = false;
+            switchVisualExpand = 0.0f;
+            lastSwitchVisualNanos = 0L;
+            return;
+        }
+
+        long now = System.nanoTime();
+        if (!Configs.ENABLE_TOOL_SWITCH_HUD.getBooleanValue()) {
+            switchHudActive = false;
+            switchVisualExpand = 0.0f;
+            lastSwitchVisualNanos = 0L;
+        }
+
+        if (!Configs.ENABLE_TOOL_HUD.getBooleanValue()) {
+            visibility = 0.0f;
+            renderToolSwitchHud(context, client, now);
             return;
         }
 
         ContainerToolStateMachine tools = ContainerToolStateMachine.getInstance();
         BlockPos target = tools.isToolEnabled() ? tools.getLookedContainerForHud(client) : null;
         boolean visible = target != null && client.screen == null;
-        long now = System.nanoTime();
         boolean updateFrame = shouldUpdateFrame(now);
         float smoothing = clamp((float) Configs.TOOL_HUD_SMOOTHING.getDoubleValue(), 0.05f, 0.8f);
         if (updateFrame) {
@@ -90,6 +185,7 @@ public class ToolHudRenderer {
         }
         if (!visible && visibility <= 0.02f) {
             visibility = 0.0f;
+            renderToolSwitchHud(context, client, now);
             return;
         }
 
@@ -98,12 +194,16 @@ public class ToolHudRenderer {
         ContainerToolMode mode = tools.getActiveMode();
         updateTextCache(client, mode);
 
+        float switchExpand = updateSwitchVisualExpand(now);
         float scale = clamp(Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f, 0.7f, 1.5f);
         int maxPanelW = Math.max(72, Math.round(width - EDGE_MARGIN * 2.0f));
         int minPanelW = Math.min(Math.round(MIN_PANEL_WIDTH * scale), maxPanelW);
-        int panelW = clamp(Math.round(cachedPanelWidth * scale), minPanelW, maxPanelW);
+        int normalPanelW = clamp(Math.round(cachedPanelWidth * scale), minPanelW, maxPanelW);
+        int expandedPanelW = clamp(Math.round(Math.max(cachedPanelWidth, getSwitchPanelWidth(client)) * scale), minPanelW, maxPanelW);
+        int panelW = Math.round(lerp(normalPanelW, expandedPanelW, switchExpand));
         ToolHudStyle style = getHudStyle();
-        int panelH = Math.round((style == ToolHudStyle.FIXED_CARD ? FIXED_PANEL_BASE_HEIGHT : ANCHORED_PANEL_BASE_HEIGHT) * scale);
+        int basePanelH = style == ToolHudStyle.FIXED_CARD ? FIXED_PANEL_BASE_HEIGHT : ANCHORED_PANEL_BASE_HEIGHT;
+        int panelH = Math.round((basePanelH + SWITCH_HUD_EXTRA_HEIGHT * switchExpand) * scale);
         int offset = Math.round(Configs.TOOL_HUD_OFFSET.getIntegerValue() * scale);
 
         if (style == ToolHudStyle.ANCHORED_CARD && visible && updateFrame) {
@@ -119,7 +219,7 @@ public class ToolHudRenderer {
         int alpha = Math.round(255.0f * opacity * eased);
 
         if (style == ToolHudStyle.FIXED_CARD) {
-            drawToolCard(context, client, Math.round(fixedPanelX), Math.round(fixedPanelY), panelW, panelH, scale, alpha, eased, tools.isWorking(), now);
+            drawToolCard(context, client, Math.round(fixedPanelX), Math.round(fixedPanelY), panelW, panelH, scale, alpha, eased, tools.isWorking(), now, switchExpand);
             return;
         }
 
@@ -133,7 +233,34 @@ public class ToolHudRenderer {
 
         drawLeader(context, startX, startY, endX, endY, alpha);
         drawAnchor(context, startX, startY, alpha);
-        drawToolCard(context, client, panelLeft, panelTop, panelW, panelH, scale, alpha, eased, tools.isWorking(), now);
+        drawToolCard(context, client, panelLeft, panelTop, panelW, panelH, scale, alpha, eased, tools.isWorking(), now, switchExpand);
+    }
+
+    private static void renderToolSwitchHud(GuiGraphicsExtractor context, Minecraft client, long nowNanos) {
+        boolean visible = isSwitchHudVisible(nowNanos);
+        float switchExpand = updateSwitchVisualExpand(nowNanos);
+        if (!visible && switchExpand <= 0.01f) {
+            return;
+        }
+
+        int width = context.guiWidth();
+        int height = context.guiHeight();
+        updateTextCache(client, switchCurrentMode);
+
+        float scale = clamp(Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f, 0.7f, 1.35f);
+        int maxPanelW = Math.max(72, Math.round(width - EDGE_MARGIN * 2.0f));
+        int minPanelW = Math.min(Math.round(MIN_PANEL_WIDTH * scale), maxPanelW);
+        int normalPanelW = clamp(Math.round(cachedPanelWidth * scale), minPanelW, maxPanelW);
+        int expandedPanelW = clamp(Math.round(Math.max(cachedPanelWidth, getSwitchPanelWidth(client)) * scale), minPanelW, maxPanelW);
+        int panelW = Math.round(lerp(normalPanelW, expandedPanelW, switchExpand));
+        int panelH = Math.round((FIXED_PANEL_BASE_HEIGHT + SWITCH_HUD_EXTRA_HEIGHT * switchExpand) * scale);
+        int panelX = (width - panelW) / 2;
+        int panelY = height - Math.max(54, Math.round(72.0f * scale));
+        panelY = clamp(panelY, 8, Math.max(8, height - panelH - 8));
+
+        float opacity = clamp((float) Configs.TOOL_HUD_OPACITY.getDoubleValue(), 0.1f, 1.0f);
+        int alpha = Math.round(255.0f * opacity * Math.max(getSwitchFade(nowNanos), switchExpand));
+        drawToolCard(context, client, panelX, panelY, panelW, panelH, scale, alpha, 1.0f, false, nowNanos, switchExpand);
     }
 
     private static ToolHudStyle getHudStyle() {
@@ -374,7 +501,7 @@ public class ToolHudRenderer {
         drawBentLine(context, x1, y1, corner[0], corner[1], x2, y2, withAlpha(ACCENT, Math.round(alpha * 0.66f)));
     }
 
-    private static void drawToolCard(GuiGraphicsExtractor context, Minecraft client, int x, int y, int width, int height, float scale, int alpha, float eased, boolean showProgress, long nowNanos) {
+    private static void drawToolCard(GuiGraphicsExtractor context, Minecraft client, int x, int y, int width, int height, float scale, int alpha, float eased, boolean showProgress, long nowNanos, float switchExpand) {
         int panelAlpha = Math.round(alpha * 0.92f);
         int borderAlpha = Math.round(alpha * 0.88f);
         int shadowAlpha = Math.round(alpha * 0.34f);
@@ -406,16 +533,23 @@ public class ToolHudRenderer {
         int textMaxUnscaled = unscaledWidth(textMaxWidth, scale);
         int progressReserve = showProgress ? barHeight + Math.max(3, Math.round(3.0f * scale)) : 0;
         int contentBottom = y + height - Math.max(5, Math.round(5.0f * scale)) - progressReserve;
-        int maxLines = countFittingLines(labelY, lineGap, textHeight, contentBottom, cachedSecondaryHint.isEmpty() ? 2 : 3);
-        drawHudToolIcon(context, iconCenterX, iconCenterY, iconScale, alpha, eased, cachedMode, nowNanos);
-        if (maxLines <= 1) {
-            drawScaledText(context, client, ellipsize(client, cachedHint, textMaxUnscaled), textX, Math.min(labelY, Math.max(y + headerHeight + 2, contentBottom - textHeight)), scale, withAlpha(0xFF55FF68, alpha));
-        } else {
-            drawScaledText(context, client, ellipsize(client, cachedLabel, textMaxUnscaled), textX, labelY, scale, withAlpha(MUTED_TEXT, Math.round(alpha * 0.88f)));
-            drawScaledText(context, client, ellipsize(client, cachedHint, textMaxUnscaled), textX, labelY + lineGap, scale, withAlpha(0xFF55FF68, alpha));
+        int normalHeight = height - Math.round(SWITCH_HUD_EXTRA_HEIGHT * switchExpand * scale);
+        int normalContentBottom = y + normalHeight - Math.max(5, Math.round(5.0f * scale)) - progressReserve;
+        boolean switching = switchExpand > 0.0025f || isSwitchHudVisible(nowNanos);
+        int normalMaxLines = countFittingLines(labelY, lineGap, textHeight, normalContentBottom,
+                switching || cachedSecondaryHint.isEmpty() ? 2 : 3);
+
+        float switchBlend = getSwitchContentBlend(switchExpand);
+        float normalFade = 1.0f - switchBlend;
+        int normalAlpha = Math.round(alpha * normalFade);
+        if (normalAlpha > 3) {
+            drawNormalToolCardContent(context, client, iconCenterX, iconCenterY, iconScale, scale, normalAlpha, eased, nowNanos,
+                    textX, labelY, lineGap, normalContentBottom, headerHeight, textHeight, textMaxUnscaled, normalMaxLines, normalFade);
         }
-        if (maxLines >= 3 && !cachedSecondaryHint.isEmpty()) {
-            drawScaledText(context, client, ellipsize(client, cachedSecondaryHint, textMaxUnscaled), textX, labelY + lineGap * 2, scale, withAlpha(MUTED_TEXT, Math.round(alpha * 0.78f)));
+        int switchAlpha = Math.round(alpha * switchBlend);
+        if (switchAlpha > 3) {
+            drawSwitchingToolCardContent(context, client, textX, iconBaseX, labelY, contentBottom, width, x,
+                    iconScale, scale, switchAlpha, nowNanos, textMaxUnscaled, switchExpand);
         }
 
         if (showProgress) {
@@ -426,6 +560,89 @@ public class ToolHudRenderer {
             context.fill(barX, barY, barX + barW, barY + barHeight, withAlpha(FIXED_PANEL_BAR_BG, Math.round(alpha * 0.58f)));
             context.fill(barX, barY, barX + fillW, barY + barHeight, withAlpha(FIXED_PANEL_BAR, Math.round(alpha * 0.95f)));
         }
+    }
+
+    private static void drawNormalToolCardContent(GuiGraphicsExtractor context, Minecraft client, int iconCenterX, int iconCenterY,
+                                                  float iconScale, float scale, int alpha, float eased, long nowNanos,
+                                                  int textX, int labelY, int lineGap, int contentBottom, int headerHeight,
+                                                  int textHeight, int textMaxUnscaled, int maxLines, float contentFade) {
+        int hintAlpha = Math.round(alpha * smoothStep(contentFade));
+        drawHudToolIcon(context, iconCenterX, iconCenterY, iconScale, alpha, eased, cachedMode, nowNanos);
+        if (maxLines <= 1) {
+            drawScaledText(context, client, ellipsize(client, cachedHint, textMaxUnscaled), textX,
+                    Math.min(labelY, Math.max(labelY - Math.max(2, Math.round(7.0f * scale)), contentBottom - textHeight)),
+                    scale, withAlpha(0xFF55FF68, hintAlpha));
+        } else {
+            drawScaledText(context, client, ellipsize(client, cachedLabel, textMaxUnscaled), textX, labelY, scale, withAlpha(MUTED_TEXT, Math.round(alpha * 0.88f)));
+            drawScaledText(context, client, ellipsize(client, cachedHint, textMaxUnscaled), textX, labelY + lineGap, scale, withAlpha(0xFF55FF68, hintAlpha));
+        }
+        if (maxLines >= 3 && !cachedSecondaryHint.isEmpty()) {
+            drawScaledText(context, client, ellipsize(client, cachedSecondaryHint, textMaxUnscaled), textX, labelY + lineGap * 2, scale, withAlpha(MUTED_TEXT, Math.round(hintAlpha * 0.78f)));
+        }
+    }
+
+    private static void drawSwitchingToolCardContent(GuiGraphicsExtractor context, Minecraft client, int textX, int iconBaseX,
+                                                     int contentTop, int contentBottom, int panelWidth, int panelX,
+                                                     float iconScale, float scale, int alpha, long nowNanos, int textMaxUnscaled,
+                                                     float switchExpand) {
+        int clipTop = contentTop - Math.round(5.0f * scale);
+        int clipBottom = contentBottom + Math.round(2.0f * scale);
+        if (clipBottom <= clipTop) {
+            return;
+        }
+
+        int centerY = (clipTop + clipBottom) / 2;
+        int rowGap = Math.max(17, Math.round(19.0f * scale));
+        float offset = getSwitchDeckOffset(nowNanos, rowGap);
+        int rowLeft = panelX + Math.round(7.0f * scale);
+        int rowRight = panelX + panelWidth - Math.round(7.0f * scale);
+        ContainerToolMode currentMode = cachedMode != null ? cachedMode : switchCurrentMode;
+        ContainerToolMode previousMode = (ContainerToolMode) currentMode.cycle(false);
+        ContainerToolMode nextMode = (ContainerToolMode) currentMode.cycle(true);
+        context.enableScissor(rowLeft, clipTop, rowRight, clipBottom);
+        drawToolSwitchRow(context, client, previousMode, iconBaseX, textX, centerY - rowGap + offset, centerY, rowGap, iconScale, scale, alpha, nowNanos, textMaxUnscaled, false, switchExpand);
+        drawToolSwitchRow(context, client, currentMode, iconBaseX, textX, centerY + offset, centerY, rowGap, iconScale, scale, alpha, nowNanos, textMaxUnscaled, true, switchExpand);
+        drawToolSwitchRow(context, client, nextMode, iconBaseX, textX, centerY + rowGap + offset, centerY, rowGap, iconScale, scale, alpha, nowNanos, textMaxUnscaled, false, switchExpand);
+        context.disableScissor();
+    }
+
+    private static void drawToolSwitchRow(GuiGraphicsExtractor context, Minecraft client, ContainerToolMode mode, int iconX, int textX,
+                                          float rowCenterY, int centerY, int rowGap, float iconScale, float scale, int alpha,
+                                          long nowNanos, int textMaxUnscaled, boolean isCurrentRow, float switchExpand) {
+        if (mode == null) {
+            return;
+        }
+
+        float distance = Math.abs(rowCenterY - centerY) / Math.max(1.0f, rowGap);
+        if (distance > 1.35f) {
+            return;
+        }
+
+        float focus = 1.0f - clamp(distance, 0.0f, 1.0f);
+        float rowVisibility = isCurrentRow ? 1.0f : Math.max(switchExpand, focus);
+        int rowAlpha = Math.round(alpha * (0.34f + focus * 0.66f) * rowVisibility);
+        if (rowAlpha <= 3) {
+            return;
+        }
+
+        int rowY = Math.round(rowCenterY);
+        float rowTextScale = scale * (0.88f + focus * 0.12f);
+        float rowIconScale = iconScale * (0.62f + focus * 0.34f);
+        int labelColor = withAlpha(isCurrentRow && focus > 0.58f ? TEXT : MUTED_TEXT, Math.round(rowAlpha * (0.82f + focus * 0.18f)));
+        int iconY = rowY + Math.round((mode == ContainerToolMode.COPY ? 0.0f : (float)Math.sin(nowNanos / 260_000_000.0D) * 1.4f * focus) * scale);
+        int iconCenterX = iconX + (mode == ContainerToolMode.COPY ? Math.round((float)Math.sin(nowNanos / 260_000_000.0D) * 1.8f * focus * scale) : 0);
+
+        float focusBackground = smoothStep(clamp((focus - 0.18f) / 0.82f, 0.0f, 1.0f));
+        int focusBackgroundAlpha = Math.round(alpha * 0.08f * focusBackground);
+        if (focusBackgroundAlpha > 1) {
+            context.fill(textX - Math.round(5.0f * scale), rowY - Math.round(11.0f * scale),
+                    textX + Math.round(Math.min(textMaxUnscaled * rowTextScale, 112.0f * scale)), rowY + Math.round(10.0f * scale),
+                    withAlpha(ACCENT, focusBackgroundAlpha));
+        }
+
+        drawHudToolIcon(context, iconCenterX, iconY, rowIconScale, rowAlpha, focus, mode, nowNanos);
+        String label = ellipsize(client, mode.getDisplayName(), Math.max(0, textMaxUnscaled));
+        drawScaledText(context, client, label, textX, rowY - Math.round(client.font.lineHeight * rowTextScale * 0.5f), rowTextScale, labelColor);
     }
 
     private static int countFittingLines(int firstY, int lineGap, int textHeight, int bottom, int requestedLines) {
@@ -439,9 +656,15 @@ public class ToolHudRenderer {
     }
 
     private static void drawHudToolIcon(GuiGraphicsExtractor context, int cx, int cy, float scale, int alpha, float eased, ContainerToolMode mode, long nowNanos) {
+        if (mode == ContainerToolMode.COLLECT_MATERIALS) {
+            drawCollectMaterialsIcon(context, cx, cy, scale, alpha, eased, nowNanos);
+            return;
+        }
+
         ArrowDirection direction = switch (mode) {
             case CLEAR -> ArrowDirection.UP;
             case COPY -> ArrowDirection.RIGHT;
+            case COLLECT_MATERIALS -> ArrowDirection.DOWN;
             case PACK, FILL_FULL -> ArrowDirection.DOWN;
         };
 
@@ -464,6 +687,44 @@ public class ToolHudRenderer {
         }
 
         drawHudArrowIcon(context, cx, cy, scale, alpha, direction);
+    }
+
+    private static void drawCollectMaterialsIcon(GuiGraphicsExtractor context, int cx, int cy, float scale, int alpha, float eased, long nowNanos) {
+        int trayW = Math.max(20, Math.round(25.0f * scale));
+        int trayH = Math.max(7, Math.round(8.0f * scale));
+        int trayX = cx - trayW / 2;
+        int trayY = cy + Math.round(7.0f * scale);
+        int tray = withAlpha(0xFF122C32, Math.round(alpha * 0.72f));
+        int edge = withAlpha(ACCENT, Math.round(alpha * 0.82f));
+        int glow = withAlpha(ACCENT, Math.round(alpha * 0.18f * eased));
+        context.fill(trayX + 2, trayY - 2, trayX + trayW - 2, trayY + trayH + 2, glow);
+        context.fill(trayX + 1, trayY, trayX + trayW - 1, trayY + trayH, tray);
+        context.fill(trayX, trayY + 1, trayX + 2, trayY + trayH, edge);
+        context.fill(trayX + trayW - 2, trayY + 1, trayX + trayW, trayY + trayH, edge);
+        context.fill(trayX + 2, trayY + trayH - 2, trayX + trayW - 2, trayY + trayH, edge);
+
+        double time = nowNanos / 220_000_000.0D;
+        for (int i = 0; i < 3; i++) {
+            float phase = (float)((time + i * 0.34D) % 1.0D);
+            float fall = easeOutCubic(phase);
+            int dotX = cx + Math.round((-8.0f + i * 8.0f + (float)Math.sin(time + i) * 1.4f) * scale);
+            int dotY = cy - Math.round((15.0f - fall * 20.0f) * scale);
+            int dotAlpha = Math.round(alpha * (1.0f - phase * 0.55f) * eased);
+            int dotColor = switch (i) {
+                case 0 -> withAlpha(0xFF55FF68, dotAlpha);
+                case 1 -> withAlpha(ACCENT, dotAlpha);
+                default -> withAlpha(0xFFFFD45A, dotAlpha);
+            };
+            int size = Math.max(2, Math.round((2.2f + focusPulse(phase) * 0.8f) * scale));
+            context.fill(dotX - size / 2, dotY - size / 2, dotX + size, dotY + size, dotColor);
+        }
+
+        int arrowAlpha = Math.round(alpha * 0.72f * eased);
+        drawHudArrowIcon(context, cx, cy - Math.round(7.0f * scale), scale * 0.42f, arrowAlpha, ArrowDirection.DOWN);
+    }
+
+    private static float focusPulse(float value) {
+        return (float)Math.sin(clamp(value, 0.0f, 1.0f) * Math.PI);
     }
 
     private static void drawHudArrowIcon(GuiGraphicsExtractor context, int cx, int cy, float scale, int alpha, ArrowDirection direction) {
@@ -692,9 +953,157 @@ public class ToolHudRenderer {
         context.fill(x + 1, y + 1, x + width - 1, y + height - 1, color);
     }
 
+    private static class CacheSnapshot {
+        private final ContainerToolMode mode;
+        private final String hotkey;
+        private final String switchHotkey;
+        private final String closeHotkey;
+        private final String label;
+        private final String hint;
+        private final String secondaryHint;
+        private final int panelWidth;
+        private final boolean switchActive;
+        private final long switchStartNanos;
+
+        private CacheSnapshot(ContainerToolMode mode, String hotkey, String switchHotkey, String closeHotkey,
+                              String label, String hint, String secondaryHint, int panelWidth,
+                              boolean switchActive, long switchStartNanos) {
+            this.mode = mode;
+            this.hotkey = hotkey;
+            this.switchHotkey = switchHotkey;
+            this.closeHotkey = closeHotkey;
+            this.label = label;
+            this.hint = hint;
+            this.secondaryHint = secondaryHint;
+            this.panelWidth = panelWidth;
+            this.switchActive = switchActive;
+            this.switchStartNanos = switchStartNanos;
+        }
+
+        private static CacheSnapshot capture() {
+            return new CacheSnapshot(cachedMode, cachedHotkey, cachedSwitchHotkey, cachedCloseHotkey,
+                    cachedLabel, cachedHint, cachedSecondaryHint, cachedPanelWidth, switchHudActive, switchHudStartNanos);
+        }
+
+        private void restore() {
+            cachedMode = this.mode;
+            cachedHotkey = this.hotkey;
+            cachedSwitchHotkey = this.switchHotkey;
+            cachedCloseHotkey = this.closeHotkey;
+            cachedLabel = this.label;
+            cachedHint = this.hint;
+            cachedSecondaryHint = this.secondaryHint;
+            cachedPanelWidth = this.panelWidth;
+            switchHudActive = this.switchActive;
+            switchHudStartNanos = this.switchStartNanos;
+        }
+    }
+
     private static float easeOutCubic(float value) {
         float t = clamp(value, 0.0f, 1.0f);
         return 1.0f - (float)Math.pow(1.0f - t, 3.0D);
+    }
+
+    private static float smoothStep(float value) {
+        float t = clamp(value, 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    }
+
+    private static int getSwitchPanelWidth(Minecraft client) {
+        int width = cachedPanelWidth;
+        width = Math.max(width, client.font.width(switchPreviousMode.getDisplayName()) + 58);
+        width = Math.max(width, client.font.width(switchCurrentMode.getDisplayName()) + 58);
+        width = Math.max(width, client.font.width(switchNextMode.getDisplayName()) + 58);
+        return Math.max(MIN_PANEL_WIDTH, width);
+    }
+
+    private static int getSwitchPanelWidth(Minecraft client, ContainerToolMode mode) {
+        ContainerToolMode current = mode != null ? mode : ContainerToolMode.CLEAR;
+        int width = cachedPanelWidth;
+        width = Math.max(width, client.font.width(((ContainerToolMode) current.cycle(false)).getDisplayName()) + 58);
+        width = Math.max(width, client.font.width(current.getDisplayName()) + 58);
+        width = Math.max(width, client.font.width(((ContainerToolMode) current.cycle(true)).getDisplayName()) + 58);
+        return Math.max(MIN_PANEL_WIDTH, width);
+    }
+
+    private static long getSwitchElapsed(long nowNanos) {
+        if (!Configs.ENABLE_TOOL_SWITCH_HUD.getBooleanValue() || !switchHudActive || switchHudStartNanos <= 0L) {
+            return -1L;
+        }
+
+        long elapsed = nowNanos - switchHudStartNanos;
+        long total = SWITCH_HUD_SLIDE_NANOS + SWITCH_HUD_HOLD_NANOS + SWITCH_HUD_FADE_NANOS;
+        if (elapsed >= total) {
+            switchHudActive = false;
+            return -1L;
+        }
+        return Math.max(0L, elapsed);
+    }
+
+    private static boolean isSwitchHudVisible(long nowNanos) {
+        return getSwitchElapsed(nowNanos) >= 0L;
+    }
+
+    private static float getSwitchFade(long nowNanos) {
+        long elapsed = getSwitchElapsed(nowNanos);
+        if (elapsed < 0L) {
+            return 0.0f;
+        }
+
+        if (elapsed <= SWITCH_HUD_SLIDE_NANOS + SWITCH_HUD_HOLD_NANOS) {
+            return 1.0f;
+        }
+        return 1.0f - easeOutCubic((elapsed - SWITCH_HUD_SLIDE_NANOS - SWITCH_HUD_HOLD_NANOS) / (float) SWITCH_HUD_FADE_NANOS);
+    }
+
+    private static float getSwitchExpand(long nowNanos) {
+        long elapsed = getSwitchElapsed(nowNanos);
+        if (elapsed < 0L) {
+            return 0.0f;
+        }
+        if (elapsed <= SWITCH_HUD_SLIDE_NANOS) {
+            return easeOutCubic(elapsed / (float) SWITCH_HUD_SLIDE_NANOS);
+        }
+        if (elapsed <= SWITCH_HUD_SLIDE_NANOS + SWITCH_HUD_HOLD_NANOS) {
+            return 1.0f;
+        }
+        return 1.0f - easeOutCubic((elapsed - SWITCH_HUD_SLIDE_NANOS - SWITCH_HUD_HOLD_NANOS) / (float) SWITCH_HUD_FADE_NANOS);
+    }
+
+    private static float getSwitchContentBlend(float switchExpand) {
+        float progress = clamp(switchExpand / SWITCH_HUD_CONTENT_FADE_BAND, 0.0f, 1.0f);
+        return progress * progress * (3.0f - 2.0f * progress);
+    }
+
+    private static float updateSwitchVisualExpand(long nowNanos) {
+        float target = getSwitchExpand(nowNanos);
+        if (lastSwitchVisualNanos <= 0L) {
+            switchVisualExpand = target;
+            lastSwitchVisualNanos = nowNanos;
+            return switchVisualExpand;
+        }
+
+        float deltaSeconds = clamp((nowNanos - lastSwitchVisualNanos) / 1_000_000_000.0f, 0.0f, 0.08f);
+        lastSwitchVisualNanos = nowNanos;
+        float speed = target > switchVisualExpand ? 18.0f : 12.0f;
+        float blend = 1.0f - (float)Math.exp(-speed * deltaSeconds);
+        switchVisualExpand += (target - switchVisualExpand) * blend;
+        if (Math.abs(target - switchVisualExpand) < 0.0025f) {
+            switchVisualExpand = target;
+        }
+        return clamp(switchVisualExpand, 0.0f, 1.0f);
+    }
+
+    private static float getSwitchDeckOffset(long nowNanos, int rowGap) {
+        long elapsed = getSwitchElapsed(nowNanos);
+        if (elapsed < 0L) {
+            return 0.0f;
+        }
+
+        float progress = easeOutCubic(clamp(elapsed / (float) SWITCH_HUD_SLIDE_NANOS, 0.0f, 1.0f));
+        float startOffset = switchHudDirection >= 0 ? rowGap : -rowGap;
+        float overshoot = (float)Math.sin(progress * Math.PI) * 2.5f * Math.signum(switchHudDirection);
+        return startOffset * (1.0f - progress) + overshoot;
     }
 
     private static boolean hasLayout() {
@@ -709,6 +1118,10 @@ public class ToolHudRenderer {
         float delta = target - current;
         float eased = 1.0f - (float) Math.pow(1.0f - clamp(smoothing, 0.01f, 0.95f), 1.25D);
         return current + delta * eased;
+    }
+
+    private static float lerp(float from, float to, float progress) {
+        return from + (to - from) * clamp(progress, 0.0f, 1.0f);
     }
 
     private static float smoothTowardWithSnap(float current, float target, float smoothing, float snapEpsilon) {

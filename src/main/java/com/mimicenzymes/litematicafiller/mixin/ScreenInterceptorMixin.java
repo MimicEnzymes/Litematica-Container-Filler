@@ -11,17 +11,23 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-// 鎷︽埅鍘熺増Minecraft瀹㈡埛绔殑灞忓箷娓叉煋
 @Mixin(Minecraft.class)
 public class ScreenInterceptorMixin {
     @Inject(method = "setScreen", at = @At("HEAD"), cancellable = true)
     private void interceptScreen(Screen screen, CallbackInfo ci) {
-        if (!Configs.ENABLE_MOD.getBooleanValue()) return;
-        if (screen instanceof AbstractContainerScreen) {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) {
+            return;
+        }
+
+        if (screen instanceof AbstractContainerScreen<?>) {
+            Screen currentScreen = ((Minecraft)(Object)this).screen;
             boolean shouldHideProjectionFillGui = Configs.HIDE_PROJECTION_FILL_GUI.getBooleanValue() &&
                     AutoFillerStateMachine.getInstance().shouldBlockScreens();
             boolean shouldHideToolGui = ContainerToolStateMachine.getInstance().shouldBlockScreens();
-            if (shouldHideProjectionFillGui || shouldHideToolGui) {
+            boolean shouldPreservePassiveScreen = currentScreen != null &&
+                    !(currentScreen instanceof AbstractContainerScreen<?>) &&
+                    (AutoFillerStateMachine.getInstance().isWorking() || ContainerToolStateMachine.getInstance().isWorking());
+            if (shouldHideProjectionFillGui || shouldHideToolGui || shouldPreservePassiveScreen) {
                 ci.cancel();
             }
         }

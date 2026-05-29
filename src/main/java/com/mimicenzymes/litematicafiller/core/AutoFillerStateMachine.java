@@ -9,27 +9,28 @@ import com.mimicenzymes.litematicafiller.dependency.QuickShulkerWrapper;
 import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.network.ClickPacketRateLimiter;
 import com.mimicenzymes.litematicafiller.network.TakeItOutCompat;
-import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
-import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.CrafterMenu;
+import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.inventory.CrafterMenu;
-import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.Slot;
-import net.minecraft.world.inventory.ContainerInput;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.network.chat.Component;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -575,7 +576,7 @@ public class AutoFillerStateMachine {
         }
         actionQueue.add(() -> {
             if (client.player != null && client.player.containerMenu != client.player.inventoryMenu) {
-                client.player.closeContainer();
+                closeHandledScreen(client);
             }
         });
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
@@ -719,7 +720,7 @@ public class AutoFillerStateMachine {
         blacklistedSlots.clear();
         ClickPacketRateLimiter.reset();
         if (client != null && client.player != null && client.player.containerMenu != client.player.inventoryMenu) {
-            client.player.closeContainer();
+            closeHandledScreen(client);
         }
         reset();
     }
@@ -970,7 +971,7 @@ public class AutoFillerStateMachine {
     }
 
     private void doInspectionPhase(Minecraft client) {
-        actionQueue.add(() -> client.player.closeContainer());
+        actionQueue.add(() -> closeHandledScreen(client));
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
         actionQueue.add(() -> {
             currentTask.needsInspection = false;
@@ -1209,7 +1210,7 @@ public class AutoFillerStateMachine {
         sendFeedback(client, Component.translatable("litematica_container_filler.message.stashing_items").getString(), true);
 
         actionQueue.add(() -> {
-            client.player.closeContainer();
+            closeHandledScreen(client);
             guiOpenedForPhase = false;
             silentlyExtracting = false;
             activeShulkerSlot = -1;
@@ -1291,16 +1292,18 @@ public class AutoFillerStateMachine {
             sendFeedback(client, Component.translatable("litematica_container_filler.message.opening_shulker_extract").getString(), true);
         }
 
-        actionQueue.add(() -> {
-            if (getQuickShulkerOpenMode() == QuickShulkerOpenMode.SIMULATE_CLICK) {
-                simulateOpenShulkerClick(client, slot);
-            } else {
-                shulkerExtractor.requestOpenShulker(slot);
-            }
-        });
+        actionQueue.add(() -> openQueuedShulker(client, slot));
         uiWaitTimer = 0;
         actionQueue.add(this::waitForUi);
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
+    }
+
+    private void openQueuedShulker(Minecraft client, int slot) {
+        if (getQuickShulkerOpenMode() == QuickShulkerOpenMode.SIMULATE_CLICK) {
+            simulateOpenShulkerClick(client, slot);
+        } else {
+            shulkerExtractor.requestOpenShulker(slot);
+        }
     }
 
     private boolean currentCrafterNeedsLocking(Minecraft client) {
@@ -1556,7 +1559,7 @@ public class AutoFillerStateMachine {
         final boolean forceDump = (remainingEmptySlots <= 0);
 
         actionQueue.add(() -> {
-            client.player.closeContainer();
+            closeHandledScreen(client);
             guiOpenedForPhase = false;
             silentlyExtracting = false;
             activeShulkerSlot = -1;
@@ -1584,7 +1587,7 @@ public class AutoFillerStateMachine {
         if (Configs.STORE_ORDERLY.getBooleanValue()) {
             int[] stashAction = findStashAction(client, currentTask.requiredItems.values());
             if (stashAction != null) {
-                actionQueue.add(() -> client.player.closeContainer());
+                actionQueue.add(() -> closeHandledScreen(client));
                 actionQueue.add(() -> actionWaitTicks = getDelay(1));
                 actionQueue.add(() -> {
                     stashShulkerSlot = stashAction[0];
@@ -1938,7 +1941,7 @@ public class AutoFillerStateMachine {
 
                 RealContainerCache.updateFromHandler(client, handler);
 
-                actionQueue.add(() -> client.player.closeContainer());
+                actionQueue.add(() -> closeHandledScreen(client));
                 actionQueue.add(() -> actionWaitTicks = getDelay(1));
                 actionQueue.add(() -> checkAndStartGatheringOrFilling(client));
             } else {
@@ -1962,7 +1965,7 @@ public class AutoFillerStateMachine {
 
         sendFeedback(client, Component.translatable("litematica_container_filler.message.fill_completed").getString(), true);
 
-        actionQueue.add(() -> client.player.closeContainer());
+        actionQueue.add(() -> closeHandledScreen(client));
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
 
         actionQueue.add(() -> {
@@ -2041,7 +2044,7 @@ public class AutoFillerStateMachine {
         }
 
         actionQueue.add(() -> {
-            client.player.closeContainer();
+            closeHandledScreen(client);
             guiOpenedForPhase = false;
             silentlyExtracting = false;
             activeShulkerSlot = -1;
@@ -2103,7 +2106,7 @@ public class AutoFillerStateMachine {
         taskQueue.clear();
         if (currentTask != null && !currentTask.forcedManual) {
             if (client.player != null && client.player.containerMenu != client.player.inventoryMenu) {
-                client.player.closeContainer();
+                closeHandledScreen(client);
             }
             reset();
         }
@@ -2116,7 +2119,7 @@ public class AutoFillerStateMachine {
         blacklistedSlots.clear();
         ClickPacketRateLimiter.reset();
         if (client.player != null && client.player.containerMenu != client.player.inventoryMenu) {
-            client.player.closeContainer();
+            closeHandledScreen(client);
         }
         reset();
     }
@@ -2246,6 +2249,23 @@ public class AutoFillerStateMachine {
     private boolean isPassiveScreenOpen(Minecraft client) {
         Screen screen = client.screen;
         return screen != null && !(screen instanceof AbstractContainerScreen<?>);
+    }
+
+    private void closeHandledScreen(Minecraft client) {
+        if (client == null || client.player == null) return;
+
+        AbstractContainerMenu handler = client.player.containerMenu;
+        if (handler == client.player.inventoryMenu) return;
+
+        if (isPassiveScreenOpen(client) && client.getConnection() != null) {
+            client.getConnection().send(new ServerboundContainerClosePacket(handler.containerId));
+            client.player.containerMenu = client.player.inventoryMenu;
+            currentMapper = null;
+            mappedHandler = null;
+            return;
+        }
+
+        client.player.closeContainer();
     }
 
     private boolean hasItemAnywhere(Minecraft client, ItemStack target) {
