@@ -39,17 +39,7 @@ public class LitematicaContainerReader {
     }
 
     public static BlockPos[] getLargeBarrelConfirmationPair(net.minecraft.world.World world, BlockPos pos, BlockState state) {
-        if (Configs.getCarpetLargeBarrelMode() != CarpetLargeBarrelMode.AUTO) return null;
-        BlockPos[] pair = getPotentialLargeBarrelPair(world, pos, state);
-        if (pair == null) return null;
-        if (RealContainerCache.isConfirmedLargeBarrel(pair[0]) || RealContainerCache.isConfirmedLargeBarrel(pair[1])) {
-            return null;
-        }
-        int firstSlots = RealContainerCache.getCachedKnownSlotCount(pair[0]);
-        if (firstSlots > 0 && firstSlots < 54) return null;
-        int secondSlots = RealContainerCache.getCachedKnownSlotCount(pair[1]);
-        if (secondSlots > 0 && secondSlots < 54) return null;
-        return pair;
+        return null;
     }
 
     public static BlockPos[] getPotentialLargeBarrelPair(net.minecraft.world.World world, BlockPos pos, BlockState state) {
@@ -80,23 +70,7 @@ public class LitematicaContainerReader {
     private static boolean shouldUseLargeBarrels(net.minecraft.world.World world, BlockPos pos, BlockState state, BlockPos[] pair, boolean renderOnly, int knownSlotCount) {
         CarpetLargeBarrelMode mode = Configs.getCarpetLargeBarrelMode();
         if (mode == CarpetLargeBarrelMode.OFF) return false;
-        if (mode == CarpetLargeBarrelMode.ON) return true;
-
-        BlockPos mate = pair[0].equals(pos) ? pair[1] : pair[0];
-
-        if (knownSlotCount >= 54) return true;
-        if (RealContainerCache.isConfirmedLargeBarrel(pair[0]) || RealContainerCache.isConfirmedLargeBarrel(pair[1])) return true;
-        if (knownSlotCount > 0) return false;
-
-        int cachedSlotCount = RealContainerCache.getKnownSlotCount(pos);
-        if (cachedSlotCount >= 54) return true;
-        if (cachedSlotCount > 0) return false;
-
-        int mateCachedSlotCount = RealContainerCache.getKnownSlotCount(mate);
-        if (mateCachedSlotCount >= 54) return true;
-        if (mateCachedSlotCount > 0) return false;
-
-        return false;
+        return mode == CarpetLargeBarrelMode.ON;
     }
 
     private static BlockPos[] getLargeBarrelPair(net.minecraft.world.World world, BlockPos pos, Direction facing, BlockPos pos2) {
@@ -134,6 +108,8 @@ public class LitematicaContainerReader {
         BlockState state = schematicWorld.getBlockState(worldPos);
         BlockPos[] halves = getDoubleContainerHalves(schematicWorld, worldPos, state);
 
+        String schematicKey = findSchematicKeyForPosition(worldPos);
+
         if (halves != null) {
             Map<Integer, ItemStack> rightHalf = getSingleContainerItems(schematicWorld, halves[0], registries);
             Map<Integer, ItemStack> leftHalf = getSingleContainerItems(schematicWorld, halves[1], registries);
@@ -143,7 +119,7 @@ public class LitematicaContainerReader {
             items.putAll(getSingleContainerItems(schematicWorld, worldPos, registries));
         }
 
-        MaterialReplacer.replaceInMap(items);
+        MaterialReplacer.replaceInMap(items, schematicKey);
 
         return items;
     }
@@ -170,23 +146,24 @@ public class LitematicaContainerReader {
 
         BlockState state = schematicWorld.getBlockState(worldPos);
         BlockPos[] halves = getDoubleContainerHalves(schematicWorld, worldPos, state);
+        String schematicKey = findSchematicKeyForPosition(worldPos);
 
         if (halves != null) {
             Map<Integer, ItemStack> combined = RealContainerCache.combineDoubleContainerItems(
                     getSingleContainerItems(schematicWorld, halves[0], registries),
                     getSingleContainerItems(schematicWorld, halves[1], registries));
-            collectIgnoredSlots(combined, ignoredSlots);
+            collectIgnoredSlots(combined, ignoredSlots, schematicKey);
         } else {
-            collectIgnoredSlots(getSingleContainerItems(schematicWorld, worldPos, registries), ignoredSlots);
+            collectIgnoredSlots(getSingleContainerItems(schematicWorld, worldPos, registries), ignoredSlots, schematicKey);
         }
 
         return ignoredSlots;
     }
 
-    private static void collectIgnoredSlots(Map<Integer, ItemStack> items, Set<Integer> ignoredSlots) {
+    private static void collectIgnoredSlots(Map<Integer, ItemStack> items, Set<Integer> ignoredSlots, String schematicKey) {
         if (items == null) return;
         for (Map.Entry<Integer, ItemStack> entry : items.entrySet()) {
-            if (MaterialReplacer.isIgnored(entry.getValue())) {
+            if (MaterialReplacer.isIgnored(entry.getValue(), schematicKey)) {
                 ignoredSlots.add(entry.getKey());
             }
         }
@@ -281,5 +258,38 @@ public class LitematicaContainerReader {
         MaterialReplacer.replaceInMap(items);
 
         return items;
+    }
+
+    public static String findSchematicKeyForPosition(BlockPos worldPos) {
+        if (worldPos == null) return null;
+
+        try {
+            var manager = fi.dy.masa.litematica.data.DataManager.getSchematicPlacementManager();
+            if (manager == null) return null;
+
+            for (fi.dy.masa.litematica.schematic.placement.SchematicPlacement placement : manager.getAllSchematicsPlacements()) {
+                if (placement == null || !placement.isEnabled()) continue;
+
+                for (fi.dy.masa.litematica.selection.Box box : placement.getSubRegionBoxes(
+                        fi.dy.masa.litematica.schematic.placement.SubRegionPlacement.RequiredEnabled.PLACEMENT_ENABLED).values()) {
+                    BlockPos p1 = box.getPos1();
+                    BlockPos p2 = box.getPos2();
+                    int minX = Math.min(p1.getX(), p2.getX());
+                    int maxX = Math.max(p1.getX(), p2.getX());
+                    int minY = Math.min(p1.getY(), p2.getY());
+                    int maxY = Math.max(p1.getY(), p2.getY());
+                    int minZ = Math.min(p1.getZ(), p2.getZ());
+                    int maxZ = Math.max(p1.getZ(), p2.getZ());
+                    if (worldPos.getX() >= minX && worldPos.getX() <= maxX
+                            && worldPos.getY() >= minY && worldPos.getY() <= maxY
+                            && worldPos.getZ() >= minZ && worldPos.getZ() <= maxZ) {
+                        return SchematicMaterialReplacementContext.keyForPlacement(placement);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return null;
     }
 }

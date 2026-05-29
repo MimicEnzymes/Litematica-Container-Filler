@@ -305,9 +305,8 @@ public class HighlightScanner {
         long now = System.currentTimeMillis();
         boolean modOperating = AutoFillerStateMachine.getInstance().isWorking() || ContainerToolStateMachine.getInstance().isWorking();
         boolean syncLayer = Configs.SYNC_LITE_LAYER.getBooleanValue();
-        boolean hideCompleted = Configs.HIDE_COMPLETED_CONTAINERS.getBooleanValue();
         LayerRange renderLayerRange = syncLayer ? fi.dy.masa.litematica.data.DataManager.getRenderLayerRange() : null;
-        processDirtyHighlights(client, schematicWorld, renderLayerRange, hideCompleted, now);
+        processDirtyHighlights(client, schematicWorld, renderLayerRange, now);
 
         boolean userHandledScreenOpen = client.currentScreen instanceof HandledScreen<?> && !modOperating;
         if (userHandledScreenOpen) {
@@ -351,7 +350,7 @@ public class HighlightScanner {
             if (currentRadius > 0 && pos.getSquaredDistance(currentCenter) > radiusSq) continue;
 
             HighlightState type = evaluateHighlightForPosition(client, schematicWorld, pos, renderLayerRange,
-                    hideCompleted, hasManualOverrides, now);
+                    hasManualOverrides, now);
             if (type != null) {
                 nextHighlights.put(pos, type);
             }
@@ -366,7 +365,6 @@ public class HighlightScanner {
     private static void processDirtyHighlights(MinecraftClient client,
                                                net.minecraft.world.World schematicWorld,
                                                LayerRange renderLayerRange,
-                                               boolean hideCompleted,
                                                long now) {
         Set<BlockPos> changed = RealContainerCache.drainChangedPositions();
         for (BlockPos changedPos : changed) {
@@ -392,7 +390,7 @@ public class HighlightScanner {
 
             HighlightState previous = HIGHLIGHT_MAP.get(renderPos);
             HighlightState next = evaluateHighlightForPosition(client, schematicWorld, renderPos, renderLayerRange,
-                    hideCompleted, hasManualOverrides, now);
+                    hasManualOverrides, now);
 
             boolean changedHighlight;
             if (next == null) {
@@ -425,7 +423,6 @@ public class HighlightScanner {
                                                                net.minecraft.world.World schematicWorld,
                                                                BlockPos pos,
                                                                LayerRange renderLayerRange,
-                                                               boolean hideCompleted,
                                                                boolean hasManualOverrides,
                                                                long now) {
         BlockState state = schematicWorld.getBlockState(pos);
@@ -498,7 +495,6 @@ public class HighlightScanner {
 
             if (!hasJob && type == HighlightState.SATISFIED) return null;
             if (hasJob || type != HighlightState.UNKNOWN) {
-                if (hideCompleted && type == HighlightState.SATISFIED) return null;
                 return type;
             }
             return null;
@@ -506,8 +502,8 @@ public class HighlightScanner {
 
         if (!hasJob) return null;
         if (manualCompleted) return HighlightState.MANUAL_COMPLETED;
-        if (manualNeedsFill || !hideCompleted) return manualNeedsFill ? HighlightState.MANUAL_NEEDS_FILL : HighlightState.UNKNOWN;
-        return null;
+        if (manualNeedsFill) return HighlightState.MANUAL_NEEDS_FILL;
+        return HighlightState.UNKNOWN;
     }
 
     private static boolean isRealContainerMissing(MinecraftClient client, BlockPos checkPos, BlockPos[] schematicHalves) {
@@ -606,7 +602,15 @@ public class HighlightScanner {
         isIndexing = true;
         CompletableFuture.runAsync(() -> {
             try {
+                if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
+                    return;
+                }
+
                 Set<BlockPos> found = LitematicaPlacementContainerData.rebuildIndex();
+                if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
+                    return;
+                }
+
                 if (!found.equals(SCHEMATIC_CONTAINERS)) {
                     SCHEMATIC_REQ_CACHE.clear();
                     SCHEMATIC_IGNORED_SLOT_CACHE.clear();
