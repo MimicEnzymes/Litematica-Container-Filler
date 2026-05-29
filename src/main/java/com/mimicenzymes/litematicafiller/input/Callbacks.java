@@ -78,6 +78,11 @@ public class Callbacks implements IHotkeyCallback {
             return true;
         }
 
+        if (key == Hotkeys.TOOL_SWITCH_PREVIOUS.getKeybind()) {
+            ContainerToolStateMachine.getInstance().switchMode(mc, false);
+            return true;
+        }
+
         if (key == Hotkeys.TOOL_CLOSE_ALL.getKeybind()) {
             AutoFillerStateMachine.getInstance().emergencyStop(mc);
             Configs.WORKING_STATE.setBooleanValue(false);
