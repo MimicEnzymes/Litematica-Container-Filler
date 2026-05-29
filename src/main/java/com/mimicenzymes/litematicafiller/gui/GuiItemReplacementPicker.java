@@ -311,7 +311,9 @@ public class GuiItemReplacementPicker extends GuiBase {
                 this.panelX + 14, this.panelY + this.panelHeight - 29, 0xFFC8D0DA);
 
         RenderUtils.drawRect(drawContext, this.gridX - 2, this.gridY - 2, this.gridColumns * CELL_SIZE + 4, this.gridRows * CELL_SIZE + 4, 0x6630353D);
+        drawContext.enableScissor(this.gridX, this.gridY, this.gridX + this.gridColumns * CELL_SIZE, this.gridY + this.gridRows * CELL_SIZE);
         this.drawItems(drawContext, mouseX, mouseY);
+        drawContext.disableScissor();
         this.drawScrollbar(drawContext);
 
         this.drawWidgets(drawContext, mouseX, mouseY);
@@ -359,9 +361,6 @@ public class GuiItemReplacementPicker extends GuiBase {
             int local = index - firstIndex;
             int x = this.gridX + (local % this.gridColumns) * CELL_SIZE;
             int y = this.gridY + (local / this.gridColumns) * CELL_SIZE - scrollOffset;
-            if (y < this.gridY || y + CELL_SIZE > this.gridY + this.gridRows * CELL_SIZE) {
-                continue;
-            }
             boolean hovered = index == hoveredIndex;
             boolean selected = item == this.selectedItem;
 
