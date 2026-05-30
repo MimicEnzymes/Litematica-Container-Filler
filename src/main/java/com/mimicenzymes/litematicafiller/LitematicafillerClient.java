@@ -66,6 +66,10 @@ public class LitematicafillerClient implements ClientModInitializer {
                 if (Configs.RATE_LIMIT_CLICK_PACKETS.getBooleanValue() || ClickPacketRateLimiter.hasPendingPackets()) {
                     ClickPacketRateLimiter.tick(client);
                 }
+                if (handleClickPacketOverflow(client, filler, tool)) {
+                    updateFillProtectionSnapshot(client);
+                    return;
+                }
                 if (fillerActive || !filler.isIdle()) {
                     filler.tick(client);
                 } else {
@@ -73,6 +77,10 @@ public class LitematicafillerClient implements ClientModInitializer {
                 }
                 if (toolActive) {
                     tool.tick(client);
+                }
+                if (handleClickPacketOverflow(client, filler, tool)) {
+                    updateFillProtectionSnapshot(client);
+                    return;
                 }
                 if (needsContainerData) {
                     LitematicaChangeListener.tick(client);
@@ -103,6 +111,26 @@ public class LitematicafillerClient implements ClientModInitializer {
             }
         });
         InitializationHandler.getInstance().registerInitializationHandler(new InitHandler());
+    }
+
+    private static boolean handleClickPacketOverflow(net.minecraft.client.Minecraft client,
+                                                     AutoFillerStateMachine filler,
+                                                     ContainerToolStateMachine tool) {
+        if (!ClickPacketRateLimiter.consumeOverflowed()) {
+            return false;
+        }
+
+        Configs.WORKING_STATE.setBooleanValue(false);
+        filler.emergencyStop(client);
+        if (tool.isWorking()) {
+            tool.stopForDisabledMod(client);
+        }
+        ClickPacketRateLimiter.reset();
+        workerTickTimer = 0;
+        if (client.player != null) {
+            client.player.sendOverlayMessage(Component.translatable("litematica_container_filler.message.click_packet_queue_overflow"));
+        }
+        return true;
     }
 
     private static void stopActiveWorkForDisabledMod(net.minecraft.client.Minecraft client) {

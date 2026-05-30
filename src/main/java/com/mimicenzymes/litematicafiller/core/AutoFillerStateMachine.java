@@ -193,17 +193,6 @@ public class AutoFillerStateMachine {
         WAITING_FOR_DATA, READY, SATISFIED
     }
 
-    private static java.lang.reflect.Field CACHE_FIELD = null;
-    private static java.lang.reflect.Field NBT_QUERY_CACHE_FIELD = null;
-    static {
-        try {
-            CACHE_FIELD = RealContainerCache.class.getDeclaredField("CACHE");
-            CACHE_FIELD.setAccessible(true);
-            NBT_QUERY_CACHE_FIELD = RealContainerCache.class.getDeclaredField("NBT_QUERY_CACHE");
-            NBT_QUERY_CACHE_FIELD.setAccessible(true);
-        } catch (Exception ignored) {}
-    }
-
     private AutoFillerStateMachine() {
         this.shulkerExtractor = DependencyChecker.HAS_QUICK_SHULKER ? new QuickShulkerWrapper() : new DummyExtractor();
     }
@@ -235,19 +224,8 @@ public class AutoFillerStateMachine {
         return baseTicks + Configs.FILL_DELAY.getIntegerValue();
     }
 
-    @SuppressWarnings("unchecked")
     private Map<Integer, ItemStack> getReliableCache(BlockPos pos) {
-        try {
-            if (CACHE_FIELD != null) {
-                Map<BlockPos, Map<Integer, ItemStack>> cache = (Map<BlockPos, Map<Integer, ItemStack>>) CACHE_FIELD.get(null);
-                if (cache.containsKey(pos)) return cache.get(pos);
-            }
-            if (NBT_QUERY_CACHE_FIELD != null) {
-                Map<BlockPos, Map<Integer, ItemStack>> nbtCache = (Map<BlockPos, Map<Integer, ItemStack>>) NBT_QUERY_CACHE_FIELD.get(null);
-                if (nbtCache.containsKey(pos)) return nbtCache.get(pos);
-            }
-        } catch (Exception ignored) {}
-        return null;
+        return RealContainerCache.getAuthoritativeCachedItems(pos);
     }
 
     private Map<Integer, ItemStack> getTrueContainerData(Minecraft client, BlockPos pos) {
@@ -270,20 +248,13 @@ public class AutoFillerStateMachine {
                             Map<Integer, ItemStack> right = getSingleBlockEntityInventory(serverWorld, halves[0]);
                             Map<Integer, ItemStack> left = getSingleBlockEntityInventory(serverWorld, halves[1]);
                             if (right != null && left != null) {
-                                Map<Integer, ItemStack> combined = new HashMap<>(right);
-                                left.forEach((k, v) -> combined.put(k + 27, v));
-                                inventoryData = combined;
+                                inventoryData = RealContainerCache.combineDoubleContainerItems(right, left);
                             }
                         } else {
                             inventoryData = getSingleBlockEntityInventory(serverWorld, finalPos);
                         }
                         if (inventoryData != null) {
-                            if (halves != null) {
-                                RealContainerCache.put(halves[0].immutable(), inventoryData);
-                                RealContainerCache.put(halves[1].immutable(), inventoryData);
-                            } else {
-                                RealContainerCache.put(finalPos, inventoryData);
-                            }
+                            RealContainerCache.put(halves != null ? halves[0].immutable() : finalPos, inventoryData);
                         }
                         if (state.getBlock() instanceof net.minecraft.world.level.block.CrafterBlock) {
                             net.minecraft.world.level.block.entity.BlockEntity be = serverWorld.getBlockEntity(finalPos);
@@ -2742,31 +2713,12 @@ public class AutoFillerStateMachine {
     }
 
     private void simulateSlotClick(AbstractContainerScreen<?> screen, Slot slot, int slotId, int button, ContainerInput actionType) {
-        try {
-            Minecraft client = Minecraft.getInstance();
+        Minecraft client = Minecraft.getInstance();
+        if (client == null || client.player == null || client.gameMode == null) return;
 
-            if (screen == null) {
-                client.gameMode.handleContainerInput(client.player.containerMenu.containerId, slotId, button, actionType, client.player);
-                return;
-            }
-
-            java.lang.reflect.Method targetMethod = null;
-            Class<?> currClass = screen.getClass();
-            while (currClass != null && targetMethod == null) {
-                for (java.lang.reflect.Method m : currClass.getDeclaredMethods()) {
-                    Class<?>[] params = m.getParameterTypes();
-                    if (params.length == 4 && params[0] == Slot.class && params[1] == int.class && params[2] == int.class && params[3] == ContainerInput.class) {
-                        targetMethod = m; break;
-                    }
-                }
-                currClass = currClass.getSuperclass();
-            }
-            if (targetMethod != null) {
-                targetMethod.setAccessible(true);
-                targetMethod.invoke(screen, slot, slotId, button, actionType);
-            } else {
-                client.gameMode.handleContainerInput(screen.getMenu().containerId, slotId, button, actionType, client.player);
-            }
-        } catch (Exception ignored) {}
+        int syncId = screen != null
+                ? screen.getMenu().containerId
+                : client.player.containerMenu.containerId;
+        client.gameMode.handleContainerInput(syncId, slotId, button, actionType, client.player);
     }
 }

@@ -10,7 +10,9 @@ import fi.dy.masa.litematica.gui.GuiMaterialList;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.world.CompoundContainer;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
@@ -304,11 +306,8 @@ public class RealContainerCache {
 
     private static boolean isPlayerInventoryScreen(Object screen) {
         if (screen == null) return false;
-        String name = screen.getClass().getSimpleName();
-        return name.equals("InventoryScreen") ||
-                name.equals("CreativeInventoryScreen") ||
-                name.contains("Container") ||
-                name.contains("InventoryScreen");
+        return screen instanceof InventoryScreen ||
+                screen instanceof CreativeModeInventoryScreen;
     }
 
     private static boolean isCacheableTargetContainer(Minecraft client, BlockPos pos) {
@@ -777,6 +776,14 @@ public class RealContainerCache {
         }
 
         return null;
+    }
+
+    public static Map<Integer, ItemStack> getAuthoritativeCachedItems(BlockPos pos) {
+        if (pos == null) return null;
+
+        BlockPos key = pos.immutable();
+        if (CACHE.containsKey(key)) return CACHE.get(key);
+        return NBT_QUERY_CACHE.get(key);
     }
 
     public static void putLock(BlockPos pos, Set<Integer> locks) {
