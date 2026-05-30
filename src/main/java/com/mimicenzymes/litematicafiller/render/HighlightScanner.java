@@ -18,7 +18,10 @@ import net.minecraft.util.math.BlockPos;
 import fi.dy.masa.malilib.util.LayerRange;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class HighlightScanner {
     private static final int NORMAL_UPDATE_INTERVAL_TICKS = 10;
@@ -45,11 +48,15 @@ public class HighlightScanner {
     private static final int MAX_DIRTY_HIGHLIGHT_UPDATES_PER_TICK = 64;
     private static volatile int highlightVersion = 0;
     private static HighlightFingerprint highlightFingerprint = HighlightFingerprint.empty();
+    private static final ExecutorService INDEX_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "LitematicaFiller-HighlightScanner");
+        thread.setDaemon(true);
+        return thread;
+    });
     private static volatile Set<BlockPos> SCHEMATIC_CONTAINERS = Collections.emptySet();
     private static volatile Map<Long, Set<BlockPos>> SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
     private static volatile long lastIndexTime = 0;
     private static volatile boolean isIndexing = false;
-    private static volatile boolean schematicIndexInitialized = false;
     private static long lastRenderLayerSignature = Long.MIN_VALUE;
     private static boolean pendingRenderLayerRefresh = false;
     private static long lastRenderLayerRefreshTick = Long.MIN_VALUE;
@@ -200,7 +207,6 @@ public class HighlightScanner {
     }
 
     public static void ensureSchematicContainerIndex() {
-        if (schematicIndexInitialized) return;
         long now = System.currentTimeMillis();
         if (now - lastIndexTime <= 5000) return;
         startIndexingIfIdle(now);
@@ -220,7 +226,6 @@ public class HighlightScanner {
         ManualContainerOverrideManager.clearForCurrentContext();
         SCHEMATIC_CONTAINERS = Collections.emptySet();
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
-        schematicIndexInitialized = false;
         invalidateNearbyBucketCache();
         lastIndexTime = 0;
         lastRenderLayerSignature = Long.MIN_VALUE;
@@ -232,7 +237,6 @@ public class HighlightScanner {
     public static void onPlacementChanged() {
         lastIndexTime = 0;
         SCHEMATIC_CONTAINERS = Collections.emptySet();
-        schematicIndexInitialized = false;
         SCHEMATIC_REQ_CACHE.clear();
         SCHEMATIC_IGNORED_SLOT_CACHE.clear();
         HIGHLIGHT_REQUEST_TIME.clear();
@@ -294,7 +298,6 @@ public class HighlightScanner {
             if (!HIGHLIGHT_REQUEST_TIME.isEmpty()) HIGHLIGHT_REQUEST_TIME.clear();
             if (!SCHEMATIC_CONTAINERS.isEmpty()) SCHEMATIC_CONTAINERS = Collections.emptySet();
             if (!SCHEMATIC_CONTAINER_BUCKETS.isEmpty()) SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
-            schematicIndexInitialized = false;
             return;
         }
 
@@ -314,9 +317,7 @@ public class HighlightScanner {
 
         pumpDataRequests(now);
 
-        if (!schematicIndexInitialized) {
-            startIndexingIfIdle(now);
-        }
+        startIndexingIfIdle(now);
 
         boolean layerChanged = updateRenderLayerSignature(syncLayer);
         if (layerChanged) {
@@ -602,36 +603,32 @@ public class HighlightScanner {
     }
 
     private static synchronized void startIndexingIfIdle(long now) {
-        if (isIndexing || schematicIndexInitialized || now - lastIndexTime <= 5000) return;
+        if (isIndexing || now - lastIndexTime <= 5000) return;
 
         isIndexing = true;
-        boolean success = false;
-        try {
-            if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
-                return;
-            }
+        CompletableFuture.runAsync(() -> {
+            try {
+                if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
+                    return;
+                }
 
-            Set<BlockPos> found = LitematicaPlacementContainerData.rebuildIndex();
-            if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
-                return;
-            }
+                Set<BlockPos> found = LitematicaPlacementContainerData.rebuildIndex();
+                if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
+                    return;
+                }
 
-            if (!found.equals(SCHEMATIC_CONTAINERS)) {
-                SCHEMATIC_REQ_CACHE.clear();
-                SCHEMATIC_IGNORED_SLOT_CACHE.clear();
+                if (!found.equals(SCHEMATIC_CONTAINERS)) {
+                    SCHEMATIC_REQ_CACHE.clear();
+                    SCHEMATIC_IGNORED_SLOT_CACHE.clear();
+                }
+                SCHEMATIC_CONTAINERS = found;
+                SCHEMATIC_CONTAINER_BUCKETS = buildContainerBuckets(found);
+            } catch (Exception e) {} finally {
+                lastIndexTime = System.currentTimeMillis();
+                invalidateNearbyBucketCache();
+                isIndexing = false;
             }
-            SCHEMATIC_CONTAINERS = found;
-            SCHEMATIC_CONTAINER_BUCKETS = buildContainerBuckets(found);
-            success = true;
-        } catch (Exception ignored) {
-        } finally {
-            lastIndexTime = System.currentTimeMillis();
-            if (success) {
-                schematicIndexInitialized = true;
-            }
-            invalidateNearbyBucketCache();
-            isIndexing = false;
-        }
+        }, INDEX_EXECUTOR);
     }
 
     private static void clearHighlights() {

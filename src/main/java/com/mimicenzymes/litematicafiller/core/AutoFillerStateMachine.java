@@ -93,8 +93,6 @@ public class AutoFillerStateMachine {
     private static final int QUEUE_PREPARE_INTERVAL_TICKS = 2;
     private static final long MISSING_MATERIAL_MARKER_MS = 1200L;
     private static final long TICK_MS = 50L;
-    private static final long SINGLEPLAYER_SNAPSHOT_REQUEST_INTERVAL_MS = 250L;
-    private static final long SINGLEPLAYER_SNAPSHOT_REQUEST_TTL_MS = 5000L;
 
     private final Queue<FillTask> taskQueue = new ConcurrentLinkedQueue<>();
     private FillTask currentTask = null;
@@ -128,7 +126,6 @@ public class AutoFillerStateMachine {
     private final Map<BlockPos, Set<Item>> failedContainers = new ConcurrentHashMap<>();
     private final Map<BlockPos, Long> missingMaterialMarkers = new ConcurrentHashMap<>();
     private final Map<BlockPos, Long> recentFillingMarkers = new ConcurrentHashMap<>();
-    private final Map<BlockPos, Long> singleplayerSnapshotRequests = new ConcurrentHashMap<>();
     private final Map<ExactMovePlanKey, List<ExactMoveClick>> exactMovePlanCache = new HashMap<>();
     private final Set<Integer> blacklistedSlots = new HashSet<>();
 
@@ -237,77 +234,43 @@ public class AutoFillerStateMachine {
         Map<Integer, ItemStack> verifiedCache = getReliableCache(finalPos);
         if (verifiedCache != null) return verifiedCache;
 
-        requestSingleplayerServerSnapshot(client, finalPos);
+        if (client.isInSingleplayer() && client.getServer() != null && client.world != null && client.player != null) {
+            ServerPlayerEntity serverPlayer = client.getServer().getPlayerManager().getPlayer(client.player.getUuid());
+            if (serverPlayer != null) {
+                ServerWorld serverWorld = (ServerWorld) serverPlayer.getEntityWorld();
+                if (serverWorld != null) {
+                    net.minecraft.block.BlockState clientState = client.world.getBlockState(finalPos);
+                    final BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.world, finalPos, clientState);
+                    client.getServer().execute(() -> {
+                        net.minecraft.block.BlockState state = serverWorld.getBlockState(finalPos);
+                        Map<Integer, ItemStack> inventoryData = null;
+                        if (halves != null && state.isOf(net.minecraft.block.Blocks.BARREL)) {
+                            Map<Integer, ItemStack> right = getSingleBlockEntityInventory(serverWorld, halves[0]);
+                            Map<Integer, ItemStack> left = getSingleBlockEntityInventory(serverWorld, halves[1]);
+                            if (right != null && left != null) {
+                                inventoryData = RealContainerCache.combineDoubleContainerItems(right, left);
+                            }
+                        } else {
+                            inventoryData = getSingleBlockEntityInventory(serverWorld, finalPos);
+                        }
+                        if (inventoryData != null) {
+                            RealContainerCache.put(halves != null ? halves[0].toImmutable() : finalPos, inventoryData);
+                        }
+                        if (state.getBlock() instanceof net.minecraft.block.CrafterBlock) {
+                            net.minecraft.block.entity.BlockEntity be = serverWorld.getBlockEntity(finalPos);
+                            if (be != null) {
+                                net.minecraft.nbt.NbtCompound nbt = be.createNbt(serverWorld.getRegistryManager());
+                                Set<Integer> locks = RealContainerCache.parseDisabledSlots(nbt);
+                                RealContainerCache.putLock(finalPos, locks);
+                            }
+                        }
+                    });
+                }
+            }
+        }
         Map<Integer, ItemStack> fallback = RealContainerCache.getCachedItems(pos);
         if (fallback != null && fallback.isEmpty()) return null;
         return fallback;
-    }
-
-    private void requestSingleplayerServerSnapshot(MinecraftClient client, BlockPos finalPos) {
-        if (!client.isInSingleplayer() || client.getServer() == null || client.world == null || client.player == null) {
-            return;
-        }
-
-        long now = System.currentTimeMillis();
-        BlockPos requestKey = finalPos.toImmutable();
-        Long lastRequest = singleplayerSnapshotRequests.get(requestKey);
-        if (lastRequest != null && now - lastRequest < SINGLEPLAYER_SNAPSHOT_REQUEST_INTERVAL_MS) {
-            return;
-        }
-        singleplayerSnapshotRequests.put(requestKey, now);
-        if (singleplayerSnapshotRequests.size() > 512) {
-            singleplayerSnapshotRequests.entrySet().removeIf(entry -> now - entry.getValue() > SINGLEPLAYER_SNAPSHOT_REQUEST_TTL_MS);
-        }
-
-        final java.util.UUID playerUuid = client.player.getUuid();
-        final net.minecraft.registry.RegistryKey<net.minecraft.world.World> dimension = client.world.getRegistryKey();
-        final net.minecraft.block.BlockState clientState = client.world.getBlockState(finalPos);
-        final BlockPos[] clientHalves = LitematicaContainerReader.getDoubleContainerHalves(client.world, finalPos, clientState);
-        final BlockPos[] cacheHalves = clientHalves == null ? null : new BlockPos[]{clientHalves[0].toImmutable(), clientHalves[1].toImmutable()};
-
-        client.getServer().execute(() -> {
-            ServerPlayerEntity serverPlayer = client.getServer().getPlayerManager().getPlayer(playerUuid);
-            if (serverPlayer == null) return;
-
-            ServerWorld serverWorld = (ServerWorld) serverPlayer.getEntityWorld();
-            if (serverWorld == null || !serverWorld.getRegistryKey().equals(dimension)) return;
-
-            net.minecraft.block.BlockState state = serverWorld.getBlockState(finalPos);
-            Map<Integer, ItemStack> inventoryData = null;
-            if (cacheHalves != null && state.isOf(net.minecraft.block.Blocks.BARREL)) {
-                Map<Integer, ItemStack> right = getSingleBlockEntityInventory(serverWorld, cacheHalves[0]);
-                Map<Integer, ItemStack> left = getSingleBlockEntityInventory(serverWorld, cacheHalves[1]);
-                if (right != null && left != null) {
-                    inventoryData = RealContainerCache.combineDoubleContainerItems(right, left);
-                }
-            } else {
-                inventoryData = getSingleBlockEntityInventory(serverWorld, finalPos);
-            }
-
-            Set<Integer> locks = null;
-            if (state.getBlock() instanceof net.minecraft.block.CrafterBlock) {
-                net.minecraft.block.entity.BlockEntity be = serverWorld.getBlockEntity(finalPos);
-                if (be != null) {
-                    net.minecraft.nbt.NbtCompound nbt = be.createNbt(serverWorld.getRegistryManager());
-                    locks = RealContainerCache.parseDisabledSlots(nbt);
-                }
-            }
-
-            if (inventoryData == null && locks == null) return;
-
-            Map<Integer, ItemStack> snapshot = inventoryData == null ? Collections.emptyMap() : inventoryData;
-            Set<Integer> lockSnapshot = locks == null ? null : new HashSet<>(locks);
-            client.execute(() -> {
-                if (client.world == null || client.player == null ||
-                        !playerUuid.equals(client.player.getUuid()) ||
-                        !dimension.equals(client.world.getRegistryKey())) {
-                    return;
-                }
-
-                BlockPos writePos = cacheHalves != null ? cacheHalves[0] : finalPos;
-                RealContainerCache.putServerVerified(writePos, cacheHalves, snapshot, lockSnapshot);
-            });
-        });
     }
 
     private Map<Integer, ItemStack> getSingleBlockEntityInventory(net.minecraft.server.world.ServerWorld world, BlockPos pos) {
@@ -2353,7 +2316,6 @@ public class AutoFillerStateMachine {
         openedShulkerSlots.clear();
         shulkerMisses.clear();
         blacklistedSlots.clear();
-        singleplayerSnapshotRequests.clear();
         ClickPacketRateLimiter.setOperationActive(!taskQueue.isEmpty());
     }
 
@@ -2747,12 +2709,14 @@ public class AutoFillerStateMachine {
     }
 
     private void simulateSlotClick(HandledScreen<?> screen, Slot slot, int slotId, int button, SlotActionType actionType) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client == null || client.player == null || client.interactionManager == null) return;
+        try {
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player == null || client.interactionManager == null) return;
 
-        int syncId = screen != null
-                ? screen.getScreenHandler().syncId
-                : client.player.currentScreenHandler.syncId;
-        client.interactionManager.clickSlot(syncId, slotId, button, actionType, client.player);
+            int syncId = screen != null
+                    ? screen.getScreenHandler().syncId
+                    : client.player.currentScreenHandler.syncId;
+            client.interactionManager.clickSlot(syncId, slotId, button, actionType, client.player);
+        } catch (Exception ignored) {}
     }
 }

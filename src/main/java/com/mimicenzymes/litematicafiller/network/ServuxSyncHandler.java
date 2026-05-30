@@ -1,6 +1,5 @@
 package com.mimicenzymes.litematicafiller.network;
 
-import com.mimicenzymes.litematicafiller.core.RealContainerCache;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.minecraft.item.ItemStack;
@@ -19,7 +18,6 @@ public class ServuxSyncHandler {
 
     public static final Map<BlockPos, Map<Integer, ItemStack>> INDEPENDENT_CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Integer> SLOT_COUNT_CACHE = new ConcurrentHashMap<>();
-    private static final Map<BlockPos, Long> REQUEST_TIME = new ConcurrentHashMap<>();
 
     private static boolean minihudChecked = false;
     private static Class<?> minihudCacheClass = null;
@@ -40,18 +38,7 @@ public class ServuxSyncHandler {
             ClientPlayNetworking.registerGlobalReceiver(ServuxResponsePayload.ID, (payload, context) -> {
                 context.client().execute(() -> {
                     if (payload.pos() != null && payload.items() != null) {
-                        BlockPos key = payload.pos().toImmutable();
-                        Long requestedAt = REQUEST_TIME.remove(key);
-                        boolean accepted = RealContainerCache.putExternalVerified(
-                                key,
-                                payload.items(),
-                                Math.max(getCachedSlotCount(key), inferSlotCountFromItems(payload.items())),
-                                requestedAt);
-                        if (accepted) {
-                            putIndependentCache(key, payload.items());
-                        } else {
-                            clearCachedData(key);
-                        }
+                        putIndependentCache(payload.pos().toImmutable(), payload.items());
                     }
                 });
             });
@@ -240,20 +227,11 @@ public class ServuxSyncHandler {
         BlockPos key = pos.toImmutable();
         INDEPENDENT_CACHE.remove(key);
         SLOT_COUNT_CACHE.remove(key);
-        REQUEST_TIME.remove(key);
-    }
-
-    public static void clearCachedDataKeepRequestTime(BlockPos pos) {
-        if (pos == null) return;
-        BlockPos key = pos.toImmutable();
-        INDEPENDENT_CACHE.remove(key);
-        SLOT_COUNT_CACHE.remove(key);
     }
 
     public static void clearAllCachedData() {
         INDEPENDENT_CACHE.clear();
         SLOT_COUNT_CACHE.clear();
-        REQUEST_TIME.clear();
     }
 
     public static boolean requestData(BlockPos pos) {
@@ -269,9 +247,7 @@ public class ServuxSyncHandler {
         }
 
         if (payloadsRegistered && ClientPlayNetworking.canSend(ServuxRequestPayload.ID)) {
-            BlockPos key = pos.toImmutable();
-            REQUEST_TIME.put(key, System.currentTimeMillis());
-            ClientPlayNetworking.send(new ServuxRequestPayload(0, key));
+            ClientPlayNetworking.send(new ServuxRequestPayload(0, pos));
             return true;
         }
 
@@ -285,7 +261,6 @@ public class ServuxSyncHandler {
                 BlockPos evicted = iterator.next();
                 iterator.remove();
                 SLOT_COUNT_CACHE.remove(evicted);
-                REQUEST_TIME.remove(evicted);
             }
         }
         INDEPENDENT_CACHE.put(pos.toImmutable(), items);

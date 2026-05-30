@@ -8,6 +8,8 @@ import fi.dy.masa.litematica.schematic.placement.SubRegionPlacement;
 import fi.dy.masa.litematica.schematic.placement.SubRegionPlacement.RequiredEnabled;
 import fi.dy.masa.litematica.util.PositionUtils;
 import fi.dy.masa.litematica.util.SchematicUtils;
+import net.minecraft.block.BlockState;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.registry.RegistryWrapper;
@@ -54,6 +56,7 @@ public class LitematicaPlacementContainerData {
         Map<BlockPos, NbtCompound> nbtByWorldPos = new HashMap<>();
         Map<BlockPos, String> schematicKeyByWorldPos = new HashMap<>();
         Set<BlockPos> positions = new HashSet<>();
+        MinecraftClient client = MinecraftClient.getInstance();
 
         try {
             for (SchematicPlacement placement : DataManager.getSchematicPlacementManager().getAllSchematicsPlacements()) {
@@ -82,7 +85,7 @@ public class LitematicaPlacementContainerData {
                             continue;
                         }
 
-                        if (!isContainerBlockEntity(container, localPos, nbt)) continue;
+                        if (!isContainerBlockEntity(container, localPos, client, nbt)) continue;
 
                         BlockPos immutableWorldPos = worldPos.toImmutable();
                         positions.add(immutableWorldPos);
@@ -155,11 +158,23 @@ public class LitematicaPlacementContainerData {
         }
     }
 
-    private static boolean isContainerBlockEntity(LitematicaBlockStateContainer container, BlockPos localPos, NbtCompound nbt) {
+    private static boolean isContainerBlockEntity(LitematicaBlockStateContainer container, BlockPos localPos, MinecraftClient client, NbtCompound nbt) {
         try {
-            net.minecraft.block.BlockState state = container.get(localPos.getX(), localPos.getY(), localPos.getZ());
+            BlockState state = container.get(localPos.getX(), localPos.getY(), localPos.getZ());
             if (state == null || state.isAir() || !state.hasBlockEntity()) return false;
-            return nbt.contains("Items") || nbt.contains("disabled_slots");
+            if (client.world == null) return true;
+
+            try {
+                var blockEntity = net.minecraft.block.entity.BlockEntity.createFromNbt(
+                        localPos,
+                        state,
+                        nbt,
+                        client.world.getRegistryManager()
+                );
+                return blockEntity instanceof net.minecraft.inventory.Inventory || nbt.contains("Items");
+            } catch (Exception ignored) {
+                return nbt.contains("Items");
+            }
         } catch (Exception ignored) {
             return false;
         }
