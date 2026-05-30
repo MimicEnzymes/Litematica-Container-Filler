@@ -9,7 +9,6 @@ import fi.dy.masa.malilib.render.GuiContext;
 import fi.dy.masa.malilib.render.RenderUtils;
 import fi.dy.masa.malilib.util.StringUtils;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
 import net.minecraft.item.ItemStack;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -28,7 +27,7 @@ public abstract class WidgetMaterialListEntryMixin {
     @Shadow protected abstract int getColumnPosX(int column);
 
     @Inject(method = "render", at = @At("HEAD"), require = 0)
-    private void lcf$layoutReplacementButtons(DrawContext drawContext, int mouseX, int mouseY, boolean selected, CallbackInfo ci) {
+    private void lcf$layoutReplacementButtons(GuiContext drawContext, int mouseX, int mouseY, boolean selected, CallbackInfo ci) {
         if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         if (FillMaterialCalculator.listMode == 0) return;
         if (this.entry == null) return;
@@ -61,7 +60,7 @@ public abstract class WidgetMaterialListEntryMixin {
     }
 
     @Inject(method = "render", at = @At("TAIL"), require = 0)
-    private void lcf$drawReplacementMarker(DrawContext drawContext, int mouseX, int mouseY, boolean selected, CallbackInfo ci) {
+    private void lcf$drawReplacementMarker(GuiContext drawContext, int mouseX, int mouseY, boolean selected, CallbackInfo ci) {
         if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         if (FillMaterialCalculator.listMode == 0) return;
         if (this.entry == null || this.entry.getStack().isEmpty()) return;
@@ -78,7 +77,7 @@ public abstract class WidgetMaterialListEntryMixin {
     }
 
     @Inject(method = "postRenderHovered", at = @At("TAIL"), require = 0)
-    private void lcf$drawReplacementMarkerTooltip(DrawContext drawContext, int mouseX, int mouseY, boolean selected, CallbackInfo ci) {
+    private void lcf$drawReplacementMarkerTooltip(GuiContext drawContext, int mouseX, int mouseY, boolean selected, CallbackInfo ci) {
         if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         if (FillMaterialCalculator.listMode == 0) return;
         if (this.entry == null || this.entry.getStack().isEmpty()) return;
@@ -180,7 +179,7 @@ public abstract class WidgetMaterialListEntryMixin {
         return own.equals(label) || "Replace".equalsIgnoreCase(label) || "替换".equals(label);
     }
 
-    private void lcf$drawReplacementInfoBelowMaterialTooltip(DrawContext drawContext, int mouseX, int mouseY, List<String> lines) {
+    private void lcf$drawReplacementInfoBelowMaterialTooltip(GuiContext drawContext, int mouseX, int mouseY, List<String> lines) {
         MinecraftClient client = MinecraftClient.getInstance();
         int textWidth = 0;
         for (String line : lines) {
@@ -210,7 +209,7 @@ public abstract class WidgetMaterialListEntryMixin {
         }
     }
 
-    private static GuiContext lcf$guiContext(DrawContext drawContext) {
-        return drawContext instanceof GuiContext guiContext ? guiContext : GuiContext.fromGuiGraphics(drawContext);
+    private static GuiContext lcf$guiContext(GuiContext drawContext) {
+        return drawContext;
     }
 }
