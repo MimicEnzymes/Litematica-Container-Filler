@@ -193,17 +193,6 @@ public class AutoFillerStateMachine {
         WAITING_FOR_DATA, READY, SATISFIED
     }
 
-    private static java.lang.reflect.Field CACHE_FIELD = null;
-    private static java.lang.reflect.Field NBT_QUERY_CACHE_FIELD = null;
-    static {
-        try {
-            CACHE_FIELD = RealContainerCache.class.getDeclaredField("CACHE");
-            CACHE_FIELD.setAccessible(true);
-            NBT_QUERY_CACHE_FIELD = RealContainerCache.class.getDeclaredField("NBT_QUERY_CACHE");
-            NBT_QUERY_CACHE_FIELD.setAccessible(true);
-        } catch (Exception ignored) {}
-    }
-
     private AutoFillerStateMachine() {
         this.shulkerExtractor = DependencyChecker.HAS_QUICK_SHULKER ? new QuickShulkerWrapper() : new DummyExtractor();
     }
@@ -235,19 +224,8 @@ public class AutoFillerStateMachine {
         return baseTicks + Configs.FILL_DELAY.getIntegerValue();
     }
 
-    @SuppressWarnings("unchecked")
     private Map<Integer, ItemStack> getReliableCache(BlockPos pos) {
-        try {
-            if (CACHE_FIELD != null) {
-                Map<BlockPos, Map<Integer, ItemStack>> cache = (Map<BlockPos, Map<Integer, ItemStack>>) CACHE_FIELD.get(null);
-                if (cache.containsKey(pos)) return cache.get(pos);
-            }
-            if (NBT_QUERY_CACHE_FIELD != null) {
-                Map<BlockPos, Map<Integer, ItemStack>> nbtCache = (Map<BlockPos, Map<Integer, ItemStack>>) NBT_QUERY_CACHE_FIELD.get(null);
-                if (nbtCache.containsKey(pos)) return nbtCache.get(pos);
-            }
-        } catch (Exception ignored) {}
-        return null;
+        return RealContainerCache.getAuthoritativeCachedItems(pos);
     }
 
     private Map<Integer, ItemStack> getTrueContainerData(MinecraftClient client, BlockPos pos) {
@@ -2733,29 +2711,12 @@ public class AutoFillerStateMachine {
     private void simulateSlotClick(HandledScreen<?> screen, Slot slot, int slotId, int button, SlotActionType actionType) {
         try {
             MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player == null || client.interactionManager == null) return;
 
-            if (screen == null) {
-                client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, slotId, button, actionType, client.player);
-                return;
-            }
-
-            java.lang.reflect.Method targetMethod = null;
-            Class<?> currClass = screen.getClass();
-            while (currClass != null && targetMethod == null) {
-                for (java.lang.reflect.Method m : currClass.getDeclaredMethods()) {
-                    Class<?>[] params = m.getParameterTypes();
-                    if (params.length == 4 && params[0] == Slot.class && params[1] == int.class && params[2] == int.class && params[3] == SlotActionType.class) {
-                        targetMethod = m; break;
-                    }
-                }
-                currClass = currClass.getSuperclass();
-            }
-            if (targetMethod != null) {
-                targetMethod.setAccessible(true);
-                targetMethod.invoke(screen, slot, slotId, button, actionType);
-            } else {
-                client.interactionManager.clickSlot(screen.getScreenHandler().syncId, slotId, button, actionType, client.player);
-            }
+            int syncId = screen != null
+                    ? screen.getScreenHandler().syncId
+                    : client.player.currentScreenHandler.syncId;
+            client.interactionManager.clickSlot(syncId, slotId, button, actionType, client.player);
         } catch (Exception ignored) {}
     }
 }

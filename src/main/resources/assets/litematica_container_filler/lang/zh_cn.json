@@ -293,6 +293,7 @@
   "litematica_container_filler.message.fill_completed": "§a[容器填充] 目标容器填充完成！",
   "litematica_container_filler.message.returning_items": "§e[容器填充] 正在处理多余材料并恢复有序存放物品...",
   "litematica_container_filler.message.container_timeout": "§c[容器填充] 容器响应超时，已中断操作。",
+  "litematica_container_filler.message.click_packet_queue_overflow": "§c[容器填充] 慢速点击包队列溢出，已中断操作。",
   "litematica_container_filler.message.user_aborted": "§e[容器填充] 用户手动关闭界面，已强行终止任务。",
   "litematica_container_filler.message.container_leaking": "§c[容器填充] 检测到容器异常吞件 (可能是漏斗)，已强制中止！",
   "litematica_container_filler.message.tool_cancelled": "§e[容器填充] 工具操作已取消。",
