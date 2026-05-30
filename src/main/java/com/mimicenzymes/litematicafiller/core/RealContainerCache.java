@@ -49,6 +49,7 @@ public class RealContainerCache {
     private static final Set<BlockPos> CHANGED_POSITIONS = ConcurrentHashMap.newKeySet();
     private static BlockPos lastLookedPos = null;
     private static final long SYNC_SNAPSHOT_TTL_MS = 15000L;
+    private static final long PREDICTED_CACHE_SHIELD_MS = 2000L;
     private static ScreenHandler lastObservedHandler = null;
     private static int lastObservedSyncId = Integer.MIN_VALUE;
     private static long lastObservedSignature = Long.MIN_VALUE;
@@ -58,6 +59,7 @@ public class RealContainerCache {
     private static ScreenHandler boundScreenHandler = null;
     private static int boundScreenSyncId = Integer.MIN_VALUE;
     private static BlockPos boundScreenTargetPos = null;
+    private static final Map<BlockPos, Long> PREDICTED_CACHE_TIME = new ConcurrentHashMap<>();
     private static final long PENDING_SCREEN_TARGET_TTL_TICKS = 20L;
     private static final long ENTITY_INVALIDATION_SYNC_BLOCK_MS = 5000L;
     private static final Set<BlockPos> CONFIRMED_LARGE_BARREL_POSITIONS = ConcurrentHashMap.newKeySet();
@@ -206,6 +208,7 @@ public class RealContainerCache {
 
         BlockState state = client.world.getBlockState(pos);
         BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.world, pos, state, slotCount);
+        clearPredictionShield(pos, halves);
 
         boolean changed;
         if (halves != null) {
@@ -304,11 +307,8 @@ public class RealContainerCache {
 
     private static boolean isPlayerInventoryScreen(Object screen) {
         if (screen == null) return false;
-        String name = screen.getClass().getSimpleName();
-        return name.equals("InventoryScreen") ||
-                name.equals("CreativeInventoryScreen") ||
-                name.contains("PlayerInventory") ||
-                name.contains("InventoryScreen");
+        return screen instanceof net.minecraft.client.gui.screen.ingame.InventoryScreen ||
+                screen instanceof net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
     }
 
     private static boolean isCacheableTargetContainer(MinecraftClient client, BlockPos pos) {
@@ -562,7 +562,34 @@ public class RealContainerCache {
     }
 
     public static Map<Integer, ItemStack> getCachedItems(BlockPos pos) {
-        if (CACHE.containsKey(pos)) return CACHE.get(pos);
+        if (pos == null) return null;
+
+        BlockPos key = pos.toImmutable();
+        Map<Integer, ItemStack> cached = CACHE.get(key);
+        if (cached != null && isPredictionShieldActive(key)) {
+            return cached;
+        }
+
+        Map<Integer, ItemStack> external = getExternalVerifiedItems(key);
+        if (external != null) {
+            return external;
+        }
+
+        if (cached != null) {
+            return cached;
+        }
+
+        Map<Integer, ItemStack> snapshot = getSyncSnapshot(key);
+        if (snapshot != null) {
+            requestContainerData(key);
+            return snapshot;
+        }
+
+        return null;
+    }
+
+    private static Map<Integer, ItemStack> getExternalVerifiedItems(BlockPos pos) {
+        if (pos == null) return null;
 
         var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld != null) {
@@ -573,7 +600,7 @@ public class RealContainerCache {
                 Map<Integer, ItemStack> combined = getCombinedLitematicaSyncedItems(halves[0], halves[1]);
                 if (combined != null) {
                     if (isEntityInvalidated(halves[0]) || isEntityInvalidated(halves[1])) return null;
-                    rememberSyncedData(halves, combined);
+                    putServerVerified(halves[0], halves, combined, null);
                     return combined;
                 }
 
@@ -582,17 +609,14 @@ public class RealContainerCache {
                 combined = combineHalves(rightServux, leftServux);
                 if (combined != null) {
                     if (isEntityInvalidated(halves[0]) || isEntityInvalidated(halves[1])) return null;
-                    rememberSyncedData(halves, combined);
+                    putServerVerified(halves[0], halves, combined, null);
                     return combined;
                 }
 
                 combined = combineHalves(NBT_QUERY_CACHE.get(halves[0]), NBT_QUERY_CACHE.get(halves[1]));
-                if (combined != null) return combined;
-
-                Map<Integer, ItemStack> snapshot = getSyncSnapshot(pos);
-                if (snapshot != null) {
-                    requestContainerData(pos);
-                    return snapshot;
+                if (combined != null) {
+                    putServerVerified(halves[0], halves, combined, null);
+                    return combined;
                 }
 
                 return null;
@@ -602,24 +626,43 @@ public class RealContainerCache {
         Map<Integer, ItemStack> litematicaData = getLitematicaSyncedItems(pos);
         if (litematicaData != null) {
             if (isEntityInvalidated(pos)) return null;
-            rememberSyncedData(pos, litematicaData);
+            putExternalVerified(pos, litematicaData, inferSlotCount(litematicaData), null);
             return litematicaData;
         }
 
         Map<Integer, ItemStack> servuxData = ServuxSyncHandler.getCachedData(pos);
         if (servuxData != null) {
             if (isEntityInvalidated(pos)) return null;
-            rememberSyncedData(pos, servuxData);
+            putExternalVerified(pos, servuxData, Math.max(ServuxSyncHandler.getCachedSlotCount(pos), inferSlotCount(servuxData)), null);
             return servuxData;
         }
 
-        Map<Integer, ItemStack> snapshot = getSyncSnapshot(pos);
-        if (snapshot != null) {
-            requestContainerData(pos);
-            return snapshot;
+        Map<Integer, ItemStack> nbtQuery = NBT_QUERY_CACHE.get(pos);
+        if (nbtQuery != null) {
+            putExternalVerified(pos, nbtQuery, inferSlotCount(nbtQuery), null);
+        }
+        return nbtQuery;
+    }
+
+    private static boolean isPredictionShieldActive(BlockPos pos) {
+        Long predictedAt = PREDICTED_CACHE_TIME.get(pos);
+        if (predictedAt == null) return false;
+
+        long age = System.currentTimeMillis() - predictedAt;
+        if (age >= 0L && age <= PREDICTED_CACHE_SHIELD_MS) {
+            return true;
         }
 
-        return NBT_QUERY_CACHE.get(pos);
+        PREDICTED_CACHE_TIME.remove(pos);
+        return false;
+    }
+
+    public static Map<Integer, ItemStack> getAuthoritativeCachedItems(BlockPos pos) {
+        if (pos == null) return null;
+        BlockPos key = pos.toImmutable();
+        Map<Integer, ItemStack> cached = CACHE.get(key);
+        if (cached != null) return cached;
+        return NBT_QUERY_CACHE.get(key);
     }
 
     public static void requestContainerData(BlockPos pos) {
@@ -646,11 +689,8 @@ public class RealContainerCache {
             if (halves != null) isDouble = true;
         }
 
-        if (preferOpQuery && requestOpNbtData(pos, halves, isDouble, now)) {
-            return;
-        }
-
         boolean requested = false;
+        boolean opRequested = preferOpQuery && requestOpNbtData(pos, halves, isDouble, now);
 
         if (Configs.ENABLE_DATA_SYNC.getBooleanValue()) {
             requested |= requestLitematicaData(pos, halves, isDouble);
@@ -667,8 +707,8 @@ public class RealContainerCache {
             rememberRequestTime(pos, halves, now);
         }
 
-        if (requestOpNbtData(pos, halves, isDouble, now)) {
-            return;
+        if (!opRequested) {
+            requestOpNbtData(pos, halves, isDouble, now);
         }
     }
 
@@ -718,45 +758,10 @@ public class RealContainerCache {
         if (pos != null && nbt != null) {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.world != null) {
-                if (isStaleExternalResponse(pos, requestedAt)) {
-                    return;
-                }
-
-                boolean changed = false;
-
                 Map<Integer, ItemStack> items = parseNbtInventory(nbt, client.world.getRegistryManager());
-                NBT_QUERY_CACHE.put(pos.toImmutable(), items);
                 int inferredSlotCount = inferSlotCount(nbt, items);
-                rememberLargeBarrelIfObserved(client, pos, inferredSlotCount);
-                putSlotCount(pos, inferredSlotCount);
-                CACHE_TIME.put(pos.toImmutable(), System.currentTimeMillis());
-                rememberBlockEntityIdentity(pos, null);
-                changed = true;
-
-                if (nbt.contains("disabled_slots")) {
-                    LOCK_CACHE.put(pos.toImmutable(), parseDisabledSlots(nbt));
-                    changed = true;
-                }
-
-                BlockState state = client.world.getBlockState(pos);
-                BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.world, pos, state);
-                if (halves != null) {
-                    Map<Integer, ItemStack> combined = combineHalves(NBT_QUERY_CACHE.get(halves[0]), NBT_QUERY_CACHE.get(halves[1]));
-                    if (combined != null) {
-                        changed |= putCachedItemsIfChanged(halves[0].toImmutable(), combined);
-                        changed |= putCachedItemsIfChanged(halves[1].toImmutable(), combined);
-                        changed |= putSlotCountIfChanged(halves[0], 54);
-                        changed |= putSlotCountIfChanged(halves[1], 54);
-                        rememberSyncedData(halves, combined);
-                        rememberBlockEntityIdentity(pos, halves);
-                    }
-                }
-
-                if (changed) {
-                    cacheVersion++;
-                    clearInvalidation(pos, halves);
-                    markChanged(pos, halves);
-                }
+                Set<Integer> locks = nbt.contains("disabled_slots") ? parseDisabledSlots(nbt) : null;
+                putExternalVerified(pos, items, inferredSlotCount, locks, requestedAt);
             }
         }
     }
@@ -898,6 +903,7 @@ public class RealContainerCache {
         PENDING_NBT_REQUESTS.clear();
         PENDING_NBT_REQUEST_TIME.clear();
         LAST_REQUEST_TIME.clear();
+        PREDICTED_CACHE_TIME.clear();
         CONFIRMED_LARGE_BARREL_POSITIONS.clear();
         ServuxSyncHandler.clearAllCachedData();
         cacheVersion++;
@@ -905,11 +911,129 @@ public class RealContainerCache {
 
     public static void put(BlockPos pos, Map<Integer, ItemStack> items) {
         if (pos == null || items == null) return;
-        putCachedItems(pos.toImmutable(), items);
+        BlockPos key = pos.toImmutable();
+        clearPredictionShield(key);
+        putCachedItems(key, items);
         rememberBlockEntityIdentity(pos, null);
         cacheVersion++;
         clearInvalidation(pos, null);
         markChanged(pos, null);
+    }
+
+    public static boolean putServerVerified(BlockPos pos, BlockPos[] halves, Map<Integer, ItemStack> items, Set<Integer> locks) {
+        return putServerVerified(pos, halves, items, locks, null);
+    }
+
+    public static boolean putServerVerified(BlockPos pos, BlockPos[] halves, Map<Integer, ItemStack> items, Set<Integer> locks, Long requestedAt) {
+        if (pos == null || items == null) return false;
+        if (isStaleExternalResponse(pos, requestedAt)) return false;
+
+        if (halves != null && halves.length >= 2 && halves[0] != null && halves[1] != null) {
+            clearPredictionShield(pos, halves);
+            Map<Integer, ItemStack> snapshot = copyItems(items);
+            boolean changed = putCachedItemsIfChanged(halves[0].toImmutable(), snapshot);
+            changed |= putCachedItemsIfChanged(halves[1].toImmutable(), snapshot);
+            changed |= putSlotCountIfChanged(halves[0], Math.max(54, inferSlotCount(snapshot)));
+            changed |= putSlotCountIfChanged(halves[1], Math.max(54, inferSlotCount(snapshot)));
+            clearExternalHalfData(halves);
+            rememberSyncedData(halves, snapshot);
+            rememberBlockEntityIdentity(pos, halves);
+            if (locks != null) {
+                Set<Integer> lockSnapshot = new HashSet<>(locks);
+                Set<Integer> previousLocks = LOCK_CACHE.put(pos.toImmutable(), lockSnapshot);
+                changed |= !lockSnapshot.equals(previousLocks);
+            }
+            clearInvalidation(pos, halves);
+            if (changed) {
+                cacheVersion++;
+                markChanged(pos, halves);
+            }
+            return true;
+        }
+
+        Map<Integer, ItemStack> snapshot = copyItems(items);
+        BlockPos key = pos.toImmutable();
+        clearPredictionShield(key);
+        boolean changed = putCachedItemsIfChanged(key, snapshot);
+        changed |= putSlotCountIfChanged(key, inferSlotCount(snapshot));
+        rememberSyncedData(key, snapshot);
+        rememberBlockEntityIdentity(key, null);
+        if (locks != null) {
+            Set<Integer> lockSnapshot = new HashSet<>(locks);
+            Set<Integer> previousLocks = LOCK_CACHE.put(key, lockSnapshot);
+            changed |= !lockSnapshot.equals(previousLocks);
+        }
+        clearInvalidation(key, null);
+        if (changed) {
+            cacheVersion++;
+            markChanged(key, null);
+        }
+        return true;
+    }
+
+    public static boolean putExternalVerified(BlockPos pos, Map<Integer, ItemStack> items, int slotCount, Long requestedAt) {
+        return putExternalVerified(pos, items, slotCount, null, requestedAt);
+    }
+
+    public static boolean putExternalVerified(BlockPos pos, Map<Integer, ItemStack> items, int slotCount, Set<Integer> locks, Long requestedAt) {
+        if (pos == null || items == null || !hasActiveConsumers()) return false;
+        if (isStaleExternalResponse(pos, requestedAt)) return false;
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.world == null) return false;
+
+        BlockPos key = pos.toImmutable();
+        clearPredictionShield(key);
+        Map<Integer, ItemStack> snapshot = copyItems(items);
+        NBT_QUERY_CACHE.put(key, snapshot);
+        CACHE_TIME.put(key, System.currentTimeMillis());
+        rememberLargeBarrelIfObserved(client, key, slotCount);
+        boolean changed = putSlotCountIfChanged(key, slotCount);
+        rememberBlockEntityIdentity(key, null);
+
+        if (locks != null) {
+            Set<Integer> lockSnapshot = new HashSet<>(locks);
+            Set<Integer> previousLocks = LOCK_CACHE.put(key, lockSnapshot);
+            changed |= !lockSnapshot.equals(previousLocks);
+        }
+
+        BlockState state = client.world.getBlockState(key);
+        BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(client.world, key, state);
+        if (halves == null) {
+            var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
+            if (schematicWorld != null) {
+                halves = LitematicaContainerReader.getDoubleContainerHalves(schematicWorld, key, schematicWorld.getBlockState(key));
+            }
+        }
+
+        if (halves != null) {
+            Map<Integer, ItemStack> combined = combineHalves(NBT_QUERY_CACHE.get(halves[0]), NBT_QUERY_CACHE.get(halves[1]));
+            if (combined != null) {
+                changed |= putCachedItemsIfChanged(halves[0].toImmutable(), combined);
+                changed |= putCachedItemsIfChanged(halves[1].toImmutable(), combined);
+                clearPredictionShield(key, halves);
+                int combinedSlotCount = Math.max(54, inferSlotCount(combined));
+                changed |= putSlotCountIfChanged(halves[0], combinedSlotCount);
+                changed |= putSlotCountIfChanged(halves[1], combinedSlotCount);
+                rememberSyncedData(halves, combined);
+                rememberBlockEntityIdentity(key, halves);
+                clearInvalidation(key, halves);
+                if (changed) {
+                    cacheVersion++;
+                    markChanged(key, halves);
+                }
+                return true;
+            }
+        }
+
+        changed |= putCachedItemsIfChanged(key, snapshot);
+        rememberSyncedData(key, snapshot);
+        clearInvalidation(key, null);
+        if (changed) {
+            cacheVersion++;
+            markChanged(key, null);
+        }
+        return true;
     }
 
     public static void putPredicted(BlockPos pos, Map<Integer, ItemStack> items) {
@@ -925,7 +1049,8 @@ public class RealContainerCache {
                 putCachedItems(halves[1].toImmutable(), snapshot);
                 putSlotCountIfChanged(halves[0], 54);
                 putSlotCountIfChanged(halves[1], 54);
-                clearExternalHalfData(halves);
+                clearExternalHalfData(halves, false);
+                markPredictionShield(halves);
                 rememberSyncedData(halves, snapshot);
                 rememberBlockEntityIdentity(pos, halves);
                 cacheVersion++;
@@ -936,7 +1061,10 @@ public class RealContainerCache {
         }
 
         Map<Integer, ItemStack> snapshot = copyItems(items);
-        putCachedItems(pos.toImmutable(), snapshot);
+        BlockPos key = pos.toImmutable();
+        putCachedItems(key, snapshot);
+        clearExternalData(key, false);
+        markPredictionShield(key);
         rememberSyncedData(pos, snapshot);
         rememberBlockEntityIdentity(pos, null);
         cacheVersion++;
@@ -1092,15 +1220,17 @@ public class RealContainerCache {
     }
 
     private static void removeCachedDataOnly(BlockPos pos) {
-        CACHE.remove(pos);
-        LOCK_CACHE.remove(pos);
-        SLOT_COUNT_CACHE.remove(pos);
-        SYNC_SNAPSHOT_CACHE.remove(pos);
-        SYNC_SNAPSHOT_TIME.remove(pos);
-        NBT_QUERY_CACHE.remove(pos);
-        CACHE_TIME.remove(pos);
-        ServuxSyncHandler.clearCachedData(pos);
-        LAST_REQUEST_TIME.remove(pos);
+        if (pos == null) return;
+        BlockPos key = pos.toImmutable();
+        CACHE.remove(key);
+        LOCK_CACHE.remove(key);
+        SLOT_COUNT_CACHE.remove(key);
+        SYNC_SNAPSHOT_CACHE.remove(key);
+        SYNC_SNAPSHOT_TIME.remove(key);
+        CACHE_TIME.remove(key);
+        LAST_REQUEST_TIME.remove(key);
+        clearExternalData(key);
+        clearPredictionShield(key);
     }
 
     private static boolean isStaleExternalResponse(BlockPos pos, Long requestedAt) {
@@ -1139,12 +1269,59 @@ public class RealContainerCache {
     }
 
     private static void clearExternalHalfData(BlockPos[] halves) {
+        clearExternalHalfData(halves, true);
+    }
+
+    private static void clearExternalHalfData(BlockPos[] halves, boolean clearRequestTime) {
         if (halves == null) return;
         for (BlockPos half : halves) {
             if (half == null) continue;
-            BlockPos key = half.toImmutable();
-            NBT_QUERY_CACHE.remove(key);
+            clearExternalData(half, clearRequestTime);
+        }
+    }
+
+    private static void clearExternalData(BlockPos pos) {
+        clearExternalData(pos, true);
+    }
+
+    private static void clearExternalData(BlockPos pos, boolean clearRequestTime) {
+        if (pos == null) return;
+        BlockPos key = pos.toImmutable();
+        NBT_QUERY_CACHE.remove(key);
+        if (clearRequestTime) {
             ServuxSyncHandler.clearCachedData(key);
+        } else {
+            ServuxSyncHandler.clearCachedDataKeepRequestTime(key);
+        }
+    }
+
+    private static void markPredictionShield(BlockPos pos) {
+        if (pos != null) {
+            PREDICTED_CACHE_TIME.put(pos.toImmutable(), System.currentTimeMillis());
+        }
+    }
+
+    private static void markPredictionShield(BlockPos[] halves) {
+        if (halves == null) return;
+        long now = System.currentTimeMillis();
+        for (BlockPos half : halves) {
+            if (half != null) {
+                PREDICTED_CACHE_TIME.put(half.toImmutable(), now);
+            }
+        }
+    }
+
+    private static void clearPredictionShield(BlockPos pos) {
+        if (pos != null) {
+            PREDICTED_CACHE_TIME.remove(pos.toImmutable());
+        }
+    }
+
+    private static void clearPredictionShield(BlockPos pos, BlockPos[] halves) {
+        clearPredictionShield(pos);
+        if (halves == null) return;
+        for (BlockPos half : halves) {
+            clearPredictionShield(half);
         }
     }
 

@@ -16,6 +16,7 @@ public class ClickPacketRateLimiter {
     private static final Queue<Packet<?>> BUFFER = new ArrayDeque<>();
     private static boolean operationActive = false;
     private static boolean replaying = false;
+    private static boolean overflowed = false;
 
     private ClickPacketRateLimiter() {
     }
@@ -32,6 +33,13 @@ public class ClickPacketRateLimiter {
         BUFFER.clear();
         operationActive = false;
         replaying = false;
+        overflowed = false;
+    }
+
+    public static boolean consumeOverflowed() {
+        boolean result = overflowed;
+        overflowed = false;
+        return result;
     }
 
     public static boolean bufferIfNeeded(Packet<?> packet) {
@@ -40,7 +48,11 @@ public class ClickPacketRateLimiter {
         if (!operationActive || !isContainerMutationPacket(packet)) return false;
 
         if (BUFFER.size() >= MAX_BUFFERED_PACKETS) {
-            BUFFER.poll();
+            BUFFER.clear();
+            operationActive = false;
+            replaying = false;
+            overflowed = true;
+            return true;
         }
         BUFFER.offer(packet);
         return true;
