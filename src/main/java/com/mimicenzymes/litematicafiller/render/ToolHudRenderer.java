@@ -151,6 +151,10 @@ public class ToolHudRenderer {
         lastNormalHintRevealNanos = switchHudStartNanos;
     }
 
+    public static boolean hasActiveTextSwitchHud() {
+        return !Configs.ENABLE_TOOL_HUD.getBooleanValue() && getSwitchElapsed(System.nanoTime()) >= 0L;
+    }
+
     public static void render(DrawContext context) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null || client.world == null || !Configs.ENABLE_MOD.getBooleanValue()) {
@@ -173,23 +177,21 @@ public class ToolHudRenderer {
         }
 
         long now = System.nanoTime();
-        if (!Configs.ENABLE_TOOL_SWITCH_HUD.getBooleanValue()) {
-            switchHudActive = false;
-            switchVisualExpand = 0.0f;
-            lastSwitchVisualNanos = 0L;
-            normalHintReveal = 1.0f;
-            lastNormalHintRevealNanos = 0L;
-        }
 
         if (!Configs.ENABLE_TOOL_HUD.getBooleanValue()) {
             visibility = 0.0f;
-            renderToolSwitchHud(context, client, now);
+            renderTextSwitchHud(context, client, now);
             return;
         }
 
         ContainerToolStateMachine tools = ContainerToolStateMachine.getInstance();
         BlockPos target = tools.isToolEnabled() ? tools.getLookedContainerForHud(client) : null;
-        boolean visible = target != null && client.currentScreen == null;
+        boolean targetVisible = target != null && client.currentScreen == null;
+        ContainerToolMode mode = tools.getActiveMode();
+        updateTextCache(client, mode);
+        float switchExpand = updateSwitchVisualExpand(now);
+        boolean switchVisible = switchExpand > 0.0025f || isSwitchHudVisible(now);
+        boolean visible = targetVisible || switchVisible;
         boolean updateFrame = shouldUpdateFrame(now);
         float smoothing = clamp((float) Configs.TOOL_HUD_SMOOTHING.getDoubleValue(), 0.05f, 0.8f);
         if (updateFrame) {
@@ -197,16 +199,12 @@ public class ToolHudRenderer {
         }
         if (!visible && visibility <= 0.02f) {
             visibility = 0.0f;
-            renderToolSwitchHud(context, client, now);
             return;
         }
 
         int width = context.getScaledWindowWidth();
         int height = context.getScaledWindowHeight();
-        ContainerToolMode mode = tools.getActiveMode();
-        updateTextCache(client, mode);
 
-        float switchExpand = updateSwitchVisualExpand(now);
         float scale = clamp(Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f, 0.7f, 1.5f);
         int maxPanelW = Math.max(72, Math.round(width - EDGE_MARGIN * 2.0f));
         int minPanelW = Math.min(Math.round(MIN_PANEL_WIDTH * scale), maxPanelW);
@@ -217,12 +215,13 @@ public class ToolHudRenderer {
         int basePanelH = style == ToolHudStyle.FIXED_CARD ? FIXED_PANEL_BASE_HEIGHT : ANCHORED_PANEL_BASE_HEIGHT;
         int panelH = Math.round((basePanelH + SWITCH_HUD_EXTRA_HEIGHT * switchExpand) * scale);
         int offset = Math.round(Configs.TOOL_HUD_OFFSET.getIntegerValue() * scale);
+        boolean drawFixedCard = style == ToolHudStyle.FIXED_CARD || (!targetVisible && switchVisible);
 
-        if (style == ToolHudStyle.ANCHORED_CARD && visible && updateFrame) {
+        if (style == ToolHudStyle.ANCHORED_CARD && targetVisible && updateFrame) {
             updateLayout(client, target, width, height, panelW, panelH, offset, scale, smoothing);
-        } else if (style == ToolHudStyle.FIXED_CARD && updateFrame) {
+        } else if (drawFixedCard && updateFrame) {
             updateFixedLayout(width, height, panelW, panelH, smoothing);
-        } else if ((style == ToolHudStyle.ANCHORED_CARD && !hasLayout()) || (style == ToolHudStyle.FIXED_CARD && !hasFixedLayout())) {
+        } else if ((drawFixedCard && !hasFixedLayout()) || (!drawFixedCard && !hasLayout())) {
             return;
         }
 
@@ -230,7 +229,7 @@ public class ToolHudRenderer {
         float opacity = clamp((float) Configs.TOOL_HUD_OPACITY.getDoubleValue(), 0.1f, 1.0f);
         int alpha = Math.round(255.0f * opacity * eased);
 
-        if (style == ToolHudStyle.FIXED_CARD) {
+        if (drawFixedCard) {
             drawToolCard(context, client, Math.round(fixedPanelX), Math.round(fixedPanelY), panelW, panelH, scale, alpha, eased, tools.isWorking(), now, switchExpand);
             return;
         }
@@ -248,31 +247,37 @@ public class ToolHudRenderer {
         drawToolCard(context, client, panelLeft, panelTop, panelW, panelH, scale, alpha, eased, tools.isWorking(), now, switchExpand);
     }
 
-    private static void renderToolSwitchHud(DrawContext context, MinecraftClient client, long nowNanos) {
-        boolean visible = isSwitchHudVisible(nowNanos);
+    private static void renderTextSwitchHud(DrawContext context, MinecraftClient client, long nowNanos) {
         float switchExpand = updateSwitchVisualExpand(nowNanos);
-        if (!visible && switchExpand <= 0.01f) {
+        if (!isSwitchHudVisible(nowNanos) && switchExpand <= 0.01f) {
             return;
         }
 
         int width = context.getScaledWindowWidth();
         int height = context.getScaledWindowHeight();
-        updateTextCache(client, switchCurrentMode);
-
-        float scale = clamp(Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f, 0.7f, 1.35f);
-        int maxPanelW = Math.max(72, Math.round(width - EDGE_MARGIN * 2.0f));
-        int minPanelW = Math.min(Math.round(MIN_PANEL_WIDTH * scale), maxPanelW);
-        int normalPanelW = clamp(Math.round(cachedPanelWidth * scale), minPanelW, maxPanelW);
-        int expandedPanelW = clamp(Math.round(Math.max(cachedPanelWidth, getSwitchPanelWidth(client)) * scale), minPanelW, maxPanelW);
-        int panelW = Math.round(lerp(normalPanelW, expandedPanelW, switchExpand));
-        int panelH = Math.round((FIXED_PANEL_BASE_HEIGHT + SWITCH_HUD_EXTRA_HEIGHT * switchExpand) * scale);
-        int panelX = (width - panelW) / 2;
-        int panelY = height - Math.max(54, Math.round(72.0f * scale));
-        panelY = clamp(panelY, 8, Math.max(8, height - panelH - 8));
-
+        float scale = clamp(Configs.TOOL_HUD_SCALE.getIntegerValue() / 100.0f, 0.75f, 1.35f);
         float opacity = clamp((float) Configs.TOOL_HUD_OPACITY.getDoubleValue(), 0.1f, 1.0f);
         int alpha = Math.round(255.0f * opacity * Math.max(getSwitchFade(nowNanos), switchExpand));
-        drawToolCard(context, client, panelX, panelY, panelW, panelH, scale, alpha, 1.0f, false, nowNanos, switchExpand);
+        if (alpha <= 3) {
+            return;
+        }
+
+        ContainerToolMode currentMode = switchCurrentMode != null ? switchCurrentMode : ContainerToolMode.CLEAR;
+        ContainerToolMode previousMode = (ContainerToolMode) currentMode.cycle(false);
+        ContainerToolMode nextMode = (ContainerToolMode) currentMode.cycle(true);
+        int rowGap = Math.max(12, Math.round(15.0f * scale));
+        int centerX = width / 2;
+        int centerY = height - Math.max(42, Math.round(58.0f * scale));
+        int textMaxUnscaled = unscaledWidth(Math.max(32, width - 32), scale);
+        float offset = getSwitchDeckOffset(nowNanos, rowGap);
+
+        int clipTop = Math.max(0, centerY - rowGap - Math.round(11.0f * scale));
+        int clipBottom = Math.min(height, centerY + rowGap + Math.round(11.0f * scale));
+        context.enableScissor(8, clipTop, Math.max(9, width - 8), clipBottom);
+        drawTextSwitchRow(context, client, previousMode, centerX, centerY - rowGap + offset, centerY, rowGap, scale, alpha, textMaxUnscaled, false, switchExpand);
+        drawTextSwitchRow(context, client, currentMode, centerX, centerY + offset, centerY, rowGap, scale, alpha, textMaxUnscaled, true, switchExpand);
+        drawTextSwitchRow(context, client, nextMode, centerX, centerY + rowGap + offset, centerY, rowGap, scale, alpha, textMaxUnscaled, false, switchExpand);
+        context.disableScissor();
     }
 
     private static ToolHudStyle getHudStyle() {
@@ -661,6 +666,36 @@ public class ToolHudRenderer {
         drawHudToolIcon(context, iconCenterX, iconY, rowIconScale, rowAlpha, focus, mode, nowNanos);
         String label = ellipsize(client, mode.getDisplayName(), Math.max(0, textMaxUnscaled));
         drawScaledText(context, client, label, textX, rowY - Math.round(client.textRenderer.fontHeight * rowTextScale * 0.5f), rowTextScale, labelColor);
+    }
+
+    private static void drawTextSwitchRow(DrawContext context, MinecraftClient client, ContainerToolMode mode,
+                                          int centerX, float rowCenterY, int centerY, int rowGap, float scale,
+                                          int alpha, int textMaxUnscaled, boolean isCurrentRow, float switchExpand) {
+        if (mode == null) {
+            return;
+        }
+
+        float distance = Math.abs(rowCenterY - centerY) / Math.max(1.0f, rowGap);
+        if (distance > 1.35f) {
+            return;
+        }
+
+        float focus = 1.0f - clamp(distance, 0.0f, 1.0f);
+        float rowVisibility = isCurrentRow ? 1.0f : Math.max(switchExpand, focus);
+        int rowAlpha = Math.round(alpha * (0.30f + focus * 0.70f) * rowVisibility);
+        if (rowAlpha <= 3) {
+            return;
+        }
+
+        float rowTextScale = scale * (0.84f + focus * 0.16f);
+        String label = ellipsize(client, mode.getDisplayName(), Math.max(0, textMaxUnscaled));
+        int textWidth = client.textRenderer.getWidth(label);
+        int x = Math.round(centerX - textWidth * rowTextScale * 0.5f);
+        int y = Math.round(rowCenterY - client.textRenderer.fontHeight * rowTextScale * 0.5f);
+        int color = withAlpha(isCurrentRow && focus > 0.58f ? TEXT : MUTED_TEXT,
+                Math.round(rowAlpha * (0.76f + focus * 0.24f)));
+
+        drawScaledText(context, client, label, x, y, rowTextScale, color);
     }
 
     private static int countFittingLines(int firstY, int lineGap, int textHeight, int bottom, int requestedLines) {
@@ -1052,7 +1087,7 @@ public class ToolHudRenderer {
     }
 
     private static long getSwitchElapsed(long nowNanos) {
-        if (!Configs.ENABLE_TOOL_SWITCH_HUD.getBooleanValue() || !switchHudActive || switchHudStartNanos <= 0L) {
+        if (!switchHudActive || switchHudStartNanos <= 0L) {
             return -1L;
         }
 
