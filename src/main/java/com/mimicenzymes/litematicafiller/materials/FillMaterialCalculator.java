@@ -48,6 +48,7 @@ public class FillMaterialCalculator {
 
     public static volatile boolean hasMissingData = false;
     private static volatile int materialReplacementVersion = 0;
+    private static int seenGlobalReplacementVersion = -1;
 
     private static final Map<SchematicPlacement, List<NbtContext>> PLACEMENT_NBT_CACHE = new IdentityHashMap<>();
     public static class ItemStackKey {
@@ -201,11 +202,21 @@ public class FillMaterialCalculator {
         materialReplacementVersion++;
     }
 
+    public static void syncMaterialReplacementRules() {
+        int globalVersion = MaterialReplacer.getGlobalReplacementVersion();
+        if (globalVersion != seenGlobalReplacementVersion) {
+            seenGlobalReplacementVersion = globalVersion;
+            requestMaterialReplacementRefresh();
+        }
+    }
+
     public static void calculate(Object input, boolean silent) {
         calculate(input, silent, null);
     }
 
     public static void calculate(Object input, boolean silent, List<MaterialListEntry> fallbackEntries) {
+        syncMaterialReplacementRules();
+
         itemStatsCache.clear();
         replacementSourceCache.clear();
         containerMaterialKeys.clear();
