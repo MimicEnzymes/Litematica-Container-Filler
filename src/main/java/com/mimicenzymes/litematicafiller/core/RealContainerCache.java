@@ -561,6 +561,14 @@ public class RealContainerCache {
         return hash * 0x100000001b3L;
     }
 
+    public static Map<Integer, ItemStack> getAuthoritativeCachedItems(BlockPos pos) {
+        if (pos == null) return null;
+
+        BlockPos key = pos.toImmutable();
+        if (CACHE.containsKey(key)) return CACHE.get(key);
+        return NBT_QUERY_CACHE.get(key);
+    }
+
     public static Map<Integer, ItemStack> getCachedItems(BlockPos pos) {
         if (CACHE.containsKey(pos)) return CACHE.get(pos);
 
