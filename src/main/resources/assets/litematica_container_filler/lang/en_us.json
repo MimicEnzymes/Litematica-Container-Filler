@@ -318,6 +318,7 @@
   "litematica_container_filler.message.fill_completed": "§a[Container Filler] Target container fill completed!",
   "litematica_container_filler.message.returning_items": "§e[Container Filler] Processing excess materials and restoring stored items...",
   "litematica_container_filler.message.container_timeout": "§c[Container Filler] Container response timeout, operation aborted.",
+  "litematica_container_filler.message.click_packet_queue_overflow": "§c[Container Filler] Slow click packet queue overflowed, operation aborted.",
   "litematica_container_filler.message.user_aborted": "§e[Container Filler] User manually closed the interface. Task forcefully terminated.",
   "litematica_container_filler.message.container_leaking": "§c[Container Filler] Container item leaking detected (Hopper?), task aborted!",
   "litematica_container_filler.message.tool_cancelled": "§e[Container Filler] Tool operation cancelled.",
