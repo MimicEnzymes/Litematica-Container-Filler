@@ -18,7 +18,7 @@ public class InGameHudMixin {
         MinecraftClient client = MinecraftClient.getInstance();
         if (!Configs.ENABLE_MOD.getBooleanValue() ||
                 client.options.hudHidden ||
-                (!Configs.ENABLE_TOOL_HUD.getBooleanValue() && !Configs.ENABLE_TOOL_SWITCH_HUD.getBooleanValue())) {
+                (!Configs.ENABLE_TOOL_HUD.getBooleanValue() && !ToolHudRenderer.hasActiveTextSwitchHud())) {
             return;
         }
         ToolHudRenderer.render(context);
