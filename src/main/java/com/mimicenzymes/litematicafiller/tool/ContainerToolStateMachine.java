@@ -163,9 +163,6 @@ public class ContainerToolStateMachine {
         Configs.CONTAINER_TOOL_MODE.setOptionListValue(next);
         Configs.TOOL_ENABLED.setBooleanValue(true);
         ToolHudRenderer.showToolSwitch(previous, next, forward);
-        if (!Configs.ENABLE_TOOL_SWITCH_HUD.getBooleanValue()) {
-            send(client, "litematica_container_filler.message.tool_mode_switched", next.getDisplayName());
-        }
     }
 
     public void closeAll(MinecraftClient client) {
