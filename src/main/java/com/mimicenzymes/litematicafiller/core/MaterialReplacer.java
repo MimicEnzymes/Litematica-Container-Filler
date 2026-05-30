@@ -85,6 +85,7 @@ public class MaterialReplacer {
     private static final Map<String, List<String>> SCHEMATIC_RULE_STRINGS = new HashMap<>();
     private static final Map<String, List<Replacement>> SCHEMATIC_REPLACEMENTS = new HashMap<>();
     private static int lastHash = -1;
+    private static int globalReplacementVersion = 0;
 
     public static void checkReload() {
         List<String> strings = Configs.MATERIAL_REPLACEMENTS.getStrings();
@@ -94,7 +95,13 @@ public class MaterialReplacer {
             REPLACEMENTS.clear();
             REPLACEMENTS.addAll(parseReplacements(strings));
             lastHash = currentHash;
+            globalReplacementVersion++;
         }
+    }
+
+    public static int getGlobalReplacementVersion() {
+        checkReload();
+        return globalReplacementVersion;
     }
 
     private static ItemRule parseRule(String str) {

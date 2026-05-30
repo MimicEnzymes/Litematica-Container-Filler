@@ -137,7 +137,6 @@ public class GuiRenderEditor extends GuiBase {
             }
             case HUD -> {
                 controls.add(booleanControl(Configs.ENABLE_TOOL_HUD));
-                controls.add(booleanControl(Configs.ENABLE_TOOL_SWITCH_HUD));
                 controls.add(booleanControl(Configs.TOOL_HUD_BORDER));
                 controls.add(optionControl(Configs.TOOL_HUD_STYLE));
                 controls.add(doubleStepperControl(Configs.TOOL_HUD_OPACITY, 0.05D));

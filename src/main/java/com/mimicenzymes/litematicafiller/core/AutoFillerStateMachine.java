@@ -49,6 +49,7 @@ public class AutoFillerStateMachine {
         public Map<Integer, ItemStack> missingItems;
         public boolean needsInspection;
         public boolean forcedManual;
+        public int lastPrepareAttemptTick = -1000;
 
         public final Map<Integer, Integer> fillLedger = new HashMap<>();
 
@@ -88,6 +89,8 @@ public class AutoFillerStateMachine {
     public static AutoFillerStateMachine getInstance() { return INSTANCE; }
     private static final int MAX_TASK_QUEUE_SIZE = 20;
     private static final int MAX_ACTIONS_PER_TICK = 24;
+    private static final int MAX_QUEUE_PREPARES_PER_TICK = 4;
+    private static final int QUEUE_PREPARE_INTERVAL_TICKS = 2;
     private static final long MISSING_MATERIAL_MARKER_MS = 1200L;
     private static final long TICK_MS = 50L;
 
@@ -123,6 +126,7 @@ public class AutoFillerStateMachine {
     private final Map<BlockPos, Set<Item>> failedContainers = new ConcurrentHashMap<>();
     private final Map<BlockPos, Long> missingMaterialMarkers = new ConcurrentHashMap<>();
     private final Map<BlockPos, Long> recentFillingMarkers = new ConcurrentHashMap<>();
+    private final Map<ExactMovePlanKey, List<ExactMoveClick>> exactMovePlanCache = new HashMap<>();
     private final Set<Integer> blacklistedSlots = new HashSet<>();
 
     private boolean lastContinuousState = false;
@@ -142,6 +146,51 @@ public class AutoFillerStateMachine {
         OrderlyStoredItem touch() {
             return new OrderlyStoredItem(stack.copy(), sourceShulkerSlot, System.currentTimeMillis());
         }
+    }
+
+    private record ShulkerFetchCandidate(int slot, Map<StrictItemStackKey, Integer> available, int matchingStacks) {
+        int scoreAgainst(Map<StrictItemStackKey, Integer> remaining) {
+            int score = 0;
+            for (Map.Entry<StrictItemStackKey, Integer> entry : available.entrySet()) {
+                int needed = remaining.getOrDefault(entry.getKey(), 0);
+                if (needed > 0) {
+                    score += Math.min(entry.getValue(), needed);
+                }
+            }
+            return score;
+        }
+
+        void consumeFrom(Map<StrictItemStackKey, Integer> remaining) {
+            for (Map.Entry<StrictItemStackKey, Integer> entry : available.entrySet()) {
+                int needed = remaining.getOrDefault(entry.getKey(), 0);
+                if (needed > 0) {
+                    remaining.put(entry.getKey(), Math.max(0, needed - entry.getValue()));
+                }
+            }
+        }
+    }
+
+    private enum ExactMoveSlot {
+        SOURCE, TARGET
+    }
+
+    private record ExactMoveClick(ExactMoveSlot slot, int button) {
+    }
+
+    private record ExactMoveState(int source, int target, int cursor) {
+    }
+
+    private record ExactMoveStep(ExactMoveState previous, ExactMoveClick click) {
+    }
+
+    private record ExactMovePlanKey(int sourceCount, int targetCount, int amount, int maxCount) {
+    }
+
+    private record ExactMoveTarget(int uiSlot, int playerSlot, int initialCount, int maxCount, int amount, boolean wasEmpty, List<ExactMoveClick> plan) {
+    }
+
+    private enum QueuePreparationState {
+        WAITING_FOR_DATA, READY, SATISFIED
     }
 
     private static java.lang.reflect.Field CACHE_FIELD = null;
@@ -785,8 +834,8 @@ public class AutoFillerStateMachine {
                 return false;
             });
         }
-        if (!taskQueue.isEmpty() && tickCounter % 20 == 0) {
-            prefetchQueuedTaskData();
+        if (!taskQueue.isEmpty()) {
+            prepareQueuedTasks(client);
         }
 
         if (currentTask != null) {
@@ -850,49 +899,12 @@ public class AutoFillerStateMachine {
                 case AWAITING_DATA:
                     Map<Integer, ItemStack> lateCache = getTrueContainerData(client, currentTask.targetPos);
                     if (lateCache != null) {
-                        currentTask.needsInspection = false;
-
-                        boolean isCrafter = client.world.getBlockState(currentTask.targetPos).getBlock() instanceof net.minecraft.block.CrafterBlock;
-                        Set<Integer> ignoredSlots = currentIgnoredSlots(client);
-                        boolean needsAction = false;
-                        Map<Integer, ItemStack> missingItems = new HashMap<>();
-
-                        for (int i = 0; i < 54; i++) {
-                            if (ignoredSlots.contains(i)) continue;
-
-                            ItemStack req = currentTask.requiredItems.getOrDefault(i, ItemStack.EMPTY);
-                            ItemStack cur = lateCache.getOrDefault(i, ItemStack.EMPTY);
-
-                            if (req.isEmpty() && cur.isEmpty()) continue;
-                            if (req.isEmpty() && !cur.isEmpty()) needsAction = true;
-                            else if (!req.isEmpty() && cur.isEmpty()) {
-                                needsAction = true;
-                                missingItems.put(i, req.copy());
-                            } else if (!ItemMatcher.isSameItem(req, cur)) {
-                                needsAction = true;
-                                missingItems.put(i, req.copy());
-                            } else if (cur.getCount() < req.getCount()) {
-                                needsAction = true;
-                                ItemStack diff = req.copy();
-                                diff.setCount(req.getCount() - cur.getCount());
-                                missingItems.put(i, diff);
-                            } else if (cur.getCount() > req.getCount()) {
-                                if (!isCrafter) needsAction = true;
-                            }
-                        }
-
-                        if (isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(currentTask.targetPos, client)) needsAction = true;
-
-                        if (!needsAction) {
+                        QueuePreparationState state = prepareTaskFromData(client, currentTask, lateCache);
+                        if (state == QueuePreparationState.SATISFIED) {
                             sendFeedback(client, Text.translatable("litematica_container_filler.message.already_satisfied").getString(), true);
                             reset();
                             break;
                         }
-
-                        currentTask.missingItems.clear();
-                        currentTask.missingItems.putAll(missingItems);
-
-                        currentTask.initLedger();
 
                         if (!checkMaterialsAndPrepare(client)) {
                             reset(); break;
@@ -1263,27 +1275,59 @@ public class AutoFillerStateMachine {
 
     private Set<Integer> findShulkersContaining(MinecraftClient client, List<ItemStack> needed) {
         Set<Integer> slots = new LinkedHashSet<>();
-        if (!canOpenShulkerUi()) return slots;
+        if (!canOpenShulkerUi() || client.player == null || needed.isEmpty()) return slots;
 
+        Map<StrictItemStackKey, Integer> remaining = new HashMap<>();
         for (ItemStack req : needed) {
-            int amountToFind = req.getCount();
-            for (int i = 0; i < 36; i++) {
-                if (amountToFind <= 0) break;
-                if (shulkerMisses.containsKey(i) && shulkerMisses.get(i).contains(req.getItem())) continue;
+            if (!req.isEmpty()) {
+                remaining.merge(new StrictItemStackKey(req), req.getCount(), Integer::sum);
+            }
+        }
+        if (remaining.isEmpty()) return slots;
 
-                ItemStack s = client.player.getInventory().getStack(i);
-                if (s.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) {
-                    ContainerComponent c = s.get(DataComponentTypes.CONTAINER);
-                    if (c != null) {
-                        for (ItemStack inner : containerStacks(c)) {
-                            if (ItemMatcher.isSameItem(inner, req)) {
-                                slots.add(i);
-                                amountToFind -= inner.getCount();
-                            }
-                        }
+        List<ShulkerFetchCandidate> candidates = new ArrayList<>();
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = client.player.getInventory().getStack(i);
+            if (!(s.getItem() instanceof BlockItem bi) || !(bi.getBlock() instanceof ShulkerBoxBlock)) continue;
+
+            ContainerComponent c = s.get(DataComponentTypes.CONTAINER);
+            if (c == null) continue;
+
+            Map<StrictItemStackKey, Integer> available = new HashMap<>();
+            int matchingStacks = 0;
+            for (ItemStack inner : containerStacks(c)) {
+                if (inner.isEmpty()) continue;
+                for (ItemStack req : needed) {
+                    if (shulkerMisses.containsKey(i) && shulkerMisses.get(i).contains(req.getItem())) continue;
+                    if (ItemMatcher.isSameItem(inner, req)) {
+                        available.merge(new StrictItemStackKey(req), inner.getCount(), Integer::sum);
+                        matchingStacks++;
+                        break;
                     }
                 }
             }
+            if (!available.isEmpty()) {
+                candidates.add(new ShulkerFetchCandidate(i, available, matchingStacks));
+            }
+        }
+
+        while (!candidates.isEmpty() && remaining.values().stream().anyMatch(v -> v > 0)) {
+            ShulkerFetchCandidate best = null;
+            int bestScore = 0;
+            for (ShulkerFetchCandidate candidate : candidates) {
+                int score = candidate.scoreAgainst(remaining);
+                if (score > bestScore
+                        || (score == bestScore && best != null && candidate.matchingStacks() > best.matchingStacks())
+                        || (score == bestScore && best != null && candidate.matchingStacks() == best.matchingStacks() && candidate.slot() < best.slot())) {
+                    best = candidate;
+                    bestScore = score;
+                }
+            }
+            if (best == null || bestScore <= 0) break;
+
+            slots.add(best.slot());
+            best.consumeFrom(remaining);
+            candidates.remove(best);
         }
         return slots;
     }
@@ -1460,6 +1504,9 @@ public class AutoFillerStateMachine {
     }
 
     private TakeItOutRequest findTakeItOutRequest(MinecraftClient client, List<ItemStack> needed) {
+        TakeItOutRequest best = null;
+        int bestCount = 0;
+
         for (ItemStack req : needed) {
             for (int shulkerSlot = 0; shulkerSlot < 36; shulkerSlot++) {
                 ItemStack shulker = client.player.getInventory().getStack(shulkerSlot);
@@ -1472,14 +1519,18 @@ public class AutoFillerStateMachine {
 
                 int innerSlot = 0;
                 for (ItemStack inner : containerStacks(component)) {
-                    if (ItemMatcher.isSameItem(inner, req)) {
-                        return new TakeItOutRequest(shulkerSlot, innerSlot, req.copy(), countItemInPlayerInv(client, req));
+                    if (ItemMatcher.isSameItem(inner, req) && inner.getCount() <= req.getCount() && inner.getCount() > bestCount) {
+                        ItemStack requested = inner.copy();
+                        requested.setCount(inner.getCount());
+                        best = new TakeItOutRequest(shulkerSlot, innerSlot, requested, countItemInPlayerInv(client, req));
+                        bestCount = inner.getCount();
+                        if (bestCount == req.getCount()) return best;
                     }
                     innerSlot++;
                 }
             }
         }
-        return null;
+        return best;
     }
 
     private void doShulkerExtractionPhase(MinecraftClient client) {
@@ -1488,21 +1539,15 @@ public class AutoFillerStateMachine {
         List<ItemStack> needed = computeNeededToFetch(client);
 
         int remainingEmptySlots = getEmptySlots(client).size();
-        Map<Item, Integer> partialSpaces = new HashMap<>();
-
-        for (int i = 0; i < 36; i++) {
-            ItemStack invStack = client.player.getInventory().getStack(i);
-            if (!invStack.isEmpty()) {
-                partialSpaces.put(invStack.getItem(), partialSpaces.getOrDefault(invStack.getItem(), 0) + (invStack.getMaxCount() - invStack.getCount()));
-            }
-        }
+        Map<StrictItemStackKey, Integer> partialSpaces = collectPartialSpaces(client);
 
         boolean inventoryFull = false;
 
         for (ItemStack req : needed) {
             if (inventoryFull) break;
 
-            if (remainingEmptySlots <= 0 && partialSpaces.getOrDefault(req.getItem(), 0) <= 0) {
+            StrictItemStackKey reqKey = new StrictItemStackKey(req);
+            if (remainingEmptySlots <= 0 && partialSpaces.getOrDefault(reqKey, 0) <= 0) {
                 continue;
             }
 
@@ -1515,72 +1560,62 @@ public class AutoFillerStateMachine {
                 ItemStack slotStack = h.slots.get(i).getStack();
                 if (slotStack.isEmpty() || !ItemMatcher.isSameItem(slotStack, req)) continue;
 
-                int partialSpace = partialSpaces.getOrDefault(req.getItem(), 0);
-                if (remainingEmptySlots <= 0 && partialSpace <= 0) {
-                    inventoryFull = true;
-                    break;
-                }
+                while (amountTaken < amountMissing) {
+                    slotStack = h.slots.get(i).getStack();
+                    if (slotStack.isEmpty() || !ItemMatcher.isSameItem(slotStack, req)) break;
 
-                int amountAvailable = slotStack.getCount();
-                int maxWeCanTake = amountAvailable;
-                if (remainingEmptySlots <= 0) {
-                    maxWeCanTake = Math.min(amountAvailable, partialSpace);
-                }
+                    int partialSpace = partialSpaces.getOrDefault(reqKey, 0);
+                    if (remainingEmptySlots <= 0 && partialSpace <= 0) {
+                        inventoryFull = true;
+                        break;
+                    }
 
-                int amountToTake = Math.min(amountMissing - amountTaken, maxWeCanTake);
-                if (amountToTake <= 0) continue;
+                    int amountAvailable = slotStack.getCount();
+                    int maxWeCanTake = amountAvailable;
+                    if (remainingEmptySlots <= 0) {
+                        maxWeCanTake = Math.min(amountAvailable, partialSpace);
+                    }
 
-                if (amountToTake == amountAvailable) {
-                    client.interactionManager.clickSlot(h.syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
-                } else {
-                    boolean success = false;
-                    while (!success) {
-                        int emptyUiSlot = -1;
-                        int emptyPlayerSlot = -1;
-                        for (int j = h.slots.size() - 36; j < h.slots.size(); j++) {
-                            int pIdx = j - (h.slots.size() - 36);
-                            if (h.slots.get(j).getStack().isEmpty() && !usedEmptySlots.contains(j) && !blacklistedSlots.contains(pIdx)) {
-                                emptyUiSlot = j;
-                                emptyPlayerSlot = pIdx;
+                    int amountToTake = Math.min(amountMissing - amountTaken, maxWeCanTake);
+                    if (amountToTake <= 0) break;
+
+                    int movedAmount = 0;
+
+                    if (amountToTake == amountAvailable && blacklistedSlots.isEmpty()) {
+                        client.interactionManager.clickSlot(h.syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
+                        movedAmount = amountToTake;
+                    } else {
+                        ExactMoveTarget target = findExactMoveTarget(client, h, req, amountAvailable, amountToTake, usedEmptySlots);
+                        if (target == null) {
+                            inventoryFull = true;
+                            break;
+                        }
+
+                        executeExactMovePlan(client, h, i, target.uiSlot(), target.plan());
+                        movedAmount = target.amount();
+
+                        if (target.wasEmpty()) {
+                            usedEmptySlots.add(target.uiSlot());
+                            if (h.slots.get(target.uiSlot()).getStack().isEmpty()) {
+                                blacklistedSlots.add(target.playerSlot());
                                 break;
                             }
                         }
-
-                        if (emptyUiSlot != -1) {
-                            usedEmptySlots.add(emptyUiSlot);
-
-                            client.interactionManager.clickSlot(h.syncId, i, 0, SlotActionType.PICKUP, client.player);
-                            for (int k = 0; k < amountToTake; k++) {
-                                client.interactionManager.clickSlot(h.syncId, emptyUiSlot, 1, SlotActionType.PICKUP, client.player);
-                            }
-                            client.interactionManager.clickSlot(h.syncId, i, 0, SlotActionType.PICKUP, client.player);
-
-                            if (h.slots.get(emptyUiSlot).getStack().isEmpty()) {
-                                blacklistedSlots.add(emptyPlayerSlot);
-                            } else {
-                                success = true;
-                            }
-                        } else {
-                            client.interactionManager.clickSlot(h.syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
-                            success = true;
-                        }
                     }
+
+                    if (movedAmount <= 0) break;
+
+                    borrowedItems.add(new StrictItemStackKey(req));
+                    recordOrderlyStoredItem(req, activeShulkerSlot);
+                    amountTaken += movedAmount;
+                    remainingEmptySlots = getEmptySlots(client).size();
+                    partialSpaces = collectPartialSpaces(client);
                 }
 
-                borrowedItems.add(new StrictItemStackKey(req));
-                recordOrderlyStoredItem(req, activeShulkerSlot);
-                amountTaken += amountToTake;
-
-                if (amountToTake > partialSpace) {
-                    remainingEmptySlots--;
-                    int overflow = amountToTake - partialSpace;
-                    partialSpaces.put(req.getItem(), req.getMaxCount() - overflow);
-                } else {
-                    partialSpaces.put(req.getItem(), partialSpace - amountToTake);
-                }
+                if (inventoryFull) break;
             }
 
-            if (amountTaken == 0 && (remainingEmptySlots > 0 || partialSpaces.getOrDefault(req.getItem(), 0) > 0)) {
+            if (amountTaken == 0 && (remainingEmptySlots > 0 || partialSpaces.getOrDefault(reqKey, 0) > 0)) {
                 shulkerMisses.computeIfAbsent(activeShulkerSlot, k -> new HashSet<>()).add(req.getItem());
             }
         }
@@ -1600,6 +1635,178 @@ public class AutoFillerStateMachine {
             }
         });
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
+    }
+
+    private Map<StrictItemStackKey, Integer> collectPartialSpaces(MinecraftClient client) {
+        Map<StrictItemStackKey, Integer> spaces = new HashMap<>();
+        if (client == null || client.player == null) return spaces;
+
+        for (int i = 0; i < 36; i++) {
+            ItemStack invStack = client.player.getInventory().getStack(i);
+            if (!invStack.isEmpty()) {
+                int space = invStack.getMaxCount() - invStack.getCount();
+                if (space > 0) {
+                    StrictItemStackKey key = new StrictItemStackKey(invStack);
+                    spaces.put(key, spaces.getOrDefault(key, 0) + space);
+                }
+            }
+        }
+
+        return spaces;
+    }
+
+    private ExactMoveTarget findExactMoveTarget(MinecraftClient client, ScreenHandler handler, ItemStack req, int sourceCount, int amount, Set<Integer> usedEmptySlots) {
+        if (client.player == null || req.isEmpty() || amount <= 0) return null;
+
+        ExactMoveTarget best = null;
+        int playerStart = handler.slots.size() - 36;
+
+        for (int j = playerStart; j < handler.slots.size(); j++) {
+            Slot slot = handler.slots.get(j);
+            if (slot.inventory != client.player.getInventory()) continue;
+
+            int playerSlot = slot.getIndex();
+            if (blacklistedSlots.contains(playerSlot)) continue;
+
+            ItemStack stack = slot.getStack();
+            if (!stack.isEmpty() && ItemMatcher.isSameItem(stack, req)) {
+                int maxCount = stack.getMaxCount();
+                if (stack.getCount() + amount > maxCount) continue;
+
+                List<ExactMoveClick> plan = findExactMovePlan(sourceCount, stack.getCount(), amount, maxCount);
+                best = chooseBetterExactMoveTarget(best, new ExactMoveTarget(j, playerSlot, stack.getCount(), maxCount, amount, false, plan));
+            }
+        }
+
+        for (int j = playerStart; j < handler.slots.size(); j++) {
+            Slot slot = handler.slots.get(j);
+            if (slot.inventory != client.player.getInventory()) continue;
+
+            int playerSlot = slot.getIndex();
+            if (usedEmptySlots.contains(j) || blacklistedSlots.contains(playerSlot) || !slot.getStack().isEmpty()) continue;
+
+            int maxCount = req.getMaxCount();
+            if (amount > maxCount) continue;
+
+            List<ExactMoveClick> plan = findExactMovePlan(sourceCount, 0, amount, maxCount);
+            best = chooseBetterExactMoveTarget(best, new ExactMoveTarget(j, playerSlot, 0, maxCount, amount, true, plan));
+        }
+
+        return best;
+    }
+
+    private ExactMoveTarget chooseBetterExactMoveTarget(ExactMoveTarget current, ExactMoveTarget candidate) {
+        if (candidate == null || candidate.plan() == null || candidate.plan().isEmpty()) return current;
+        if (current == null) return candidate;
+        if (candidate.plan().size() != current.plan().size()) {
+            return candidate.plan().size() < current.plan().size() ? candidate : current;
+        }
+        if (current.wasEmpty() != candidate.wasEmpty()) {
+            return !candidate.wasEmpty() ? candidate : current;
+        }
+        return candidate.uiSlot() < current.uiSlot() ? candidate : current;
+    }
+
+    private void executeExactMovePlan(MinecraftClient client, ScreenHandler handler, int sourceUiSlot, int targetUiSlot, List<ExactMoveClick> plan) {
+        if (plan == null) return;
+        for (ExactMoveClick click : plan) {
+            int uiSlot = click.slot() == ExactMoveSlot.SOURCE ? sourceUiSlot : targetUiSlot;
+            client.interactionManager.clickSlot(handler.syncId, uiSlot, click.button(), SlotActionType.PICKUP, client.player);
+        }
+    }
+
+    private List<ExactMoveClick> findExactMovePlan(int sourceCount, int targetCount, int amount, int maxCount) {
+        if (amount <= 0 || sourceCount <= 0 || amount > sourceCount || targetCount < 0 || targetCount + amount > maxCount) {
+            return null;
+        }
+
+        ExactMovePlanKey key = new ExactMovePlanKey(sourceCount, targetCount, amount, maxCount);
+        List<ExactMoveClick> cached = exactMovePlanCache.get(key);
+        if (cached != null) return cached;
+
+        ExactMoveState start = new ExactMoveState(sourceCount, targetCount, 0);
+        ExactMoveState goal = new ExactMoveState(sourceCount - amount, targetCount + amount, 0);
+
+        ArrayDeque<ExactMoveState> queue = new ArrayDeque<>();
+        Map<ExactMoveState, ExactMoveStep> visited = new HashMap<>();
+        queue.add(start);
+        visited.put(start, new ExactMoveStep(null, null));
+
+        ExactMoveClick[] clicks = {
+                new ExactMoveClick(ExactMoveSlot.SOURCE, 0),
+                new ExactMoveClick(ExactMoveSlot.TARGET, 0),
+                new ExactMoveClick(ExactMoveSlot.SOURCE, 1),
+                new ExactMoveClick(ExactMoveSlot.TARGET, 1)
+        };
+
+        while (!queue.isEmpty()) {
+            ExactMoveState state = queue.removeFirst();
+            if (state.equals(goal)) {
+                List<ExactMoveClick> plan = reconstructExactMovePlan(goal, visited);
+                exactMovePlanCache.put(key, plan);
+                return plan;
+            }
+
+            for (ExactMoveClick click : clicks) {
+                ExactMoveState next = applyExactMoveClick(state, click, maxCount);
+                if (next == null || next.equals(state) || visited.containsKey(next)) continue;
+
+                visited.put(next, new ExactMoveStep(state, click));
+                queue.addLast(next);
+            }
+        }
+
+        return null;
+    }
+
+    private List<ExactMoveClick> reconstructExactMovePlan(ExactMoveState goal, Map<ExactMoveState, ExactMoveStep> visited) {
+        LinkedList<ExactMoveClick> plan = new LinkedList<>();
+        ExactMoveState state = goal;
+        while (true) {
+            ExactMoveStep step = visited.get(state);
+            if (step == null || step.click() == null) break;
+            plan.addFirst(step.click());
+            state = step.previous();
+        }
+        return List.copyOf(plan);
+    }
+
+    private ExactMoveState applyExactMoveClick(ExactMoveState state, ExactMoveClick click, int maxCount) {
+        int source = state.source();
+        int target = state.target();
+        int cursor = state.cursor();
+        int slotCount = click.slot() == ExactMoveSlot.SOURCE ? source : target;
+
+        if (click.button() == 0) {
+            if (cursor == 0) {
+                cursor = slotCount;
+                slotCount = 0;
+            } else if (slotCount < maxCount) {
+                int moved = Math.min(cursor, maxCount - slotCount);
+                slotCount += moved;
+                cursor -= moved;
+            }
+        } else {
+            if (cursor == 0) {
+                int picked = (slotCount + 1) / 2;
+                slotCount -= picked;
+                cursor = picked;
+            } else if (slotCount < maxCount) {
+                slotCount++;
+                cursor--;
+            }
+        }
+
+        if (click.slot() == ExactMoveSlot.SOURCE) {
+            source = slotCount;
+        } else {
+            target = slotCount;
+        }
+
+        if (source < 0 || target < 0 || cursor < 0 || source > maxCount || target > maxCount || cursor > maxCount) {
+            return null;
+        }
+        return new ExactMoveState(source, target, cursor);
     }
 
     private boolean canAbsorb(MinecraftClient client, ItemStack stack) {
@@ -2156,12 +2363,100 @@ public class AutoFillerStateMachine {
         reset();
     }
 
-    private void prefetchQueuedTaskData() {
-        int count = 0;
+    private void prepareQueuedTasks(MinecraftClient client) {
+        if (client == null || client.player == null || client.world == null) return;
+
+        int preparedThisTick = 0;
+        List<FillTask> removeAfterScan = new ArrayList<>();
+
         for (FillTask task : taskQueue) {
-            if (count++ >= 4) break;
-            RealContainerCache.requestContainerData(task.targetPos, 500L, true);
+            if (task == null) continue;
+            if (task.forcedManual) continue;
+
+            if (shouldDropQueuedTask(client, task)) {
+                removeAfterScan.add(task);
+                continue;
+            }
+
+            if (preparedThisTick >= MAX_QUEUE_PREPARES_PER_TICK) break;
+            if (tickCounter - task.lastPrepareAttemptTick < QUEUE_PREPARE_INTERVAL_TICKS) continue;
+            task.lastPrepareAttemptTick = tickCounter;
+            preparedThisTick++;
+
+            Map<Integer, ItemStack> cachedData = getQueuedTaskData(task);
+            if (cachedData == null) continue;
+
+            QueuePreparationState state = prepareTaskFromData(client, task, cachedData);
+            if (state == QueuePreparationState.SATISFIED) {
+                removeAfterScan.add(task);
+            }
         }
+
+        for (FillTask task : removeAfterScan) {
+            taskQueue.remove(task);
+            if (task != null && task.targetPos != null) {
+                AreaScanner.clearAttemptCooldown(task.targetPos);
+                HighlightScanner.onContainerDataChanged(task.targetPos);
+            }
+        }
+    }
+
+    private Map<Integer, ItemStack> getQueuedTaskData(FillTask task) {
+        if (task == null || task.targetPos == null) return null;
+
+        Map<Integer, ItemStack> reliableCache = getReliableCache(task.targetPos);
+        if (reliableCache != null) return reliableCache;
+
+        RealContainerCache.requestContainerData(task.targetPos, 500L, true);
+        Map<Integer, ItemStack> fallback = RealContainerCache.getCachedItems(task.targetPos);
+        if (fallback != null && fallback.isEmpty()) return null;
+        return fallback;
+    }
+
+    private QueuePreparationState prepareTaskFromData(MinecraftClient client, FillTask task, Map<Integer, ItemStack> trueData) {
+        if (client == null || client.world == null || task == null || trueData == null) return QueuePreparationState.WAITING_FOR_DATA;
+
+        boolean isCrafter = client.world.getBlockState(task.targetPos).getBlock() instanceof net.minecraft.block.CrafterBlock;
+        Set<Integer> ignoredSlots = LitematicaContainerReader.getIgnoredSlots(task.targetPos, client.world.getRegistryManager());
+        boolean needsCrafterLocking = isCrafter && LitematicaContainerReader.doesCrafterNeedLocking(task.targetPos, client);
+        boolean needsAction = needsCrafterLocking;
+        Map<Integer, ItemStack> missingItems = new HashMap<>();
+
+        for (int i = 0; i < 54; i++) {
+            if (ignoredSlots.contains(i)) continue;
+
+            ItemStack req = task.requiredItems.getOrDefault(i, ItemStack.EMPTY);
+            ItemStack cur = trueData.getOrDefault(i, ItemStack.EMPTY);
+
+            if (req.isEmpty() && cur.isEmpty()) continue;
+            if (req.isEmpty() && !cur.isEmpty()) {
+                needsAction = true;
+            } else if (!req.isEmpty() && cur.isEmpty()) {
+                needsAction = true;
+                missingItems.put(i, req.copy());
+            } else if (!ItemMatcher.isSameItem(req, cur)) {
+                needsAction = true;
+                missingItems.put(i, req.copy());
+            } else if (cur.getCount() < req.getCount()) {
+                needsAction = true;
+                ItemStack diff = req.copy();
+                diff.setCount(req.getCount() - cur.getCount());
+                missingItems.put(i, diff);
+            } else if (cur.getCount() > req.getCount()) {
+                if (!isCrafter) needsAction = true;
+            }
+        }
+
+        if (!needsAction && !ManualContainerOverrideManager.isNeedsFill(task.targetPos)) {
+            return QueuePreparationState.SATISFIED;
+        }
+
+        task.needsInspection = false;
+        task.missingItems.clear();
+        task.missingItems.putAll(missingItems);
+        task.initLedger();
+
+        return QueuePreparationState.READY;
     }
 
     private FillTask pollBestTask(MinecraftClient client) {

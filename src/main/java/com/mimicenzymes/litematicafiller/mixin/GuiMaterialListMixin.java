@@ -22,7 +22,9 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Mixin(value = GuiMaterialList.class, remap = false)
 public abstract class GuiMaterialListMixin extends GuiBase implements MaterialListReplacementRefresh {
@@ -31,6 +33,7 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
 
     @Unique private static java.lang.reflect.Field mimic_materialListAllField = null;
     @Unique private static boolean mimic_reflectionInit = false;
+    @Unique private static final Map<MaterialListBase, List<MaterialListEntry>> mimic_originalVanillaLists = new IdentityHashMap<>();
 
     @Unique private boolean mimic_isMonitorRunning = false;
     @Unique private boolean mimic_needsCalculation = true;
@@ -172,10 +175,11 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
         if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         try {
             if (!(materialList instanceof IMaterialList iMatList)) return;
+            FillMaterialCalculator.syncMaterialReplacementRules();
             mimic_seenReplacementVersion = FillMaterialCalculator.getMaterialReplacementVersion();
             if (mimic_cachedVanillaList == null) {
                 ImmutableList<MaterialListEntry> current = mimic_readMaterialListAll();
-                if (current != null) mimic_cachedVanillaList = new ArrayList<>(current);
+                mimic_cachedVanillaList = mimic_getOriginalVanillaList(current);
             }
             if (mimic_cachedVanillaList == null) return;
 
@@ -209,6 +213,7 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
             ImmutableList<MaterialListEntry> currentRef = mimic_readMaterialListAll();
             if (currentRef == null) return;
 
+            FillMaterialCalculator.syncMaterialReplacementRules();
             int replacementVersion = FillMaterialCalculator.getMaterialReplacementVersion();
             if (replacementVersion != mimic_seenReplacementVersion) {
                 mimic_seenReplacementVersion = replacementVersion;
@@ -217,10 +222,11 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
             }
 
             if (mimic_cachedVanillaList == null) {
-                mimic_cachedVanillaList = new ArrayList<>(currentRef);
+                mimic_cachedVanillaList = mimic_getOriginalVanillaList(currentRef);
                 mimic_needsCalculation = true;
             } else if (!mimic_forceReplacementRefresh && currentRef != mimic_lastInjectedRef) {
                 mimic_cachedVanillaList = new ArrayList<>(currentRef);
+                mimic_originalVanillaLists.put(materialList, mimic_cachedVanillaList);
                 mimic_needsCalculation = true;
             }
 
@@ -261,6 +267,20 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
         } else {
             return new ArrayList<>(mimic_cachedVanillaList);
         }
+    }
+
+    @Unique
+    private List<MaterialListEntry> mimic_getOriginalVanillaList(ImmutableList<MaterialListEntry> currentRef) {
+        if (currentRef == null) return null;
+
+        List<MaterialListEntry> original = mimic_originalVanillaLists.get(materialList);
+        if (original != null) {
+            return new ArrayList<>(original);
+        }
+
+        original = new ArrayList<>(currentRef);
+        mimic_originalVanillaLists.put(materialList, original);
+        return new ArrayList<>(original);
     }
 
     @Unique
