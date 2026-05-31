@@ -27,7 +27,7 @@ public abstract class WidgetMaterialListEntryMixin {
     @Shadow protected abstract int getColumnPosX(int column);
 
     @Inject(method = "render", at = @At("HEAD"), require = 0)
-    private void lcf$layoutReplacementButtons(DrawContext drawContext, int mouseX, int mouseY, boolean selected, CallbackInfo ci) {
+    private void lcf$layoutReplacementButtons(int mouseX, int mouseY, boolean selected, DrawContext drawContext, CallbackInfo ci) {
         if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         if (FillMaterialCalculator.listMode == 0) return;
         if (this.entry == null) return;
@@ -60,7 +60,7 @@ public abstract class WidgetMaterialListEntryMixin {
     }
 
     @Inject(method = "render", at = @At("TAIL"), require = 0)
-    private void lcf$drawReplacementMarker(DrawContext drawContext, int mouseX, int mouseY, boolean selected, CallbackInfo ci) {
+    private void lcf$drawReplacementMarker(int mouseX, int mouseY, boolean selected, DrawContext drawContext, CallbackInfo ci) {
         if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         if (FillMaterialCalculator.listMode == 0) return;
         if (this.entry == null || this.entry.getStack().isEmpty()) return;
@@ -76,7 +76,7 @@ public abstract class WidgetMaterialListEntryMixin {
     }
 
     @Inject(method = "postRenderHovered", at = @At("TAIL"), require = 0)
-    private void lcf$drawReplacementMarkerTooltip(DrawContext drawContext, int mouseX, int mouseY, boolean selected, CallbackInfo ci) {
+    private void lcf$drawReplacementMarkerTooltip(int mouseX, int mouseY, boolean selected, DrawContext drawContext, CallbackInfo ci) {
         if (!Configs.ENABLE_MOD.getBooleanValue()) return;
         if (FillMaterialCalculator.listMode == 0) return;
         if (this.entry == null || this.entry.getStack().isEmpty()) return;
