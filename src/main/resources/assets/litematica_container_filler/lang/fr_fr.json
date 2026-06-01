@@ -42,6 +42,8 @@
   "litematica_container_filler.gui.label.material_replace_rename": "Nom",
   "litematica_container_filler.gui.label.material_replace_ignored": "Ignoré",
   "litematica_container_filler.gui.label.global_material_replace_source": "Choisissez l'objet source à remplacer globalement.",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_schematic": "This item is replaced by a rule saved for this schematic.",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_global": "This item is replaced by a global rule.",
   "litematica_container_filler.gui.label.container_filter_picker": "Cliquez sur les cartes de conteneurs pour ajouter ou retirer leurs ID de bloc de la liste. Appuyez sur Échap pour revenir.",
   "litematica_container_filler.gui.label.render_editor": "Prévisualisez et ajustez les surbrillances, marqueurs de tâche et le HUD d'outil.",
   "litematica_container_filler.gui.label.render_editor_drag": "Faites glisser pour faire pivoter l'aperçu",

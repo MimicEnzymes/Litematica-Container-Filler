@@ -42,6 +42,8 @@
   "litematica_container_filler.gui.label.material_replace_rename": "Name",
   "litematica_container_filler.gui.label.material_replace_ignored": "Ignored",
   "litematica_container_filler.gui.label.global_material_replace_source": "Choose the source item to replace globally.",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_schematic": "This item is replaced by a rule saved for this schematic.",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_global": "This item is replaced by a global rule.",
   "litematica_container_filler.gui.label.container_filter_picker": "Click container cards to add or remove their block IDs from the whitelist/blacklist list. Press ESC to return to configs.",
   "litematica_container_filler.gui.label.render_editor": "Preview and tune highlights, task markers, and the tool HUD.",
   "litematica_container_filler.gui.label.render_editor_drag": "Drag the preview to rotate",

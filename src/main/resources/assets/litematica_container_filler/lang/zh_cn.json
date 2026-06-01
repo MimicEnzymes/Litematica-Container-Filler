@@ -47,6 +47,8 @@
   "litematica_container_filler.gui.tooltip.material_replace_reset": "只清除当前物品在所选范围内的替换规则，其他物品的替换规则不会改变。",
   "litematica_container_filler.gui.tooltip.material_replace_button": "打开本模组的物品替换选择器。",
   "litematica_container_filler.gui.tooltip.material_replace_marker": "此物品是替换规则显示后的结果。",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_schematic": "此物品被当前原理图的替换规则替换。",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_global": "此物品被全局替换规则替换。",
   "litematica_container_filler.gui.tooltip.material_replace_marker_source": "原物品：%s",
   "litematica_container_filler.gui.tooltip.global_material_replace_visual": "打开全局物品替换规则的可视化选择界面。",
   "litematica_container_filler.gui.tooltip.global_material_replace_target": "当前替换为：%s",
