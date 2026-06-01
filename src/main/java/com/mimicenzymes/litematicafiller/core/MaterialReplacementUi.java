@@ -4,6 +4,7 @@ import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.gui.GuiItemReplacementPicker;
 import com.mimicenzymes.litematicafiller.materials.FillMaterialCalculator;
 import com.mimicenzymes.litematicafiller.materials.MaterialListReplacementRefresh;
+import com.mimicenzymes.litematicafiller.render.HighlightScanner;
 import fi.dy.masa.litematica.materials.MaterialListBase;
 import fi.dy.masa.litematica.materials.MaterialListPlacement;
 import fi.dy.masa.litematica.schematic.LitematicaSchematic;
@@ -57,8 +58,7 @@ public final class MaterialReplacementUi {
             Configs.saveToFile();
         }
 
-        FillMaterialCalculator.requestMaterialReplacementRefresh();
-        refreshParentList();
+        onReplacementRulesChanged();
 
         InfoUtils.showGuiOrInGameMessage(
                 Message.MessageType.SUCCESS,
@@ -77,8 +77,7 @@ public final class MaterialReplacementUi {
             MaterialReplacer.removeReplacementRule(source);
         }
 
-        FillMaterialCalculator.requestMaterialReplacementRefresh();
-        refreshParentList();
+        onReplacementRulesChanged();
         InfoUtils.showGuiOrInGameMessage(
                 Message.MessageType.SUCCESS,
                 "litematica_container_filler.message.material_replacement_reset",
@@ -91,10 +90,15 @@ public final class MaterialReplacementUi {
         if (schematicKey == null || schematicKey.isBlank()) return;
 
         MaterialReplacer.clearSchematicReplacementRules(schematicKey);
-        FillMaterialCalculator.requestMaterialReplacementRefresh();
-        refreshParentList();
+        onReplacementRulesChanged();
         InfoUtils.showGuiOrInGameMessage(Message.MessageType.SUCCESS,
                 "litematica_container_filler.message.material_replacement_schematic_cleared");
+    }
+
+    public static void onReplacementRulesChanged() {
+        FillMaterialCalculator.requestMaterialReplacementRefresh();
+        HighlightScanner.onMaterialReplacementChanged();
+        refreshParentList();
     }
 
     public static String findSchematicKey(Screen screen) {
