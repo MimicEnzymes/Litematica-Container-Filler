@@ -9,6 +9,7 @@ import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
 import com.mimicenzymes.litematicafiller.core.LitematicaPlacementContainerData;
 import com.mimicenzymes.litematicafiller.core.ManualContainerOverrideManager;
 import com.mimicenzymes.litematicafiller.core.ManualContainerOverrideState;
+import com.mimicenzymes.litematicafiller.core.MaterialReplacer;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.block.BlockState;
@@ -71,6 +72,8 @@ public class HighlightScanner {
 
     private static int tickCounter = 0;
     private static int boostedTicks = 0;
+    private static int seenGlobalReplacementVersion = -1;
+    private static int seenSchematicReplacementVersion = -1;
 
     public static Map<BlockPos, HighlightState> getHighlights() {
         return HIGHLIGHT_MAP;
@@ -123,6 +126,21 @@ public class HighlightScanner {
             highlightFingerprint = computeHighlightFingerprint(HIGHLIGHT_MAP);
             highlightVersion++;
         }
+        triggerBoost(BOOST_DURATION_TICKS);
+    }
+
+    public static void onMaterialReplacementChanged() {
+        seenGlobalReplacementVersion = MaterialReplacer.getGlobalReplacementVersion();
+        seenSchematicReplacementVersion = MaterialReplacer.getSchematicReplacementVersion();
+        SCHEMATIC_REQ_CACHE.clear();
+        SCHEMATIC_IGNORED_SLOT_CACHE.clear();
+        LitematicaPlacementContainerData.clear();
+        HIGHLIGHT_REQUEST_TIME.clear();
+        HIGHLIGHT_REQUEST_INTERVALS.clear();
+        DATA_REQUEST_QUEUE.clear();
+        QUEUED_DATA_REQUESTS.clear();
+        DIRTY_HIGHLIGHT_QUEUE.clear();
+        QUEUED_DIRTY_HIGHLIGHTS.clear();
         triggerBoost(BOOST_DURATION_TICKS);
     }
 
@@ -300,6 +318,7 @@ public class HighlightScanner {
             if (!SCHEMATIC_CONTAINER_BUCKETS.isEmpty()) SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
             return;
         }
+        syncGlobalReplacementVersion();
 
         BlockPos currentCenter = client.player.getBlockPos();
 
@@ -360,6 +379,14 @@ public class HighlightScanner {
         replaceHighlightsIfChanged(nextHighlights);
         if (boostedTicks > 0) {
             boostedTicks--;
+        }
+    }
+
+    private static void syncGlobalReplacementVersion() {
+        int globalVersion = MaterialReplacer.getGlobalReplacementVersion();
+        int schematicVersion = MaterialReplacer.getSchematicReplacementVersion();
+        if (globalVersion != seenGlobalReplacementVersion || schematicVersion != seenSchematicReplacementVersion) {
+            onMaterialReplacementChanged();
         }
     }
 
