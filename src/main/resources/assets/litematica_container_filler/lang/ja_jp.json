@@ -42,6 +42,8 @@
   "litematica_container_filler.gui.label.material_replace_rename": "名前",
   "litematica_container_filler.gui.label.material_replace_ignored": "無視",
   "litematica_container_filler.gui.label.global_material_replace_source": "グローバルに置換する元アイテムを選択します。",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_schematic": "This item is replaced by a rule saved for this schematic.",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_global": "This item is replaced by a global rule.",
   "litematica_container_filler.gui.label.container_filter_picker": "コンテナカードをクリックして、ホワイトリスト/ブラックリストのブロックIDを追加または削除します。ESCで設定に戻ります。",
   "litematica_container_filler.gui.label.render_editor": "ハイライト、タスクマーカー、ツールHUDをプレビューして調整します。",
   "litematica_container_filler.gui.label.render_editor_drag": "ドラッグしてプレビューを回転",

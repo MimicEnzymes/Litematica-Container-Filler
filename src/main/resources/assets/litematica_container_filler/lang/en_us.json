@@ -45,6 +45,8 @@
   "litematica_container_filler.gui.tooltip.material_replace_reset": "Clear only this item's replacement rule in the selected scope. Other replacement rules are not changed.",
   "litematica_container_filler.gui.tooltip.material_replace_button": "Open this mod's item replacement picker.",
   "litematica_container_filler.gui.tooltip.material_replace_marker": "This item is displayed after a replacement rule.",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_schematic": "This item is replaced by a rule saved for this schematic.",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_global": "This item is replaced by a global rule.",
   "litematica_container_filler.gui.tooltip.material_replace_marker_source": "Original item: %s",
   "litematica_container_filler.gui.tooltip.global_material_replace_visual": "Open a visual picker for global item replacement rules.",
   "litematica_container_filler.gui.tooltip.global_material_replace_target": "Currently replaced with: %s",
