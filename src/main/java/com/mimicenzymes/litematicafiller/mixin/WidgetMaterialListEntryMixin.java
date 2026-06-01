@@ -1,5 +1,6 @@
 package com.mimicenzymes.litematicafiller.mixin;
 
+import com.mimicenzymes.litematicafiller.core.MaterialReplacementScope;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.materials.FillMaterialCalculator;
 import fi.dy.masa.litematica.gui.widgets.WidgetMaterialListEntry;
@@ -87,7 +88,11 @@ public abstract class WidgetMaterialListEntryMixin {
         if (!this.lcf$isMouseOverReplacementMarker(self, mouseX, mouseY)) return;
 
         List<String> lines = new ArrayList<>();
-        lines.add(StringUtils.translate("litematica_container_filler.gui.tooltip.material_replace_marker"));
+        MaterialReplacementScope scope = FillMaterialCalculator.getReplacementDisplayScope(this.entry.getStack());
+        String scopeKey = scope == MaterialReplacementScope.GLOBAL
+                ? "litematica_container_filler.gui.tooltip.material_replace_marker_global"
+                : "litematica_container_filler.gui.tooltip.material_replace_marker_schematic";
+        lines.add(StringUtils.translate(scopeKey));
 
         ItemStack original = FillMaterialCalculator.getOriginalReplacementSource(this.entry.getStack());
         if (!original.isEmpty()) {

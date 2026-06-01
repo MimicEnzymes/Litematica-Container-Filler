@@ -128,7 +128,7 @@ public class LitematicaContainerReader {
         BlockEntity blockEntity = schematicWorld.getBlockEntity(pos);
         if (blockEntity == null) return items;
 
-        NbtCompound nbt = blockEntity.createNbt(registries);
+        NbtCompound nbt = createRawNbt(blockEntity, registries);
         if (nbt != null && nbt.contains("Items")) {
             items.putAll(RealContainerCache.parseNbtInventory(nbt, registries));
         }
@@ -180,7 +180,7 @@ public class LitematicaContainerReader {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.world == null) return Collections.emptySet();
 
-        NbtCompound nbt = blockEntity.createNbt(client.world.getRegistryManager());
+        NbtCompound nbt = createRawNbt(blockEntity, client.world.getRegistryManager());
         return parseDisabledSlots(nbt);
     }
 
@@ -252,6 +252,17 @@ public class LitematicaContainerReader {
         MaterialReplacer.replaceInMap(items);
 
         return items;
+    }
+
+    public static NbtCompound createRawNbt(BlockEntity blockEntity, RegistryWrapper.WrapperLookup registries) {
+        if (blockEntity == null) return null;
+
+        MaterialReplacer.pushNbtReplacementSuppression();
+        try {
+            return blockEntity.createNbt(registries);
+        } finally {
+            MaterialReplacer.popNbtReplacementSuppression();
+        }
     }
 
     public static String findSchematicKeyForPosition(BlockPos worldPos) {
