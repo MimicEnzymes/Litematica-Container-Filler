@@ -86,6 +86,8 @@ public class MaterialReplacer {
     private static final Map<String, List<Replacement>> SCHEMATIC_REPLACEMENTS = new HashMap<>();
     private static int lastHash = -1;
     private static int globalReplacementVersion = 0;
+    private static int schematicReplacementVersion = 0;
+    private static final ThreadLocal<Integer> NBT_REPLACEMENT_SUPPRESSION_DEPTH = ThreadLocal.withInitial(() -> 0);
 
     public static void checkReload() {
         List<String> strings = Configs.MATERIAL_REPLACEMENTS.getStrings();
@@ -102,6 +104,10 @@ public class MaterialReplacer {
     public static int getGlobalReplacementVersion() {
         checkReload();
         return globalReplacementVersion;
+    }
+
+    public static int getSchematicReplacementVersion() {
+        return schematicReplacementVersion;
     }
 
     private static ItemRule parseRule(String str) {
@@ -212,6 +218,11 @@ public class MaterialReplacer {
 
     public static void replaceInListTag(net.minecraft.nbt.ListTag itemsList, net.minecraft.core.HolderLookup.Provider registries) {
         String schematicKey = SchematicMaterialReplacementContext.getActiveKey();
+        replaceInListTag(itemsList, registries, schematicKey);
+    }
+
+    public static void replaceInListTag(net.minecraft.nbt.ListTag itemsList, net.minecraft.core.HolderLookup.Provider registries, String schematicKey) {
+        if (isNbtReplacementSuppressed()) return;
         checkReload();
         if (!hasReplacementRules(schematicKey)) return;
 
@@ -238,6 +249,23 @@ public class MaterialReplacer {
                 }
             }
         }
+    }
+
+    public static void pushNbtReplacementSuppression() {
+        NBT_REPLACEMENT_SUPPRESSION_DEPTH.set(NBT_REPLACEMENT_SUPPRESSION_DEPTH.get() + 1);
+    }
+
+    public static void popNbtReplacementSuppression() {
+        int depth = NBT_REPLACEMENT_SUPPRESSION_DEPTH.get();
+        if (depth <= 1) {
+            NBT_REPLACEMENT_SUPPRESSION_DEPTH.remove();
+        } else {
+            NBT_REPLACEMENT_SUPPRESSION_DEPTH.set(depth - 1);
+        }
+    }
+
+    public static boolean isNbtReplacementSuppressed() {
+        return NBT_REPLACEMENT_SUPPRESSION_DEPTH.get() > 0;
     }
 
     private static boolean hasReplacementRules(String schematicKey) {
@@ -275,6 +303,30 @@ public class MaterialReplacer {
         for (Replacement rep : REPLACEMENTS) {
             if (rep.source.matches(source)) {
                 return Optional.of(rep.target.createStack(1));
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    public static Optional<MaterialReplacementScope> getReplacementScope(ItemStack source, String schematicKey) {
+        if (source == null || source.isEmpty()) return Optional.empty();
+        checkReload();
+
+        if (schematicKey != null) {
+            List<Replacement> local = SCHEMATIC_REPLACEMENTS.get(schematicKey);
+            if (local != null) {
+                for (Replacement rep : local) {
+                    if (rep.source.matches(source)) {
+                        return Optional.of(MaterialReplacementScope.SCHEMATIC);
+                    }
+                }
+            }
+        }
+
+        for (Replacement rep : REPLACEMENTS) {
+            if (rep.source.matches(source)) {
+                return Optional.of(MaterialReplacementScope.GLOBAL);
             }
         }
 
@@ -340,24 +392,37 @@ public class MaterialReplacer {
 
     public static void clearSchematicReplacementRules(String schematicKey) {
         if (schematicKey == null || schematicKey.isBlank()) return;
-        SCHEMATIC_RULE_STRINGS.remove(schematicKey);
-        SCHEMATIC_REPLACEMENTS.remove(schematicKey);
+        boolean removed = SCHEMATIC_RULE_STRINGS.remove(schematicKey) != null;
+        removed |= SCHEMATIC_REPLACEMENTS.remove(schematicKey) != null;
+        if (removed) {
+            schematicReplacementVersion++;
+        }
     }
 
     public static void clearAllSchematicReplacementRules() {
+        if (SCHEMATIC_RULE_STRINGS.isEmpty() && SCHEMATIC_REPLACEMENTS.isEmpty()) return;
+
         SCHEMATIC_RULE_STRINGS.clear();
         SCHEMATIC_REPLACEMENTS.clear();
+        schematicReplacementVersion++;
     }
 
     private static void setSchematicRules(String schematicKey, List<String> rules) {
         if (rules == null || rules.isEmpty()) {
-            SCHEMATIC_RULE_STRINGS.remove(schematicKey);
-            SCHEMATIC_REPLACEMENTS.remove(schematicKey);
+            boolean removed = SCHEMATIC_RULE_STRINGS.remove(schematicKey) != null;
+            removed |= SCHEMATIC_REPLACEMENTS.remove(schematicKey) != null;
+            if (removed) {
+                schematicReplacementVersion++;
+            }
             return;
         }
 
-        SCHEMATIC_RULE_STRINGS.put(schematicKey, List.copyOf(rules));
-        SCHEMATIC_REPLACEMENTS.put(schematicKey, parseReplacements(rules));
+        List<String> copiedRules = List.copyOf(rules);
+        if (copiedRules.equals(SCHEMATIC_RULE_STRINGS.get(schematicKey))) return;
+
+        SCHEMATIC_RULE_STRINGS.put(schematicKey, copiedRules);
+        SCHEMATIC_REPLACEMENTS.put(schematicKey, parseReplacements(copiedRules));
+        schematicReplacementVersion++;
     }
 
     private static List<Replacement> parseReplacements(List<String> strings) {

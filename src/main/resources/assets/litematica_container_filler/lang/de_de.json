@@ -42,6 +42,8 @@
   "litematica_container_filler.gui.label.material_replace_rename": "Name",
   "litematica_container_filler.gui.label.material_replace_ignored": "Ignoriert",
   "litematica_container_filler.gui.label.global_material_replace_source": "Wähle den Quellgegenstand für globale Ersetzungen.",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_schematic": "This item is replaced by a rule saved for this schematic.",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_global": "This item is replaced by a global rule.",
   "litematica_container_filler.gui.label.container_filter_picker": "Klicke Containerkarten an, um Block-IDs zur Liste hinzuzufügen oder daraus zu entfernen. ESC kehrt zu den Einstellungen zurück.",
   "litematica_container_filler.gui.label.render_editor": "Vorschau und Anpassung von Hervorhebungen, Aufgabenmarkern und Werkzeug-HUD.",
   "litematica_container_filler.gui.label.render_editor_drag": "Ziehen, um die Vorschau zu drehen",

@@ -47,9 +47,14 @@ public class LitematicaPlacementContainerData {
             return Collections.emptyMap();
         }
 
-        Map<Integer, ItemStack> items = RealContainerCache.parseNbtInventory(nbt.get(), registries);
-        MaterialReplacer.replaceInMap(items, snapshot.schematicKeyByWorldPos().get(worldPos));
-        return items;
+        return RealContainerCache.parseNbtInventory(nbt.get(), registries);
+    }
+
+    public static String getSchematicKey(BlockPos worldPos) {
+        if (worldPos == null) return null;
+
+        ensureInitialized();
+        return snapshot.schematicKeyByWorldPos().get(worldPos);
     }
 
     private static Snapshot buildSnapshot() {

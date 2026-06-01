@@ -18,11 +18,18 @@ public class BlockEntityMixin {
     }, at = @At("RETURN"))
     private void onSerializeNbtAny(HolderLookup.Provider registries, CallbackInfoReturnable<CompoundTag> cir) {
         if (!com.mimicenzymes.litematicafiller.config.Configs.ENABLE_MOD.getBooleanValue()) return;
-        net.minecraft.world.level.Level world = ((BlockEntity) (Object) this).getLevel();
+        if (com.mimicenzymes.litematicafiller.core.MaterialReplacer.isNbtReplacementSuppressed()) return;
+
+        BlockEntity blockEntity = (BlockEntity) (Object) this;
+        net.minecraft.world.level.Level world = blockEntity.getLevel();
         if (world != null && world.isClientSide() && world.getClass().getSimpleName().contains("Schematic")) {
             CompoundTag nbt = cir.getReturnValue();
             if (nbt != null && nbt.contains("Items")) {
-                com.mimicenzymes.litematicafiller.core.MaterialReplacer.replaceInListTag((ListTag) nbt.get("Items"), registries);
+                String schematicKey = com.mimicenzymes.litematicafiller.core.LitematicaPlacementContainerData.getSchematicKey(blockEntity.getBlockPos());
+                if (schematicKey == null) {
+                    schematicKey = com.mimicenzymes.litematicafiller.core.LitematicaContainerReader.findSchematicKeyForPosition(blockEntity.getBlockPos());
+                }
+                com.mimicenzymes.litematicafiller.core.MaterialReplacer.replaceInListTag((ListTag) nbt.get("Items"), registries, schematicKey);
             }
         }
     }
