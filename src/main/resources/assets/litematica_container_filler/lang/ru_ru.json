@@ -42,6 +42,8 @@
   "litematica_container_filler.gui.label.material_replace_rename": "Имя",
   "litematica_container_filler.gui.label.material_replace_ignored": "Игнорируется",
   "litematica_container_filler.gui.label.global_material_replace_source": "Выберите исходный предмет для глобальной замены.",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_schematic": "This item is replaced by a rule saved for this schematic.",
+  "litematica_container_filler.gui.tooltip.material_replace_marker_global": "This item is replaced by a global rule.",
   "litematica_container_filler.gui.label.container_filter_picker": "Нажимайте карточки контейнеров, чтобы добавить или удалить их ID блоков из списка. ESC возвращает к настройкам.",
   "litematica_container_filler.gui.label.render_editor": "Предпросмотр и настройка подсветки, маркеров задач и HUD инструмента.",
   "litematica_container_filler.gui.label.render_editor_drag": "Перетащите, чтобы вращать предпросмотр",
