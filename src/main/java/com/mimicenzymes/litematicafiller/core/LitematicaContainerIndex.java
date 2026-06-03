@@ -6,7 +6,6 @@ import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import fi.dy.masa.litematica.selection.Box;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Position;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -28,8 +27,8 @@ public class LitematicaContainerIndex {
             Box box = placement.getEclosingBox();
             if (box == null) continue;
 
-            BlockPos p1 = BlockPos.containing((Position) box.getPos1());
-            BlockPos p2 = BlockPos.containing((Position) box.getPos2());
+            BlockPos p1 = box.getPos1();
+            BlockPos p2 = box.getPos2();
 
             int minX = Math.min(p1.getX(), p2.getX());
             int maxX = Math.max(p1.getX(), p2.getX());
