@@ -118,6 +118,7 @@ public abstract class WidgetMaterialListEntryMixin {
 
     private void lcf$layoutMaterialListActionButtons(WidgetMaterialListEntry self) {
         ButtonBase ignoreButton = null;
+        ButtonBase ownLocateButton = null;
         ButtonBase ownReplaceButton = null;
         List<ButtonBase> externalReplaceButtons = new ArrayList<>();
 
@@ -129,6 +130,8 @@ public abstract class WidgetMaterialListEntryMixin {
                 String label = ((ButtonBaseAccessor) button).lcf$getDisplayString();
                 if (this.lcf$isIgnoreButton(label)) {
                     ignoreButton = button;
+                } else if (this.lcf$isOwnLocateButton(button, label)) {
+                    ownLocateButton = button;
                 } else if (this.lcf$isOwnReplaceButton(button, label)) {
                     ownReplaceButton = button;
                 } else if (this.lcf$isReplacementLikeButton(label)) {
@@ -139,12 +142,15 @@ public abstract class WidgetMaterialListEntryMixin {
             return;
         }
 
-        if (ignoreButton == null || (ownReplaceButton == null && externalReplaceButtons.isEmpty())) return;
+        if (ignoreButton == null || (ownLocateButton == null && ownReplaceButton == null && externalReplaceButtons.isEmpty())) return;
 
         int y = self.getY() + ((self.getHeight() - 20) >> 1);
         ignoreButton.setY(y);
 
         List<ButtonBase> orderedButtons = new ArrayList<>();
+        if (ownLocateButton != null) {
+            orderedButtons.add(ownLocateButton);
+        }
         if (ownReplaceButton != null) {
             orderedButtons.add(ownReplaceButton);
         }
@@ -157,7 +163,7 @@ public abstract class WidgetMaterialListEntryMixin {
             totalWidth += button.getWidth() + 4;
         }
 
-        // Left to right: this mod's Replace, SchematicPreview's Replace, Litematica's Ignore.
+        // Left to right: this mod's Locate, this mod's Replace, SchematicPreview's Replace, Litematica's Ignore.
         int x = Math.max(self.getX() + 180, ignoreButton.getX() - 4 - totalWidth);
         for (ButtonBase button : orderedButtons) {
             button.setPosition(x, y);
@@ -167,6 +173,13 @@ public abstract class WidgetMaterialListEntryMixin {
 
     private boolean lcf$isIgnoreButton(String label) {
         return StringUtils.translate("litematica.gui.button.material_list.ignore").equals(label);
+    }
+
+    private boolean lcf$isOwnLocateButton(ButtonBase button, String label) {
+        if (!StringUtils.translate("litematica_container_filler.gui.button.material_locate").equals(label)) return false;
+
+        String marker = StringUtils.translate("litematica_container_filler.gui.tooltip.material_locate_button");
+        return button.getHoverStrings().contains(marker);
     }
 
     private boolean lcf$isOwnReplaceButton(ButtonBase button, String label) {
