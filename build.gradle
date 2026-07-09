@@ -27,8 +27,8 @@ dependencies {
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-    modImplementation name: 'litematica-fabric-1.21.4-0.21.6'
-    modImplementation name: 'malilib-fabric-1.21.4-0.23.5'
+    modImplementation name: "litematica-fabric-${project.litematica_version}"
+    modImplementation name: "malilib-fabric-${project.malilib_version}"
     modCompileOnly name: 'modmenu-13.0.3'
     modLocalRuntime name: 'modmenu-13.0.3'
     modCompileOnly name: 'quickshulker-2.3.3-1.21.4'
