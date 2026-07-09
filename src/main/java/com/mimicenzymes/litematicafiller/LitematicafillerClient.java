@@ -106,7 +106,7 @@ public class LitematicafillerClient implements ClientModInitializer {
 
         LevelRenderEvents.AFTER_OPAQUE_TERRAIN.register(context -> {
             if (com.mimicenzymes.litematicafiller.config.Configs.ENABLE_MOD.getBooleanValue()
-                    && Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
+                    && (Configs.HIGHLIGHT_CONTAINERS.getBooleanValue() || com.mimicenzymes.litematicafiller.render.HighlightScanner.hasMaterialFocus())) {
                 ContainerHighlighter.onRender(context);
             }
         });

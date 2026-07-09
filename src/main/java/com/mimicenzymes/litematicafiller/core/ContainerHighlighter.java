@@ -15,7 +15,8 @@ public class ContainerHighlighter {
     }
 
     public static void onRender(Object context) {
-        if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
+        if (!Configs.ENABLE_MOD.getBooleanValue() ||
+                (!Configs.HIGHLIGHT_CONTAINERS.getBooleanValue() && !HighlightScanner.hasMaterialFocus())) {
             return;
         }
         HighlightRenderer.getInstance().render();
