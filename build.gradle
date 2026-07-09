@@ -1,5 +1,5 @@
 plugins {
-    id 'net.fabricmc.fabric-loom' version '1.15.+'
+    id 'net.fabricmc.fabric-loom' version '1.16.3'
     id 'maven-publish'
 }
 
@@ -22,8 +22,8 @@ dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-    implementation files('libs/litematica-fabric-26.1.1-0.27.1.jar')
-    implementation files('libs/malilib-fabric-26.1.1-0.28.2.jar')
+    implementation files("libs/litematica-fabric-${project.litematica_version}.jar")
+    implementation files("libs/malilib-fabric-${project.malilib_version}.jar")
     compileOnly files('libs/modmenu-18.0.0-alpha.8.jar')
     runtimeOnly files('libs/modmenu-18.0.0-alpha.8.jar')
     compileOnly files('libs/quickshulker-3.0.0-26.1.jar')

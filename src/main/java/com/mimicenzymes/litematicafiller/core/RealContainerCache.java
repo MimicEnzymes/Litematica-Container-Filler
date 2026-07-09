@@ -5,7 +5,7 @@ import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
 import com.mimicenzymes.litematicafiller.materials.FillMaterialCalculator;
 import com.mimicenzymes.litematicafiller.network.ServuxSyncHandler;
 import com.mimicenzymes.litematicafiller.tool.ContainerToolStateMachine;
-import fi.dy.masa.litematica.data.EntitiesDataStorage;
+import fi.dy.masa.litematica.data.EntityDataManager;
 import fi.dy.masa.litematica.gui.GuiMaterialList;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -1187,7 +1187,7 @@ public class RealContainerCache {
 
     private static CompoundTag getLitematicaSyncedNbt(BlockPos pos) {
         try {
-            return EntitiesDataStorage.getInstance().getFromBlockEntityCacheNbt(pos);
+            return EntityDataManager.getInstance().getCache().getBlockEntityNbtFromCache(pos);
         } catch (Throwable ignored) {
             return null;
         }
@@ -1304,13 +1304,13 @@ public class RealContainerCache {
         if (client.level == null || !isLitematicaSyncAvailable()) return false;
 
         try {
-            EntitiesDataStorage storage = EntitiesDataStorage.getInstance();
+            EntityDataManager storage = EntityDataManager.getInstance();
 
             if (isDouble) {
-                storage.requestBlockEntity(client.level, halves[0]);
-                storage.requestBlockEntity(client.level, halves[1]);
+                storage.requestBlockEntityWrapped(client.level, halves[0]);
+                storage.requestBlockEntityWrapped(client.level, halves[1]);
             } else {
-                storage.requestBlockEntity(client.level, pos);
+                storage.requestBlockEntityWrapped(client.level, pos);
             }
 
             return true;
