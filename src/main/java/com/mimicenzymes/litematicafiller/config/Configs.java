@@ -113,6 +113,7 @@ public class Configs implements IConfigHandler {
     public static final ConfigBooleanHotkeyed RENDER_FILLING_ARROW  = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderFillingArrow", true, "", "litematica_container_filler.config.comment.renderFillingArrow");
     public static final ConfigBooleanHotkeyed RENDER_QUEUED_SPINNER = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderQueuedSpinner", true, "", "litematica_container_filler.config.comment.renderQueuedSpinner");
     public static final ConfigBooleanHotkeyed RENDER_MISSING_MATERIAL_MARKER = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderMissingMaterialMarker", true, "", "litematica_container_filler.config.comment.renderMissingMaterialMarker");
+    public static final ConfigInteger HIGHLIGHT_SCAN_BUDGET         = new ConfigInteger("litematica_container_filler.config.name.highlightScanBudget", 256, 1, 2048, "litematica_container_filler.config.comment.highlightScanBudget");
     public static final ConfigInteger MAX_QUEUED_RENDER_OVERLAYS    = new ConfigInteger("litematica_container_filler.config.name.maxQueuedRenderOverlays", 20, 0, 256, "litematica_container_filler.config.comment.maxQueuedRenderOverlays");
     public static final ConfigInteger TASK_OVERLAY_LINGER_TICKS     = new ConfigInteger("litematica_container_filler.config.name.taskOverlayLingerTicks", 40, 0, 200, "litematica_container_filler.config.comment.taskOverlayLingerTicks");
     public static final ConfigDouble HIGHLIGHT_GLASS_ALPHA_MULTIPLIER = new ConfigDouble("litematica_container_filler.config.name.highlightGlassAlphaMultiplier", 0.24D, 0.0D, 1.0D, "litematica_container_filler.config.comment.highlightGlassAlphaMultiplier");
@@ -221,6 +222,7 @@ public class Configs implements IConfigHandler {
                 RENDER_FILLING_ARROW,
                 RENDER_QUEUED_SPINNER,
                 RENDER_MISSING_MATERIAL_MARKER,
+                HIGHLIGHT_SCAN_BUDGET,
                 MAX_QUEUED_RENDER_OVERLAYS,
                 TASK_OVERLAY_LINGER_TICKS,
                 HIGHLIGHT_GLASS_ALPHA_MULTIPLIER,
