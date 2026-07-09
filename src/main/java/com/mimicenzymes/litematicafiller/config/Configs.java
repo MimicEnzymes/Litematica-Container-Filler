@@ -344,8 +344,6 @@ public class Configs implements IConfigHandler {
             ConfigUtils.writeConfigBase(root, "Hotkeys", Hotkeys.HOTKEY_LIST);
             JsonUtils.writeJsonToFile(root, new File(dir, CONFIG_FILE_NAME));
         }
-
-        InputHandler.getInstance().addKeysToMap(InputEventHandler.getKeybindManager());
     }
     public static void init() {
         Configs.INSTANCE.load();
