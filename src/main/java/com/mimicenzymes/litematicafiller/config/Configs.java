@@ -55,6 +55,7 @@ public class Configs implements IConfigHandler {
     //数据同步设置
     public static final ConfigBooleanHotkeyed ENABLE_DATA_SYNC      = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.enableDataSync", true, "", "litematica_container_filler.config.comment.enableDataSync");
     public static final ConfigBoolean ENABLE_OP_NBT_QUERY           = new ConfigBoolean("litematica_container_filler.config.name.enableOpNbtQuery", false, "litematica_container_filler.config.comment.enableOpNbtQuery");
+    public static final ConfigInteger REAL_CONTAINER_CACHE_SIZE      = new ConfigInteger("litematica_container_filler.config.name.realContainerCacheSize", 8192, 1024, 65536, "litematica_container_filler.config.comment.realContainerCacheSize");
 
     //自动物流设置
     public static final ConfigBoolean ENABLE_CREATIVE_FILL          = new ConfigBoolean("litematica_container_filler.config.name.creativeFill", true, "litematica_container_filler.config.comment.creativeFill");
@@ -158,6 +159,7 @@ public class Configs implements IConfigHandler {
         DATA_OPTIONS = ImmutableList.of(
                 ENABLE_DATA_SYNC,
                 ENABLE_OP_NBT_QUERY,
+                REAL_CONTAINER_CACHE_SIZE,
                 RATE_LIMIT_CLICK_PACKETS,
                 CLICK_PACKET_RATE_LIMIT
         );
