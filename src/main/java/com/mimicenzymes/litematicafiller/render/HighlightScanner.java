@@ -11,6 +11,7 @@ import com.mimicenzymes.litematicafiller.core.ManualContainerOverrideManager;
 import com.mimicenzymes.litematicafiller.core.ManualContainerOverrideState;
 import com.mimicenzymes.litematicafiller.core.MaterialReplacer;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
+import com.mimicenzymes.litematicafiller.materials.FillMaterialCalculator;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
@@ -37,6 +38,7 @@ public class HighlightScanner {
     private static final long ACTIVE_REQUEST_INTERVAL_MS = 750L;
     private static final long SATISFIED_REQUEST_INTERVAL_MS = 4000L;
     private static final long EMPTY_SYNC_CONFIRMATION_MS = 5000L;
+    private static final long MATERIAL_FOCUS_DURATION_MS = 15000L;
     private static final Map<BlockPos, HighlightState> HIGHLIGHT_MAP = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Map<Integer, ItemStack>> SCHEMATIC_REQ_CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockPos, Set<Integer>> SCHEMATIC_IGNORED_SLOT_CACHE = new ConcurrentHashMap<>();
@@ -74,6 +76,14 @@ public class HighlightScanner {
     private static int boostedTicks = 0;
     private static int seenGlobalReplacementVersion = -1;
     private static int seenSchematicReplacementVersion = -1;
+    private static volatile Set<BlockPos> MATERIAL_FOCUS_POSITIONS = Collections.emptySet();
+    private static volatile long materialFocusExpireAt = 0L;
+    private static volatile int materialFocusVersion = 0;
+    private static Map<FillMaterialCalculator.ItemStackKey, Set<BlockPos>> materialContainerIndex = Collections.emptyMap();
+    private static Set<BlockPos> materialContainerIndexSource = Collections.emptySet();
+    private static long materialContainerIndexLayerSignature = Long.MIN_VALUE;
+    private static int materialContainerIndexGlobalReplacementVersion = -1;
+    private static int materialContainerIndexSchematicReplacementVersion = -1;
 
     public static Map<BlockPos, HighlightState> getHighlights() {
         return HIGHLIGHT_MAP;
@@ -81,6 +91,45 @@ public class HighlightScanner {
 
     public static int getHighlightVersion() {
         return highlightVersion;
+    }
+
+    public static int getMaterialFocusVersion() {
+        getMaterialFocusPositions();
+        return materialFocusVersion;
+    }
+
+    public static boolean hasMaterialFocus() {
+        return !getMaterialFocusPositions().isEmpty();
+    }
+
+    public static Set<BlockPos> getMaterialFocusPositions() {
+        Set<BlockPos> positions = MATERIAL_FOCUS_POSITIONS;
+        if (positions.isEmpty()) return positions;
+
+        if (System.currentTimeMillis() <= materialFocusExpireAt) {
+            return positions;
+        }
+
+        clearMaterialFocus();
+        return Collections.emptySet();
+    }
+
+    public static int focusMaterialContainers(ItemStack stack, MinecraftClient client) {
+        if (stack == null || stack.isEmpty() || client == null || client.world == null) {
+            clearMaterialFocus();
+            return 0;
+        }
+
+        Set<BlockPos> matches = findMaterialContainers(stack, client);
+        if (matches.isEmpty()) {
+            clearMaterialFocus();
+            return 0;
+        }
+
+        MATERIAL_FOCUS_POSITIONS = Collections.unmodifiableSet(matches);
+        materialFocusExpireAt = System.currentTimeMillis() + MATERIAL_FOCUS_DURATION_MS;
+        materialFocusVersion++;
+        return matches.size();
     }
 
     public static void onContainerDataChanged(BlockPos pos) {
@@ -134,6 +183,8 @@ public class HighlightScanner {
         seenSchematicReplacementVersion = MaterialReplacer.getSchematicReplacementVersion();
         SCHEMATIC_REQ_CACHE.clear();
         SCHEMATIC_IGNORED_SLOT_CACHE.clear();
+        invalidateMaterialContainerIndex();
+        clearMaterialFocus();
         LitematicaPlacementContainerData.clear();
         HIGHLIGHT_REQUEST_TIME.clear();
         HIGHLIGHT_REQUEST_INTERVALS.clear();
@@ -244,6 +295,8 @@ public class HighlightScanner {
         ManualContainerOverrideManager.clearForCurrentContext();
         SCHEMATIC_CONTAINERS = Collections.emptySet();
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
+        invalidateMaterialContainerIndex();
+        clearMaterialFocus();
         invalidateNearbyBucketCache();
         lastIndexTime = 0;
         lastRenderLayerSignature = Long.MIN_VALUE;
@@ -257,6 +310,8 @@ public class HighlightScanner {
         SCHEMATIC_CONTAINERS = Collections.emptySet();
         SCHEMATIC_REQ_CACHE.clear();
         SCHEMATIC_IGNORED_SLOT_CACHE.clear();
+        invalidateMaterialContainerIndex();
+        clearMaterialFocus();
         HIGHLIGHT_REQUEST_TIME.clear();
         HIGHLIGHT_REQUEST_INTERVALS.clear();
         DATA_REQUEST_QUEUE.clear();
@@ -288,6 +343,138 @@ public class HighlightScanner {
         return getCachedSchematicReq(pos, client);
     }
 
+    private static Set<BlockPos> findMaterialContainers(ItemStack stack, MinecraftClient client) {
+        Map<FillMaterialCalculator.ItemStackKey, Set<BlockPos>> index = getMaterialContainerIndex(client);
+        if (index.isEmpty()) return Collections.emptySet();
+
+        Set<BlockPos> matches = new LinkedHashSet<>();
+        addMaterialMatches(matches, index.get(new FillMaterialCalculator.ItemStackKey(stack)));
+
+        ItemStack original = FillMaterialCalculator.getOriginalReplacementSource(stack);
+        if (!original.isEmpty() && !ItemStack.areItemsAndComponentsEqual(original, stack)) {
+            addMaterialMatches(matches, index.get(new FillMaterialCalculator.ItemStackKey(original)));
+        }
+
+        if (matches.isEmpty()) return Collections.emptySet();
+
+        List<BlockPos> sorted = new ArrayList<>(matches);
+        sorted.sort(Comparator.comparingLong(BlockPos::asLong));
+        return new LinkedHashSet<>(sorted);
+    }
+
+    private static void addMaterialMatches(Set<BlockPos> target, Set<BlockPos> matches) {
+        if (matches == null || matches.isEmpty()) return;
+        target.addAll(matches);
+    }
+
+    private static synchronized Map<FillMaterialCalculator.ItemStackKey, Set<BlockPos>> getMaterialContainerIndex(MinecraftClient client) {
+        Set<BlockPos> containers = ensureMaterialLocatorContainerIndex();
+        if (containers.isEmpty() || client == null || client.world == null) {
+            return Collections.emptyMap();
+        }
+
+        boolean syncLayer = Configs.SYNC_LITE_LAYER.getBooleanValue();
+        long layerSignature = syncLayer ? computeRenderLayerSignature() : Long.MIN_VALUE + 1L;
+        int globalVersion = MaterialReplacer.getGlobalReplacementVersion();
+        int schematicVersion = MaterialReplacer.getSchematicReplacementVersion();
+
+        if (layerSignature == materialContainerIndexLayerSignature
+                && globalVersion == materialContainerIndexGlobalReplacementVersion
+                && schematicVersion == materialContainerIndexSchematicReplacementVersion
+                && containers.equals(materialContainerIndexSource)) {
+            return materialContainerIndex;
+        }
+
+        LayerRange layerRange = syncLayer ? fi.dy.masa.litematica.data.DataManager.getRenderLayerRange() : null;
+        Map<FillMaterialCalculator.ItemStackKey, Set<BlockPos>> next = new HashMap<>();
+
+        for (BlockPos pos : containers) {
+            if (pos == null) continue;
+            if (layerRange != null && !layerRange.isPositionWithinRange(pos)) continue;
+
+            Map<Integer, ItemStack> required = getCachedSchematicReq(pos, client);
+            if (required == null || required.isEmpty()) continue;
+
+            BlockPos renderPos = getMaterialFocusRenderPos(pos);
+            for (ItemStack requiredStack : required.values()) {
+                if (requiredStack == null || requiredStack.isEmpty()) continue;
+
+                FillMaterialCalculator.ItemStackKey key = new FillMaterialCalculator.ItemStackKey(requiredStack);
+                next.computeIfAbsent(key, ignored -> new LinkedHashSet<>()).add(renderPos);
+            }
+        }
+
+        materialContainerIndex = freezeMaterialContainerIndex(next);
+        materialContainerIndexSource = containers;
+        materialContainerIndexLayerSignature = layerSignature;
+        materialContainerIndexGlobalReplacementVersion = globalVersion;
+        materialContainerIndexSchematicReplacementVersion = schematicVersion;
+        return materialContainerIndex;
+    }
+
+    private static Set<BlockPos> ensureMaterialLocatorContainerIndex() {
+        Set<BlockPos> current = SCHEMATIC_CONTAINERS;
+        if (!current.isEmpty()) return current;
+
+        try {
+            Set<BlockPos> found = LitematicaPlacementContainerData.rebuildIndex();
+            if (!found.equals(current)) {
+                SCHEMATIC_REQ_CACHE.clear();
+                SCHEMATIC_IGNORED_SLOT_CACHE.clear();
+            }
+            SCHEMATIC_CONTAINERS = found;
+            SCHEMATIC_CONTAINER_BUCKETS = buildContainerBuckets(found);
+            lastIndexTime = System.currentTimeMillis();
+            invalidateNearbyBucketCache();
+            return found;
+        } catch (Exception ignored) {
+            return current;
+        }
+    }
+
+    private static Map<FillMaterialCalculator.ItemStackKey, Set<BlockPos>> freezeMaterialContainerIndex(
+            Map<FillMaterialCalculator.ItemStackKey, Set<BlockPos>> source) {
+        if (source.isEmpty()) return Collections.emptyMap();
+
+        Map<FillMaterialCalculator.ItemStackKey, Set<BlockPos>> frozen = new HashMap<>();
+        for (Map.Entry<FillMaterialCalculator.ItemStackKey, Set<BlockPos>> entry : source.entrySet()) {
+            frozen.put(entry.getKey(), Collections.unmodifiableSet(new LinkedHashSet<>(entry.getValue())));
+        }
+        return Collections.unmodifiableMap(frozen);
+    }
+
+    private static BlockPos getMaterialFocusRenderPos(BlockPos pos) {
+        var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
+        if (schematicWorld == null || pos == null) return pos;
+
+        try {
+            BlockState state = schematicWorld.getBlockState(pos);
+            BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
+            if (halves != null && halves.length > 0 && halves[0] != null) {
+                return halves[0].toImmutable();
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return pos.toImmutable();
+    }
+
+    private static synchronized void invalidateMaterialContainerIndex() {
+        materialContainerIndex = Collections.emptyMap();
+        materialContainerIndexSource = Collections.emptySet();
+        materialContainerIndexLayerSignature = Long.MIN_VALUE;
+        materialContainerIndexGlobalReplacementVersion = -1;
+        materialContainerIndexSchematicReplacementVersion = -1;
+    }
+
+    private static void clearMaterialFocus() {
+        if (MATERIAL_FOCUS_POSITIONS.isEmpty() && materialFocusExpireAt == 0L) return;
+
+        MATERIAL_FOCUS_POSITIONS = Collections.emptySet();
+        materialFocusExpireAt = 0L;
+        materialFocusVersion++;
+    }
+
     private static Set<Integer> getCachedIgnoredSlots(BlockPos pos, MinecraftClient client) {
         return SCHEMATIC_IGNORED_SLOT_CACHE.computeIfAbsent(pos.toImmutable(),
                 ignored -> LitematicaContainerReader.getIgnoredSlots(pos, client.world.getRegistryManager()));
@@ -311,8 +498,10 @@ public class HighlightScanner {
         var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld == null) {
             clearHighlights();
+            clearMaterialFocus();
             if (!SCHEMATIC_REQ_CACHE.isEmpty()) SCHEMATIC_REQ_CACHE.clear();
             if (!SCHEMATIC_IGNORED_SLOT_CACHE.isEmpty()) SCHEMATIC_IGNORED_SLOT_CACHE.clear();
+            invalidateMaterialContainerIndex();
             if (!HIGHLIGHT_REQUEST_TIME.isEmpty()) HIGHLIGHT_REQUEST_TIME.clear();
             if (!SCHEMATIC_CONTAINERS.isEmpty()) SCHEMATIC_CONTAINERS = Collections.emptySet();
             if (!SCHEMATIC_CONTAINER_BUCKETS.isEmpty()) SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
@@ -647,6 +836,7 @@ public class HighlightScanner {
                 if (!found.equals(SCHEMATIC_CONTAINERS)) {
                     SCHEMATIC_REQ_CACHE.clear();
                     SCHEMATIC_IGNORED_SLOT_CACHE.clear();
+                    invalidateMaterialContainerIndex();
                 }
                 SCHEMATIC_CONTAINERS = found;
                 SCHEMATIC_CONTAINER_BUCKETS = buildContainerBuckets(found);
