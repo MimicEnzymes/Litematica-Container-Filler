@@ -54,7 +54,7 @@ public class Configs implements IConfigHandler {
 
     //数据同步设置
     public static final ConfigBooleanHotkeyed ENABLE_DATA_SYNC      = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.enableDataSync", true, "", "litematica_container_filler.config.comment.enableDataSync");
-    public static final ConfigBoolean ENABLE_OP_NBT_QUERY           = new ConfigBoolean("litematica_container_filler.config.name.enableOpNbtQuery", true, "litematica_container_filler.config.comment.enableOpNbtQuery");
+    public static final ConfigBoolean ENABLE_OP_NBT_QUERY           = new ConfigBoolean("litematica_container_filler.config.name.enableOpNbtQuery", false, "litematica_container_filler.config.comment.enableOpNbtQuery");
 
     //自动物流设置
     public static final ConfigBoolean ENABLE_CREATIVE_FILL          = new ConfigBoolean("litematica_container_filler.config.name.creativeFill", true, "litematica_container_filler.config.comment.creativeFill");

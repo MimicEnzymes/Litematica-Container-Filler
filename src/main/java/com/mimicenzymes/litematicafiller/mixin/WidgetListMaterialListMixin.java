@@ -3,6 +3,7 @@ package com.mimicenzymes.litematicafiller.mixin;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.core.MaterialReplacementUi;
 import com.mimicenzymes.litematicafiller.materials.FillMaterialCalculator;
+import com.mimicenzymes.litematicafiller.render.HighlightScanner;
 import fi.dy.masa.litematica.gui.GuiMaterialList;
 import fi.dy.masa.litematica.gui.widgets.WidgetListMaterialList;
 import fi.dy.masa.litematica.gui.widgets.WidgetMaterialListEntry;
@@ -13,6 +14,7 @@ import fi.dy.masa.malilib.gui.widgets.WidgetBase;
 import fi.dy.masa.malilib.util.StringUtils;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.ItemStack;
+import net.minecraft.text.Text;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -39,13 +41,33 @@ public abstract class WidgetListMaterialListMixin {
         WidgetMaterialListEntry entryWidget = cir.getReturnValue();
         if (entryWidget == null) return;
 
+        MinecraftClient client = MinecraftClient.getInstance();
+        ItemStack displayStack = materialEntry.getStack().copy();
+        displayStack.setCount(1);
+
+        String locateLabel = StringUtils.translate("litematica_container_filler.gui.button.material_locate");
+        int locateWidth = Math.max(42, client.textRenderer.getWidth(locateLabel) + 8);
+        int locateX = this.lcf$getAdaptiveButtonX(entryWidget, locateWidth);
+        int buttonY = entryWidget.getY() + ((entryWidget.getHeight() - 20) >> 1);
+        ButtonGeneric locateButton = new ButtonGeneric(locateX, buttonY, locateWidth, 20, locateLabel);
+        locateButton.setHoverStrings(StringUtils.translate("litematica_container_filler.gui.tooltip.material_locate_button"));
+        locateButton.setActionListener((clickedButton, mouseButton) -> {
+            int count = HighlightScanner.focusMaterialContainers(displayStack, MinecraftClient.getInstance());
+            if (MinecraftClient.getInstance().player != null) {
+                String key = count > 0
+                        ? "litematica_container_filler.message.material_locate_found"
+                        : "litematica_container_filler.message.material_locate_none";
+                MinecraftClient.getInstance().player.sendMessage(Text.translatable(key, count), true);
+            }
+        });
+        ((WidgetContainerInvoker) entryWidget).lcf$addWidget(locateButton);
+
         ItemStack sourceStack = FillMaterialCalculator.getOriginalReplacementSource(materialEntry.getStack());
         if (sourceStack.isEmpty()) return;
 
         String label = StringUtils.translate("litematica_container_filler.gui.button.material_replace");
-        int width = Math.max(42, MinecraftClient.getInstance().textRenderer.getWidth(label) + 8);
+        int width = Math.max(42, client.textRenderer.getWidth(label) + 8);
         int buttonX = this.lcf$getAdaptiveButtonX(entryWidget, width);
-        int buttonY = entryWidget.getY() + ((entryWidget.getHeight() - 20) >> 1);
         ButtonGeneric button = new ButtonGeneric(buttonX, buttonY, width, 20, label);
         button.setHoverStrings(StringUtils.translate("litematica_container_filler.gui.tooltip.material_replace_button"));
         button.setActionListener((clickedButton, mouseButton) -> MaterialReplacementUi.open(this.gui, sourceStack));
