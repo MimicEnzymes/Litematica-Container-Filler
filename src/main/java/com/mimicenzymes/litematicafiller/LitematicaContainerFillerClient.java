@@ -106,7 +106,8 @@ public class LitematicaContainerFillerClient implements ClientModInitializer {
         });
 
         WorldRenderEvents.AFTER_ENTITIES.register(context -> {
-            if (Configs.ENABLE_MOD.getBooleanValue() && Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
+            if (Configs.ENABLE_MOD.getBooleanValue() &&
+                    (Configs.HIGHLIGHT_CONTAINERS.getBooleanValue() || com.mimicenzymes.litematicafiller.render.HighlightScanner.hasMaterialFocus())) {
                 ContainerHighlighter.onRender(context);
             }
         });

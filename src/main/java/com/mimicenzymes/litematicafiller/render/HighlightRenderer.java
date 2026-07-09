@@ -30,6 +30,9 @@ public class HighlightRenderer {
     private static final float MANUAL_BADGE_GAP = 0.014f;
     private static final float MANUAL_BADGE_SIZE = 0.44f;
     private static final float MANUAL_BADGE_THICKNESS = 0.034f;
+    private static final float MATERIAL_FOCUS_GAP = 0.13f;
+    private static final float MATERIAL_FOCUS_SIZE = 0.82f;
+    private static final float MATERIAL_FOCUS_THICKNESS = 0.05f;
 
     private final Map<ChunkKey, ChunkRenderCache> chunkCaches = new HashMap<>();
     private final Map<ChunkKey, Map<BlockPos, HighlightState>> desiredChunks = new HashMap<>();
@@ -41,11 +44,16 @@ public class HighlightRenderer {
     private ChunkRenderCache taskOverlayCache = null;
     private long taskOverlaySignature = EMPTY_SIGNATURE;
     private long taskOverlayFrame = Long.MIN_VALUE;
+    private ChunkRenderCache materialFocusOverlayCache = null;
+    private long materialFocusOverlaySignature = EMPTY_SIGNATURE;
+    private long materialFocusOverlayFrame = Long.MIN_VALUE;
 
     public static HighlightRenderer getInstance() { return INSTANCE; }
 
     public void render() {
-        if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
+        boolean highlightEnabled = Configs.HIGHLIGHT_CONTAINERS.getBooleanValue();
+        boolean materialFocusActive = HighlightScanner.hasMaterialFocus();
+        if (!Configs.ENABLE_MOD.getBooleanValue() || (!highlightEnabled && !materialFocusActive)) {
             clearRenderCache();
             return;
         }
@@ -57,11 +65,12 @@ public class HighlightRenderer {
         }
 
         AutoFillerStateMachine filler = AutoFillerStateMachine.getInstance();
-        Map<BlockPos, HighlightState> highlights = HighlightScanner.getHighlights();
+        Map<BlockPos, HighlightState> highlights = highlightEnabled ? HighlightScanner.getHighlights() : Collections.emptyMap();
+        Set<BlockPos> materialFocusPositions = HighlightScanner.getMaterialFocusPositions();
         boolean renderFilling = Configs.RENDER_FILLING_ARROW.getBooleanValue();
         boolean renderQueued = Configs.RENDER_QUEUED_SPINNER.getBooleanValue();
         boolean renderMissing = Configs.RENDER_MISSING_MATERIAL_MARKER.getBooleanValue();
-        if (highlights.isEmpty() && !filler.hasRenderableTaskMarkers(renderFilling, renderQueued, renderMissing)) {
+        if (highlights.isEmpty() && materialFocusPositions.isEmpty() && !filler.hasRenderableTaskMarkers(renderFilling, renderQueued, renderMissing)) {
             clearRenderCache();
             return;
         }
@@ -69,18 +78,21 @@ public class HighlightRenderer {
         BlockPos currentTaskPos = renderFilling ? filler.getCurrentTaskPos() : null;
         Set<BlockPos> queuedTaskPositions = renderQueued ? filler.getQueuedTaskPositions() : Collections.emptySet();
         Set<BlockPos> missingMaterialPositions = renderMissing ? filler.getMissingMaterialPositions() : Collections.emptySet();
+        boolean xray = Configs.HIGHLIGHT_XRAY.getBooleanValue();
+        var cameraPos = RenderUtils.camPos();
         if (highlights.isEmpty()) {
-            clearRenderCache();
+            clearStateHighlightCache();
+            drawMaterialFocusOverlay(cameraPos, xray, materialFocusPositions);
             if (hasTaskOverlay(currentTaskPos, queuedTaskPositions, missingMaterialPositions)) {
-                drawTaskOverlays(RenderUtils.camPos(), Configs.HIGHLIGHT_XRAY.getBooleanValue(), currentTaskPos, queuedTaskPositions, missingMaterialPositions);
+                drawTaskOverlays(cameraPos, xray, currentTaskPos, queuedTaskPositions, missingMaterialPositions);
+            } else {
+                clearTaskOverlayCache();
             }
             return;
         }
 
-        boolean xray = Configs.HIGHLIGHT_XRAY.getBooleanValue();
         long styleSignature = computeStyleSignature(xray);
         int highlightVersion = HighlightScanner.getHighlightVersion();
-        var cameraPos = RenderUtils.camPos();
 
         try {
             if (cachedStyleSignature != styleSignature) {
@@ -95,6 +107,7 @@ public class HighlightRenderer {
 
             rebuildDirtyChunks(xray, cameraPos);
             drawChunkCaches(cameraPos);
+            drawMaterialFocusOverlay(cameraPos, xray, materialFocusPositions);
             drawTaskOverlays(cameraPos, xray, currentTaskPos, queuedTaskPositions, missingMaterialPositions);
         } catch (Exception e) {
             clearRenderCache();
@@ -342,6 +355,105 @@ public class HighlightRenderer {
         }
     }
 
+    private void drawMaterialFocusOverlay(Vec3d cameraPos, boolean xray, Set<BlockPos> positions) {
+        if (positions == null || positions.isEmpty()) {
+            clearMaterialFocusOverlayCache();
+            return;
+        }
+
+        RenderContext ctx = null;
+        BuiltBuffer meshData = null;
+        try {
+            int fpsLimit = Configs.TASK_MARKER_ANIMATION_FPS.getIntegerValue();
+            long nanoTime = System.nanoTime();
+            double rawTime = nanoTime / 1_000_000_000.0D;
+            long frame = fpsLimit <= 0 ? nanoTime : (long)Math.floor(rawTime * fpsLimit);
+            double time = fpsLimit <= 0 ? rawTime : frame / (double)fpsLimit;
+            long signature = computeMaterialFocusOverlaySignature(true, positions);
+            if (materialFocusOverlayCache != null && materialFocusOverlaySignature == signature && materialFocusOverlayFrame == frame) {
+                renderOffset[0] = (float)(materialFocusOverlayCache.cameraX - cameraPos.x);
+                renderOffset[1] = (float)(materialFocusOverlayCache.cameraY - cameraPos.y);
+                renderOffset[2] = (float)(materialFocusOverlayCache.cameraZ - cameraPos.z);
+                drawChunkCache(materialFocusOverlayCache);
+                return;
+            }
+
+            ctx = new RenderContext(
+                    () -> "litematica_filler_material_focus",
+                    MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL
+            );
+
+            var buffer = ctx.getBuilder();
+            if (buffer == null) return;
+
+            for (BlockPos pos : positions) {
+                if (pos != null) {
+                    drawMaterialFocusMarker(getHighlightBox(pos), cameraPos, time, buffer);
+                }
+            }
+
+            meshData = buffer.endNullable();
+            if (meshData == null) return;
+
+            ctx.upload(meshData, false);
+            ChunkRenderCache cache = new ChunkRenderCache(null, ctx, cameraPos.x, cameraPos.y, cameraPos.z);
+            ctx = null;
+            clearMaterialFocusOverlayCache();
+            materialFocusOverlayCache = cache;
+            materialFocusOverlaySignature = signature;
+            materialFocusOverlayFrame = frame;
+
+            renderOffset[0] = 0.0f;
+            renderOffset[1] = 0.0f;
+            renderOffset[2] = 0.0f;
+            drawChunkCache(cache);
+        } catch (Exception e) {
+            clearMaterialFocusOverlayCache();
+            LOGGER.warn("Failed to render material focus overlays", e);
+        } finally {
+            if (meshData != null) meshData.close();
+            closeContext(ctx);
+        }
+    }
+
+    private void drawMaterialFocusMarker(HighlightBox box, Vec3d cameraPos, double time, net.minecraft.client.render.BufferBuilder buffer) {
+        float size = Math.min(box.maxX() - box.minX(), box.maxZ() - box.minZ());
+        float scale = (float) Configs.TASK_OVERLAY_SCALE.getDoubleValue();
+        float half = Math.max(0.22f, size * MATERIAL_FOCUS_SIZE * 0.5f);
+        float thickness = Math.max(0.026f, size * MATERIAL_FOCUS_THICKNESS) * Math.max(0.65f, scale);
+        float y = box.maxY() + MATERIAL_FOCUS_GAP;
+        float cx = box.centerX();
+        float cz = box.centerZ();
+
+        Color4f base = Configs.HIGHLIGHT_COLOR_FILLING.getColor();
+        Color4f glow = new Color4f(base.r, base.g, base.b, Math.min(0.18f, Math.max(0.08f, base.a * 0.18f)));
+        Color4f ring = new Color4f(base.r, base.g, base.b, Math.min(0.92f, Math.max(0.48f, base.a * 0.82f)));
+        float centerPulse = 0.5f + 0.5f * (float)Math.sin(time * 7.5D);
+        Color4f core = new Color4f(0.92f, 1.0f, 0.96f, 0.34f + centerPulse * 0.18f);
+
+        drawInflatedWorldBox(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(), 0.025f, glow, cameraPos, buffer);
+        drawWorldSquareRing(cx, y, cz, half, thickness, ring, cameraPos, buffer);
+
+        for (int i = 0; i < 2; i++) {
+            float progress = (float)((time * 1.45D + i * 0.5D) % 1.0D);
+            float eased = 1.0f - (1.0f - progress) * (1.0f - progress);
+            float waveHalf = Math.max(thickness * 1.85f, half * eased);
+            float waveThickness = Math.max(thickness * 0.55f, thickness * (0.95f - progress * 0.35f));
+            float waveAlpha = Math.min(0.70f, Math.max(0.035f, base.a * 0.62f * (1.0f - progress)));
+            Color4f wave = new Color4f(base.r, base.g, base.b, waveAlpha);
+            drawWorldSquareRing(cx, y + thickness * (1.35f + i * 0.12f), cz, waveHalf, waveThickness, wave, cameraPos, buffer);
+        }
+
+        drawCenteredWorldBox(cx, y + thickness * 1.9f, cz, Math.max(0.08f, thickness * (1.45f + centerPulse * 0.55f)), thickness * 0.9f, core, cameraPos, buffer);
+    }
+
+    private void drawWorldSquareRing(float cx, float y, float cz, float half, float thickness, Color4f color, Vec3d cameraPos, net.minecraft.client.render.BufferBuilder buffer) {
+        drawWorldBox(cx - half, y, cz - half, cx + half, y + thickness, cz - half + thickness, color, cameraPos, buffer);
+        drawWorldBox(cx - half, y, cz + half - thickness, cx + half, y + thickness, cz + half, color, cameraPos, buffer);
+        drawWorldBox(cx - half, y, cz - half, cx - half + thickness, y + thickness, cz + half, color, cameraPos, buffer);
+        drawWorldBox(cx + half - thickness, y, cz - half, cx + half, y + thickness, cz + half, color, cameraPos, buffer);
+    }
+
     private void drawFillingArrow(HighlightBox box, Vec3d cameraPos, double time, net.minecraft.client.render.BufferBuilder buffer) {
         float cx = box.centerX();
         float cz = box.centerZ();
@@ -514,6 +626,27 @@ public class HighlightRenderer {
         return sum;
     }
 
+    private long computeMaterialFocusOverlaySignature(boolean xray, Set<BlockPos> positions) {
+        long sum = xray ? 0x6d6174666f637573L : 0x776f726c64666f63L;
+        long xor = 0L;
+        int count = 0;
+
+        sum = mix64(sum ^ HighlightScanner.getMaterialFocusVersion());
+        sum = mix64(sum ^ Configs.HIGHLIGHT_COLOR_FILLING.getColor().getIntValue());
+        sum = mix64(sum ^ Double.doubleToLongBits(Configs.TASK_OVERLAY_SCALE.getDoubleValue()));
+
+        for (BlockPos pos : positions) {
+            if (pos == null) continue;
+            long hash = mix64(pos.asLong());
+            count++;
+            sum += hash;
+            xor ^= Long.rotateLeft(hash, (int)(hash & 63L));
+        }
+
+        sum = mix64(sum ^ count);
+        return mix64(sum ^ xor);
+    }
+
     private long mix64(long value) {
         value = (value ^ (value >>> 30)) * 0xbf58476d1ce4e5b9L;
         value = (value ^ (value >>> 27)) * 0x94d049bb133111ebL;
@@ -521,6 +654,12 @@ public class HighlightRenderer {
     }
 
     private void clearRenderCache() {
+        clearStateHighlightCache();
+        clearTaskOverlayCache();
+        clearMaterialFocusOverlayCache();
+    }
+
+    private void clearStateHighlightCache() {
         for (ChunkRenderCache cache : chunkCaches.values()) {
             closeContext(cache.fillContext);
             closeContext(cache.lineContext);
@@ -529,7 +668,6 @@ public class HighlightRenderer {
         desiredChunks.clear();
         desiredChunkFingerprints.clear();
         dirtyChunks.clear();
-        clearTaskOverlayCache();
         cachedHighlightVersion = -1;
         cachedStyleSignature = EMPTY_SIGNATURE;
     }
@@ -542,6 +680,16 @@ public class HighlightRenderer {
         }
         taskOverlaySignature = EMPTY_SIGNATURE;
         taskOverlayFrame = Long.MIN_VALUE;
+    }
+
+    private void clearMaterialFocusOverlayCache() {
+        if (materialFocusOverlayCache != null) {
+            closeContext(materialFocusOverlayCache.fillContext);
+            closeContext(materialFocusOverlayCache.lineContext);
+            materialFocusOverlayCache = null;
+        }
+        materialFocusOverlaySignature = EMPTY_SIGNATURE;
+        materialFocusOverlayFrame = Long.MIN_VALUE;
     }
 
     private void removeChunkCache(ChunkKey key) {
