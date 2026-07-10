@@ -29,7 +29,6 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.text.Text;
 
@@ -1318,7 +1317,7 @@ public class AutoFillerStateMachine {
         }
 
         silentlyExtracting = false;
-        BlockHitResult hitResult = new BlockHitResult(new Vec3d(pos.getX()+0.5, pos.getY()+0.5, pos.getZ()+0.5), Direction.UP, pos, false);
+        BlockHitResult hitResult = InteractionTargeting.createBlockHitResult(client, pos);
         client.interactionManager.interactBlock(client.player, Hand.MAIN_HAND, hitResult);
         currentMapper = null;
         uiWaitTimer = 0;
@@ -1330,8 +1329,8 @@ public class AutoFillerStateMachine {
         if (client.player == null) return false;
 
         double reach = client.player.getBlockInteractionRange();
-        double reachSq = (reach + 0.5) * (reach + 0.5);
-        return client.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(pos)) <= reachSq;
+        double reachSq = InteractionTargeting.squaredInteractionRange(reach);
+        return InteractionTargeting.squaredDistanceToBlock(client.player.getEyePos(), pos) <= reachSq;
     }
 
     private void openShulkerBox(MinecraftClient client, int slot) {
@@ -2471,7 +2470,7 @@ public class AutoFillerStateMachine {
 
         double reach = client.player.getBlockInteractionRange();
         double keepDistance = reach + (isPlayerMovingFast(client) ? 2.0D : 5.0D);
-        return client.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(task.targetPos)) > keepDistance * keepDistance;
+        return InteractionTargeting.squaredDistanceToBlock(client.player.getEyePos(), task.targetPos) > keepDistance * keepDistance;
     }
 
     private boolean ensureQueueSpace(MinecraftClient client, BlockPos newPos, boolean preferNearby) {
@@ -2502,7 +2501,7 @@ public class AutoFillerStateMachine {
     }
 
     private double queueDistanceScore(MinecraftClient client, BlockPos pos) {
-        return client.player == null ? 0.0D : client.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(pos));
+        return client.player == null ? 0.0D : InteractionTargeting.squaredDistanceToBlock(client.player.getEyePos(), pos);
     }
 
     private double scoreTask(MinecraftClient client, FillTask task) {
