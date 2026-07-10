@@ -17,7 +17,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.BlockPos;
-import fi.dy.masa.malilib.util.LayerRange;
+import fi.dy.masa.malilib.util.position.LayerRange;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -533,7 +533,7 @@ public class HighlightScanner {
         LayerRange renderLayerRange = syncLayer ? fi.dy.masa.litematica.data.DataManager.getRenderLayerRange() : null;
         processDirtyHighlights(client, schematicWorld, renderLayerRange, now);
 
-        boolean userHandledScreenOpen = client.screen instanceof AbstractContainerScreen<?> && !modOperating;
+        boolean userHandledScreenOpen = client.gui.screen() instanceof AbstractContainerScreen<?> && !modOperating;
         if (userHandledScreenOpen) {
             pumpDataRequests(now);
             return;

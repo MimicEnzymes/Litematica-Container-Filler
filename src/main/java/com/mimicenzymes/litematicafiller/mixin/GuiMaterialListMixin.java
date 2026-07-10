@@ -140,7 +140,7 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
         Thread monitor = new Thread(() -> {
             int tickCount = 0;
             while (Configs.ENABLE_MOD.getBooleanValue() &&
-                    Minecraft.getInstance().screen == this &&
+                    Minecraft.getInstance().gui.screen() == this &&
                     FillMaterialCalculator.listMode != 0) {
                 try {
                     Thread.sleep(50);
@@ -149,7 +149,7 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
                     final boolean forceRefresh = (tickCount % 10 == 0) && FillMaterialCalculator.hasMissingData;
                     Minecraft.getInstance().execute(() -> {
                         if (Configs.ENABLE_MOD.getBooleanValue() &&
-                                Minecraft.getInstance().screen == this &&
+                                Minecraft.getInstance().gui.screen() == this &&
                                 FillMaterialCalculator.listMode != 0) {
                             if (forceRefresh) mimic_needsCalculation = true;
                             mimic_injectSilently();

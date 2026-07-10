@@ -24,10 +24,10 @@ dependencies {
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
     implementation files("libs/litematica-fabric-${project.litematica_version}.jar")
     implementation files("libs/malilib-fabric-${project.malilib_version}.jar")
-    compileOnly files('libs/modmenu-18.0.0-alpha.8.jar')
-    runtimeOnly files('libs/modmenu-18.0.0-alpha.8.jar')
-    compileOnly files('libs/quickshulker-3.0.0-26.1.jar')
-    runtimeOnly files('libs/quickshulker-3.0.0-26.1.jar')
+    compileOnly files('libs/modmenu-20.0.1.jar')
+    runtimeOnly files('libs/modmenu-20.0.1.jar')
+    compileOnly files('libs/quickshulker-3.0.2-26.2.jar')
+    runtimeOnly files('libs/quickshulker-3.0.2-26.2.jar')
 }
 
 java {

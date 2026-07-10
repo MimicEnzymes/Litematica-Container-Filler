@@ -24,6 +24,7 @@ public class HighlightRenderer {
     private static final long EMPTY_SIGNATURE = Long.MIN_VALUE;
     private static final int RENDER_CACHE_REGION_SHIFT = 6;
     private static final int MAX_CHUNK_REBUILDS_PER_FRAME = 1;
+    private static final int RENDER_CONTEXT_BUFFER_SIZE = 1536;
     private static final float TOP_PLATE_MIN_INSET = 0.02f;
     private static final float TOP_PLATE_BOTTOM_OFFSET = 0.035f;
     private static final float TOP_PLATE_TOP_OFFSET = 0.095f;
@@ -194,7 +195,8 @@ public class HighlightRenderer {
             if (Configs.RENDER_STATE_GLASS.getBooleanValue() || Configs.RENDER_STATE_TOP_PLATE.getBooleanValue()) {
                 fillCtx = new RenderContext(
                         () -> "litematica_filler_glass",
-                        xray ? MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL : MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_LEQUAL_DEPTH_OFFSET_2
+                        xray ? MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL : MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_LEQUAL_DEPTH_OFFSET_2,
+                        RENDER_CONTEXT_BUFFER_SIZE
                 );
 
                 var fillBuffer = fillCtx.getBuilder();
@@ -302,7 +304,8 @@ public class HighlightRenderer {
 
             ctx = new RenderContext(
                     () -> "litematica_filler_task_overlays",
-                    xray ? MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL : MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_LEQUAL_DEPTH_OFFSET_2
+                    xray ? MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL : MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_LEQUAL_DEPTH_OFFSET_2,
+                    RENDER_CONTEXT_BUFFER_SIZE
             );
 
             var buffer = ctx.getBuilder();
@@ -380,7 +383,8 @@ public class HighlightRenderer {
 
             ctx = new RenderContext(
                     () -> "litematica_filler_material_focus",
-                    MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL
+                    MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL,
+                    RENDER_CONTEXT_BUFFER_SIZE
             );
 
             var buffer = ctx.getBuilder();

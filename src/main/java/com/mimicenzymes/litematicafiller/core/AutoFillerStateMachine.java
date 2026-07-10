@@ -1851,7 +1851,7 @@ public class AutoFillerStateMachine {
         boolean extractedAnyInThisPass = false;
 
         if (handler instanceof CrafterMenu crafterHandler) {
-            AbstractContainerScreen<?> AbstractContainerScreen = client.screen instanceof AbstractContainerScreen<?> ? (AbstractContainerScreen<?>) client.screen : null;
+            AbstractContainerScreen<?> AbstractContainerScreen = client.gui.screen() instanceof AbstractContainerScreen<?> ? (AbstractContainerScreen<?>) client.gui.screen() : null;
             Set<Integer> targetDisabled = LitematicaContainerReader.getDisabledSlots(currentTask.targetPos);
             boolean toggledInThisTick = false;
 
@@ -2548,7 +2548,7 @@ public class AutoFillerStateMachine {
     }
 
     private boolean isPassiveScreenOpen(Minecraft client) {
-        Screen screen = client.screen;
+        Screen screen = client.gui.screen();
         return screen != null && !(screen instanceof AbstractContainerScreen<?>);
     }
 

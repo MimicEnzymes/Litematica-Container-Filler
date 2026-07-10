@@ -39,7 +39,7 @@ public class GuiConfigs extends GuiConfigsBase {
     }
 
     public GuiConfigs() {
-        this(Minecraft.getInstance().screen);
+        this(Minecraft.getInstance().gui.screen());
     }
 
     @Override
@@ -161,7 +161,7 @@ public class GuiConfigs extends GuiConfigsBase {
             ButtonGeneric visualButton = new ButtonGeneric(buttonX, y, visualWidth, 20, visualText);
             visualButton.setHoverStrings(fi.dy.masa.malilib.util.StringUtils.translate("litematica_container_filler.gui.tooltip.container_filter_visual"));
             this.addButton(visualButton, (clickedButton, mouseButton) -> {
-                Screen screen = this.host instanceof Screen hostScreen ? hostScreen : Minecraft.getInstance().screen;
+                Screen screen = this.host instanceof Screen hostScreen ? hostScreen : Minecraft.getInstance().gui.screen();
                 GuiBase.openGui(new GuiContainerFilter(screen));
             });
 
@@ -211,7 +211,7 @@ public class GuiConfigs extends GuiConfigsBase {
             ButtonGeneric visualButton = new ButtonGeneric(buttonX, y, visualWidth, 20, visualText);
             visualButton.setHoverStrings(fi.dy.masa.malilib.util.StringUtils.translate("litematica_container_filler.gui.tooltip.global_material_replace_visual"));
             this.addButton(visualButton, (clickedButton, mouseButton) -> {
-                Screen screen = this.host instanceof Screen hostScreen ? hostScreen : Minecraft.getInstance().screen;
+                Screen screen = this.host instanceof Screen hostScreen ? hostScreen : Minecraft.getInstance().gui.screen();
                 GuiBase.openGui(new GuiGlobalMaterialReplacementPicker(screen));
             });
 

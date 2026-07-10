@@ -37,7 +37,7 @@ public class LitematicafillerClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (!isGuiAutoRegistered) {
-                boolean isTitleScreen = client.screen != null && client.screen.getClass().getSimpleName().equals("TitleScreen");
+                boolean isTitleScreen = client.gui.screen() != null && client.gui.screen().getClass().getSimpleName().equals("TitleScreen");
                 boolean isInWorld = client.player != null;
                 if (isTitleScreen || isInWorld) {
                     try { new GuiConfigs(null); } catch (Exception e) {}

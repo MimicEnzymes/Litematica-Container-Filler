@@ -116,14 +116,14 @@ public class RealContainerCache {
             cleanupExpiredCache();
         }
 
-        if (client.screen == null && client.hitResult instanceof BlockHitResult bhr) {
+        if (client.gui.screen() == null && client.hitResult instanceof BlockHitResult bhr) {
             lastLookedPos = bhr.getBlockPos();
         }
 
-        if (isPlayerInventoryScreen(client.screen)) {
+        if (isPlayerInventoryScreen(client.gui.screen())) {
             resetObservedHandler();
             resetBoundScreenTarget();
-        } else if (client.screen instanceof AbstractContainerScreen<?> screen) {
+        } else if (client.gui.screen() instanceof AbstractContainerScreen<?> screen) {
             updateFromHandlerIfNeeded(client, screen.getMenu());
         } else {
             resetObservedHandler();
@@ -144,7 +144,7 @@ public class RealContainerCache {
         }
 
         Minecraft client = Minecraft.getInstance();
-        return FillMaterialCalculator.listMode != 0 && client.screen instanceof GuiMaterialList;
+        return FillMaterialCalculator.listMode != 0 && client.gui.screen() instanceof GuiMaterialList;
     }
 
     public static void updateFromScreen(Minecraft client, AbstractContainerScreen<?> screen) {

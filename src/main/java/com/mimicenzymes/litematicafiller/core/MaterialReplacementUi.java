@@ -155,7 +155,7 @@ public final class MaterialReplacementUi {
     }
 
     public static void refreshParentList() {
-        Screen screen = Minecraft.getInstance().screen;
+        Screen screen = Minecraft.getInstance().gui.screen();
         if (screen instanceof MaterialListReplacementRefresh refresh) {
             refresh.lcf$refreshMaterialReplacementList();
         } else if (screen instanceof GuiItemReplacementPicker picker) {

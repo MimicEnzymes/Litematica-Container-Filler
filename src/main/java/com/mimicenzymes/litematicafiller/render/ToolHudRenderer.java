@@ -158,7 +158,7 @@ public class ToolHudRenderer {
             lastSwitchVisualNanos = 0L;
             return;
         }
-        if (client.options.hideGui) {
+        if (client.gui.hud.isHidden()) {
             visibility = 0.0f;
             switchHudActive = false;
             switchVisualExpand = 0.0f;
@@ -175,7 +175,7 @@ public class ToolHudRenderer {
 
         ContainerToolStateMachine tools = ContainerToolStateMachine.getInstance();
         BlockPos target = tools.isToolEnabled() ? tools.getLookedContainerForHud(client) : null;
-        boolean targetVisible = target != null && client.screen == null;
+        boolean targetVisible = target != null && client.gui.screen() == null;
         ContainerToolMode mode = tools.getActiveMode();
         updateTextCache(client, mode);
         float switchExpand = updateSwitchVisualExpand(now);

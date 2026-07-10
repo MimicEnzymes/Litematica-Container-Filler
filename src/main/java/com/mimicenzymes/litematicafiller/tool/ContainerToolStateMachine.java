@@ -1594,7 +1594,7 @@ public class ContainerToolStateMachine {
     }
 
     private boolean isPassiveScreenOpen(Minecraft client) {
-        Screen screen = client.screen;
+        Screen screen = client.gui.screen();
         return screen != null && !(screen instanceof AbstractContainerScreen<?>);
     }
 

@@ -17,7 +17,7 @@ public class InGameHudMixin {
     private void litematicaContainerFiller$renderToolHud(GuiGraphicsExtractor context, DeltaTracker tickCounter, CallbackInfo ci) {
         Minecraft client = Minecraft.getInstance();
         if (!Configs.ENABLE_MOD.getBooleanValue() ||
-                client.options.hideGui ||
+                client.gui.hud.isHidden() ||
                 (!Configs.ENABLE_TOOL_HUD.getBooleanValue() && !ToolHudRenderer.hasActiveTextSwitchHud())) {
             return;
         }
