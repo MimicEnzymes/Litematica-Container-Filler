@@ -689,7 +689,7 @@ public class RealContainerCache {
     }
 
     private static boolean requestOpNbtData(BlockPos pos, BlockPos[] halves, boolean isDouble, long now) {
-        if (!Configs.ENABLE_OP_NBT_QUERY.getBooleanValue()) return false;
+        if (!canUseOpNbtQuery()) return false;
 
         int requestCount = isDouble ? 2 : 1;
         if (PENDING_NBT_REQUESTS.size() + requestCount > MAX_PENDING_NBT_REQUESTS) return false;
@@ -716,6 +716,13 @@ public class RealContainerCache {
         PENDING_NBT_REQUEST_TIME.put(id, now);
         client.getNetworkHandler().sendPacket(new net.minecraft.network.packet.c2s.play.QueryBlockNbtC2SPacket(id, pos));
         return true;
+    }
+
+    public static boolean canUseOpNbtQuery() {
+        if (Configs.ENABLE_OP_NBT_QUERY.getBooleanValue()) return true;
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        return client != null && client.isInSingleplayer();
     }
 
     public static void handleNbtResponse(int transactionId, NbtCompound nbt) {
