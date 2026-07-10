@@ -4,6 +4,7 @@ import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.config.Hotkeys;
 import com.mimicenzymes.litematicafiller.config.QuickShulkerOpenMode;
 import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
+import com.mimicenzymes.litematicafiller.core.InteractionTargeting;
 import com.mimicenzymes.litematicafiller.core.ItemMatcher;
 import com.mimicenzymes.litematicafiller.core.RealContainerCache;
 import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
@@ -38,8 +39,6 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -559,7 +558,7 @@ public class ContainerToolStateMachine {
 
     private void openContainer(MinecraftClient client, BlockPos pos) {
         uiWaitTicks = 0;
-        BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(pos), Direction.UP, pos, false);
+        BlockHitResult hit = InteractionTargeting.createBlockHitResult(client, pos);
         client.interactionManager.interactBlock(client.player, Hand.MAIN_HAND, hit);
     }
 
