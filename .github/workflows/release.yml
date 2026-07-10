@@ -12,7 +12,7 @@ on:
         type: string
         required: false
       build_branches:
-        description: 'Branches to build, comma-separated, e.g. "1.21.4,26.1". Leave empty to auto-match 1.21, 1.21.*, and 26.*'
+        description: 'Branches to build, comma-separated, e.g. "1.21.4,26.2". Leave empty to auto-match 1.21, 1.21.*, and 26.*'
         type: string
         required: false
         default: ''
@@ -121,6 +121,9 @@ jobs:
                 ;;
               26.1)
                 printf '26.1\n26.1.1\n26.1.2'
+                ;;
+              26.2)
+                printf '26.2'
                 ;;
               *)
                 printf '%s' "$1"
