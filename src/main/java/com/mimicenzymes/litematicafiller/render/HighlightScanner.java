@@ -1,6 +1,5 @@
 package com.mimicenzymes.litematicafiller.render;
 
-import com.mojang.logging.LogUtils;
 import com.mimicenzymes.litematicafiller.config.Configs;
 import com.mimicenzymes.litematicafiller.core.AutoFillerStateMachine;
 import com.mimicenzymes.litematicafiller.filter.ContainerBlockFilter;
@@ -25,10 +24,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import org.slf4j.Logger;
 
 public class HighlightScanner {
-    private static final Logger LOGGER = LogUtils.getLogger();
     private static final int NORMAL_UPDATE_INTERVAL_TICKS = 10;
     private static final int IDLE_UPDATE_INTERVAL_TICKS = 20;
     private static final int BOOSTED_UPDATE_INTERVAL_TICKS = 2;
@@ -65,7 +62,6 @@ public class HighlightScanner {
     private static volatile Map<Long, Set<BlockPos>> SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
     private static volatile long lastIndexTime = 0;
     private static volatile boolean isIndexing = false;
-    private static volatile int indexGeneration = 0;
     private static long lastRenderLayerSignature = Long.MIN_VALUE;
     private static boolean pendingRenderLayerRefresh = false;
     private static long lastRenderLayerRefreshTick = Long.MIN_VALUE;
@@ -311,7 +307,6 @@ public class HighlightScanner {
         ManualContainerOverrideManager.clearForCurrentContext();
         SCHEMATIC_CONTAINERS = Collections.emptySet();
         SCHEMATIC_CONTAINER_BUCKETS = Collections.emptyMap();
-        indexGeneration++;
         invalidateMaterialContainerIndex();
         clearMaterialFocus();
         invalidateNearbyBucketCache();
@@ -323,9 +318,8 @@ public class HighlightScanner {
     }
 
     public static void onPlacementChanged() {
-        clearHighlights();
+        invalidateActiveScanPass();
         lastIndexTime = 0;
-        indexGeneration++;
         SCHEMATIC_CONTAINERS = Collections.emptySet();
         SCHEMATIC_REQ_CACHE.clear();
         SCHEMATIC_IGNORED_SLOT_CACHE.clear();
@@ -468,8 +462,8 @@ public class HighlightScanner {
         if (schematicWorld == null || pos == null) return pos;
 
         try {
-            BlockState state = LitematicaContainerReader.getSchematicBlockState(pos, schematicWorld);
-            BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalvesForSchematic(pos, state, schematicWorld);
+            BlockState state = schematicWorld.getBlockState(pos);
+            BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
             if (halves != null && halves.length > 0 && halves[0] != null) {
                 return halves[0].immutable();
             }
@@ -652,8 +646,6 @@ public class HighlightScanner {
             BlockPos renderPos = scanPass.nextRenderPosition(schematicWorld);
             if (renderPos == null) {
                 anyHighlightChanged |= removeHighlightsMissingFromScan(scanPass.seenRenderPositions);
-                LOGGER.info("[LCF diagnostics] highlight scan complete seen={} highlights={} changed={} sample={}",
-                        scanPass.seenRenderPositions.size(), HIGHLIGHT_MAP.size(), anyHighlightChanged, samplePositions(HIGHLIGHT_MAP.keySet()));
                 activeScanPass = null;
                 break;
             }
@@ -733,10 +725,10 @@ public class HighlightScanner {
     }
 
     private static BlockPos getRenderPositionForChangedContainer(net.minecraft.world.level.Level schematicWorld, BlockPos pos) {
-        BlockState state = LitematicaContainerReader.getSchematicBlockState(pos, schematicWorld);
+        BlockState state = schematicWorld.getBlockState(pos);
         if (state == null || state.isAir()) return pos;
 
-        BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalvesForSchematic(pos, state, schematicWorld);
+        BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
         return halves != null ? halves[0] : pos;
     }
 
@@ -746,7 +738,7 @@ public class HighlightScanner {
                                                                LayerRange renderLayerRange,
                                                                boolean hasManualOverrides,
                                                                long now) {
-        BlockState state = LitematicaContainerReader.getSchematicBlockState(pos, schematicWorld);
+        BlockState state = schematicWorld.getBlockState(pos);
         boolean schematicContainer = state != null && !state.isAir() && state.hasBlockEntity() &&
                 ContainerBlockFilter.isAllowedForSchematicFill(state, schematicWorld, pos);
         ManualContainerOverrideState manualState = hasManualOverrides
@@ -766,7 +758,7 @@ public class HighlightScanner {
         }
 
         BlockPos checkPos = pos;
-        BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalvesForSchematic(pos, state, schematicWorld);
+        BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
         if (halves != null) checkPos = halves[0];
         if (!checkPos.equals(pos)) return null;
         queueLargeBarrelConfirmationIfNeeded(client, schematicWorld, checkPos, state, now);
@@ -921,15 +913,9 @@ public class HighlightScanner {
         if (isIndexing || now - lastIndexTime <= 5000) return;
 
         isIndexing = true;
-        int generationAtStart = indexGeneration;
         CompletableFuture.runAsync(() -> {
-            boolean published = false;
             try {
                 Set<BlockPos> found = LitematicaPlacementContainerData.rebuildIndex();
-                if (generationAtStart != indexGeneration) {
-                    return;
-                }
-
                 if (!found.equals(SCHEMATIC_CONTAINERS)) {
                     SCHEMATIC_REQ_CACHE.clear();
                     SCHEMATIC_IGNORED_SLOT_CACHE.clear();
@@ -938,31 +924,12 @@ public class HighlightScanner {
                 }
                 SCHEMATIC_CONTAINERS = found;
                 SCHEMATIC_CONTAINER_BUCKETS = buildContainerBuckets(found);
-                LOGGER.info("[LCF diagnostics] schematic container index rebuilt generation={} containers={} sample={}",
-                        generationAtStart, found.size(), samplePositions(found));
-                published = true;
             } catch (Exception e) {} finally {
-                lastIndexTime = published ? System.currentTimeMillis() : 0L;
+                lastIndexTime = System.currentTimeMillis();
                 invalidateNearbyBucketCache();
                 isIndexing = false;
             }
         }, INDEX_EXECUTOR);
-    }
-
-    private static String samplePositions(Collection<BlockPos> positions) {
-        if (positions == null || positions.isEmpty()) return "[]";
-
-        List<BlockPos> sample = new ArrayList<>(positions);
-        sample.sort(Comparator.comparingLong(BlockPos::asLong));
-        int limit = Math.min(sample.size(), 5);
-        StringBuilder builder = new StringBuilder("[");
-        for (int i = 0; i < limit; i++) {
-            if (i > 0) builder.append(", ");
-            builder.append(sample.get(i));
-        }
-        if (sample.size() > limit) builder.append(", ...");
-        builder.append(']');
-        return builder.toString();
     }
 
     private static void clearHighlights() {

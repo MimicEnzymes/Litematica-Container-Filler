@@ -14,8 +14,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.Mirror;
-import net.minecraft.world.level.block.Rotation;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -43,14 +41,6 @@ public class LitematicaPlacementContainerData {
         return nbt == null ? Optional.empty() : Optional.of(nbt);
     }
 
-    public static Optional<BlockState> getBlockState(BlockPos worldPos) {
-        if (worldPos == null) return Optional.empty();
-
-        ensureInitialized();
-        BlockState state = snapshot.stateByWorldPos().get(worldPos);
-        return state == null ? Optional.empty() : Optional.of(state);
-    }
-
     public static Map<Integer, ItemStack> getItems(BlockPos worldPos, HolderLookup.Provider registries) {
         Optional<CompoundTag> nbt = getNbt(worldPos);
         if (nbt.isEmpty() || !nbt.get().contains("Items")) {
@@ -69,7 +59,6 @@ public class LitematicaPlacementContainerData {
 
     private static Snapshot buildSnapshot() {
         Map<BlockPos, CompoundTag> nbtByWorldPos = new HashMap<>();
-        Map<BlockPos, BlockState> stateByWorldPos = new HashMap<>();
         Map<BlockPos, String> schematicKeyByWorldPos = new HashMap<>();
         Set<BlockPos> positions = new HashSet<>();
         Minecraft client = Minecraft.getInstance();
@@ -103,16 +92,9 @@ public class LitematicaPlacementContainerData {
 
                         if (!isContainerBlockEntity(container, localPos, client, nbt)) continue;
 
-                        BlockPos key = worldPos.immutable();
-                        BlockState rawState = container.get(localPos.getX(), localPos.getY(), localPos.getZ());
-                        BlockState transformedState = transformBlockState(rawState, placement, regionPlacement);
-
-                        positions.add(key);
-                        nbtByWorldPos.put(key, nbt.copy());
-                        if (transformedState != null) {
-                            stateByWorldPos.put(key, transformedState);
-                        }
-                        schematicKeyByWorldPos.put(key, SchematicMaterialReplacementContext.keyForPlacement(placement));
+                        positions.add(worldPos.immutable());
+                        nbtByWorldPos.put(worldPos.immutable(), nbt.copy());
+                        schematicKeyByWorldPos.put(worldPos.immutable(), SchematicMaterialReplacementContext.keyForPlacement(placement));
                     }
                 }
             }
@@ -122,7 +104,6 @@ public class LitematicaPlacementContainerData {
         return new Snapshot(
                 Collections.unmodifiableSet(positions),
                 Collections.unmodifiableMap(nbtByWorldPos),
-                Collections.unmodifiableMap(stateByWorldPos),
                 Collections.unmodifiableMap(schematicKeyByWorldPos),
                 true
         );
@@ -203,35 +184,9 @@ public class LitematicaPlacementContainerData {
         }
     }
 
-    private static BlockState transformBlockState(BlockState state, SchematicPlacement placement, SubRegionPlacement regionPlacement) {
-        if (state == null || placement == null || regionPlacement == null) return state;
-
-        Mirror placementMirror = placement.getMirror();
-        Mirror regionMirror = regionPlacement.getMirror();
-        Rotation placementRotation = placement.getRotation();
-        Rotation rotation = placementRotation.getRotated(regionPlacement.getRotation());
-
-        if (regionMirror != Mirror.NONE &&
-                (placementRotation == Rotation.CLOCKWISE_90 || placementRotation == Rotation.COUNTERCLOCKWISE_90)) {
-            regionMirror = regionMirror == Mirror.FRONT_BACK ? Mirror.LEFT_RIGHT : Mirror.FRONT_BACK;
-        }
-
-        if (placementMirror != Mirror.NONE) {
-            state = state.mirror(placementMirror);
-        }
-        if (regionMirror != Mirror.NONE) {
-            state = state.mirror(regionMirror);
-        }
-        if (rotation != Rotation.NONE) {
-            state = state.rotate(rotation);
-        }
-
-        return state;
-    }
-
-    private record Snapshot(Set<BlockPos> positions, Map<BlockPos, CompoundTag> nbtByWorldPos, Map<BlockPos, BlockState> stateByWorldPos, Map<BlockPos, String> schematicKeyByWorldPos, boolean initialized) {
+    private record Snapshot(Set<BlockPos> positions, Map<BlockPos, CompoundTag> nbtByWorldPos, Map<BlockPos, String> schematicKeyByWorldPos, boolean initialized) {
         static Snapshot empty() {
-            return new Snapshot(Collections.emptySet(), Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap(), false);
+            return new Snapshot(Collections.emptySet(), Collections.emptyMap(), Collections.emptyMap(), false);
         }
     }
 }

@@ -164,11 +164,11 @@ public class AreaScanner {
                                            Set<BlockPos> processedPositions,
                                            List<PendingTask> pendingTasks,
                                            BlockPos rawPos) {
-        BlockState state = LitematicaContainerReader.getSchematicBlockState(rawPos, schematicWorld);
+        BlockState state = schematicWorld.getBlockState(rawPos);
         if (state == null || state.isAir() || !state.hasBlockEntity()) return;
         if (!ContainerBlockFilter.isAllowedForSchematicFill(state, schematicWorld, rawPos)) return;
 
-        BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalvesForSchematic(rawPos, state, schematicWorld);
+        BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(schematicWorld, rawPos, state);
         BlockPos taskPos = halves != null ? halves[0] : rawPos;
 
         if (!processedPositions.add(taskPos)) return;

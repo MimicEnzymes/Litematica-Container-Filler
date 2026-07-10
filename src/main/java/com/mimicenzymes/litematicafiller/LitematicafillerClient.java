@@ -48,7 +48,6 @@ public class LitematicafillerClient implements ClientModInitializer {
             if (!com.mimicenzymes.litematicafiller.config.Configs.ENABLE_MOD.getBooleanValue()) {
                 stopActiveWorkForDisabledMod(client);
                 ClickPacketRateLimiter.reset();
-                SchematicPlacementChangeWatcher.reset();
                 updateFillProtectionSnapshot(client);
                 return;
             }
@@ -87,7 +86,6 @@ public class LitematicafillerClient implements ClientModInitializer {
                     LitematicaChangeListener.tick(client);
                     RealContainerCache.tick(client);
                 }
-                SchematicPlacementChangeWatcher.tick(client);
                 if (highlightEnabled) {
                     ContainerHighlighter.tick(client);
                 }
@@ -103,12 +101,10 @@ public class LitematicafillerClient implements ClientModInitializer {
                 } else {
                     workerTickTimer = 0;
                 }
-            } else {
-                SchematicPlacementChangeWatcher.reset();
             }
         });
 
-        LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN.register(context -> {
+        LevelRenderEvents.END_MAIN.register(context -> {
             if (com.mimicenzymes.litematicafiller.config.Configs.ENABLE_MOD.getBooleanValue()
                     && (Configs.HIGHLIGHT_CONTAINERS.getBooleanValue() || com.mimicenzymes.litematicafiller.render.HighlightScanner.hasMaterialFocus())) {
                 ContainerHighlighter.onRender(context);

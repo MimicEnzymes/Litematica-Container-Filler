@@ -102,8 +102,6 @@ public class HighlightRenderer {
             }
 
             if (cachedHighlightVersion != highlightVersion) {
-                LOGGER.info("[LCF diagnostics] renderer saw highlight version {} -> {} highlights={} sample={}",
-                        cachedHighlightVersion, highlightVersion, highlights.size(), samplePositions(highlights.keySet()));
                 updateDesiredChunks(highlights);
                 cachedHighlightVersion = highlightVersion;
             }
@@ -179,8 +177,6 @@ public class HighlightRenderer {
             }
 
             ChunkRenderCache oldCache = chunkCaches.put(key, cache);
-            LOGGER.info("[LCF diagnostics] renderer rebuilt chunk {} entries={} sample={}",
-                    key, highlights.size(), samplePositions(highlights.keySet()));
             if (oldCache != null) {
                 closeContext(oldCache.fillContext);
                 closeContext(oldCache.lineContext);
@@ -260,22 +256,6 @@ public class HighlightRenderer {
             renderOffset[2] = (float)(cache.cameraZ - cameraPos.z);
             drawChunkCache(cache);
         }
-    }
-
-    private String samplePositions(Collection<BlockPos> positions) {
-        if (positions == null || positions.isEmpty()) return "[]";
-
-        List<BlockPos> sample = new ArrayList<>(positions);
-        sample.sort(Comparator.comparingLong(BlockPos::asLong));
-        int limit = Math.min(sample.size(), 5);
-        StringBuilder builder = new StringBuilder("[");
-        for (int i = 0; i < limit; i++) {
-            if (i > 0) builder.append(", ");
-            builder.append(sample.get(i));
-        }
-        if (sample.size() > limit) builder.append(", ...");
-        builder.append(']');
-        return builder.toString();
     }
 
     private void drawChunkCache(ChunkRenderCache cache) {
@@ -801,8 +781,8 @@ public class HighlightRenderer {
             return HighlightBox.single(pos == null ? BlockPos.ZERO : pos);
         }
 
-        BlockState state = LitematicaContainerReader.getSchematicBlockState(pos, schematicWorld);
-        BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalvesForSchematic(pos, state, schematicWorld);
+        BlockState state = schematicWorld.getBlockState(pos);
+        BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
         if (halves == null) {
             return HighlightBox.single(pos);
         }

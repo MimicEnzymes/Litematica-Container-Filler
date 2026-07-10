@@ -564,8 +564,8 @@ public class RealContainerCache {
 
         var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld != null) {
-            BlockState state = LitematicaContainerReader.getSchematicBlockState(pos, schematicWorld);
-            BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalvesForSchematic(pos, state, schematicWorld);
+            BlockState state = schematicWorld.getBlockState(pos);
+            BlockPos[] halves = LitematicaContainerReader.getDoubleContainerHalves(schematicWorld, pos, state);
 
             if (halves != null) {
                 Map<Integer, ItemStack> combined = getCombinedLitematicaSyncedItems(halves[0], halves[1]);
@@ -636,8 +636,8 @@ public class RealContainerCache {
         BlockPos[] halves = null;
         var schematicWorld = fi.dy.masa.litematica.world.SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld != null) {
-            BlockState state = LitematicaContainerReader.getSchematicBlockState(pos, schematicWorld);
-            halves = LitematicaContainerReader.getDoubleContainerHalvesForSchematic(pos, state, schematicWorld);
+            BlockState state = schematicWorld.getBlockState(pos);
+            halves = LitematicaContainerReader.getDoubleContainerHalves(schematicWorld, pos, state);
             if (halves == null) {
                 halves = LitematicaContainerReader.getLargeBarrelConfirmationPair(schematicWorld, pos, state);
             }
@@ -680,7 +680,7 @@ public class RealContainerCache {
     }
 
     private static boolean requestOpNbtData(BlockPos pos, BlockPos[] halves, boolean isDouble, long now) {
-        if (!isOpNbtQueryAllowed()) return false;
+        if (!Configs.ENABLE_OP_NBT_QUERY.getBooleanValue()) return false;
 
         int requestCount = isDouble ? 2 : 1;
         if (PENDING_NBT_REQUESTS.size() + requestCount > MAX_PENDING_NBT_REQUESTS) return false;
@@ -707,13 +707,6 @@ public class RealContainerCache {
         PENDING_NBT_REQUEST_TIME.put(id, now);
         client.getConnection().send(new net.minecraft.network.protocol.game.ServerboundBlockEntityTagQueryPacket(id, pos));
         return true;
-    }
-
-    private static boolean isOpNbtQueryAllowed() {
-        if (Configs.ENABLE_OP_NBT_QUERY.getBooleanValue()) return true;
-
-        Minecraft client = Minecraft.getInstance();
-        return client != null && client.hasSingleplayerServer();
     }
 
     public static void handleNbtResponse(int transactionId, CompoundTag nbt) {

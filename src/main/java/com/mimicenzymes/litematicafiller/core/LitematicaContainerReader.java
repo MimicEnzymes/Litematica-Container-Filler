@@ -19,7 +19,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 
 public class LitematicaContainerReader {
     public static BlockPos[] getDoubleContainerHalves(net.minecraft.world.level.Level Level, BlockPos pos, BlockState state) {
@@ -35,22 +34,6 @@ public class LitematicaContainerReader {
         return getContainerHalves(Level, pos, state, true, knownSlotCount);
     }
 
-    public static BlockState getSchematicBlockState(BlockPos worldPos, net.minecraft.world.level.Level fallbackWorld) {
-        if (worldPos == null) return null;
-
-        return LitematicaPlacementContainerData.getBlockState(worldPos)
-                .orElseGet(() -> fallbackWorld == null || worldPos == null ? null : fallbackWorld.getBlockState(worldPos));
-    }
-
-    public static BlockPos[] getDoubleContainerHalvesForSchematic(BlockPos pos, BlockState state, net.minecraft.world.level.Level fallbackWorld) {
-        return getContainerHalves(pos, state, schematicStateGetter(fallbackWorld), false, -1);
-    }
-
-    public static BlockPos[] getRenderContainerHalvesForSchematic(BlockPos pos, BlockState state, net.minecraft.world.level.Level fallbackWorld) {
-        int knownSlotCount = RealContainerCache.getKnownSlotCount(pos);
-        return getContainerHalves(pos, state, schematicStateGetter(fallbackWorld), true, knownSlotCount);
-    }
-
     public static BlockPos[] getLargeBarrelConfirmationPair(net.minecraft.world.level.Level Level, BlockPos pos, BlockState state) {
         return null;
     }
@@ -58,17 +41,10 @@ public class LitematicaContainerReader {
     public static BlockPos[] getPotentialLargeBarrelPair(net.minecraft.world.level.Level Level, BlockPos pos, BlockState state) {
         if (Level == null || pos == null || state == null || !state.is(net.minecraft.world.level.block.Blocks.BARREL)) return null;
         Direction facing = state.getValue(net.minecraft.world.level.block.BarrelBlock.FACING);
-        return getLargeBarrelPair(pos, facing, pos.relative(facing.getOpposite()), Level::getBlockState);
+        return getLargeBarrelPair(Level, pos, facing, pos.relative(facing.getOpposite()));
     }
 
     private static BlockPos[] getContainerHalves(net.minecraft.world.level.Level Level, BlockPos pos, BlockState state, boolean renderOnly, int knownSlotCount) {
-        if (Level == null) return null;
-        return getContainerHalves(pos, state, Level::getBlockState, renderOnly, knownSlotCount);
-    }
-
-    private static BlockPos[] getContainerHalves(BlockPos pos, BlockState state, Function<BlockPos, BlockState> stateGetter, boolean renderOnly, int knownSlotCount) {
-        if (pos == null || state == null || state.isAir()) return null;
-
         if (state.getBlock() instanceof ChestBlock) {
             ChestType type = state.getValue(ChestBlock.TYPE);
             if (type != ChestType.SINGLE) {
@@ -79,24 +55,23 @@ public class LitematicaContainerReader {
                 return new BlockPos[]{rightPos, leftPos};
             }
         } else if (state.is(net.minecraft.world.level.block.Blocks.BARREL)) {
-            Direction facing = state.getValue(net.minecraft.world.level.block.BarrelBlock.FACING);
-            BlockPos[] pair = getLargeBarrelPair(pos, facing, pos.relative(facing.getOpposite()), stateGetter);
+            BlockPos[] pair = getPotentialLargeBarrelPair(Level, pos, state);
             if (pair == null) return null;
 
-            return shouldUseLargeBarrels(pos, state, pair, renderOnly, knownSlotCount) ? pair : null;
+            return shouldUseLargeBarrels(Level, pos, state, pair, renderOnly, knownSlotCount) ? pair : null;
         }
         return null;
     }
 
-    private static boolean shouldUseLargeBarrels(BlockPos pos, BlockState state, BlockPos[] pair, boolean renderOnly, int knownSlotCount) {
+    private static boolean shouldUseLargeBarrels(net.minecraft.world.level.Level Level, BlockPos pos, BlockState state, BlockPos[] pair, boolean renderOnly, int knownSlotCount) {
         CarpetLargeBarrelMode mode = Configs.getCarpetLargeBarrelMode();
         if (mode == CarpetLargeBarrelMode.OFF) return false;
         return mode == CarpetLargeBarrelMode.ON;
     }
 
-    private static BlockPos[] getLargeBarrelPair(BlockPos pos, Direction facing, BlockPos pos2, Function<BlockPos, BlockState> stateGetter) {
-        BlockState state2 = stateGetter.apply(pos2);
-        if (state2 == null || !state2.is(net.minecraft.world.level.block.Blocks.BARREL) || state2.getValue(net.minecraft.world.level.block.BarrelBlock.FACING) != facing.getOpposite()) {
+    private static BlockPos[] getLargeBarrelPair(net.minecraft.world.level.Level Level, BlockPos pos, Direction facing, BlockPos pos2) {
+        BlockState state2 = Level.getBlockState(pos2);
+        if (!state2.is(net.minecraft.world.level.block.Blocks.BARREL) || state2.getValue(net.minecraft.world.level.block.BarrelBlock.FACING) != facing.getOpposite()) {
             return null;
         }
 
@@ -126,8 +101,8 @@ public class LitematicaContainerReader {
         var schematicWorld = SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld == null) return items;
 
-        BlockState state = getSchematicBlockState(worldPos, schematicWorld);
-        BlockPos[] halves = getDoubleContainerHalvesForSchematic(worldPos, state, schematicWorld);
+        BlockState state = schematicWorld.getBlockState(worldPos);
+        BlockPos[] halves = getDoubleContainerHalves(schematicWorld, worldPos, state);
 
         String schematicKey = findSchematicKeyForPosition(worldPos);
 
@@ -165,8 +140,8 @@ public class LitematicaContainerReader {
         var schematicWorld = SchematicWorldHandler.getSchematicWorld();
         if (schematicWorld == null) return ignoredSlots;
 
-        BlockState state = getSchematicBlockState(worldPos, schematicWorld);
-        BlockPos[] halves = getDoubleContainerHalvesForSchematic(worldPos, state, schematicWorld);
+        BlockState state = schematicWorld.getBlockState(worldPos);
+        BlockPos[] halves = getDoubleContainerHalves(schematicWorld, worldPos, state);
         String schematicKey = findSchematicKeyForPosition(worldPos);
 
         if (halves != null) {
@@ -322,9 +297,5 @@ public class LitematicaContainerReader {
         }
 
         return null;
-    }
-
-    private static Function<BlockPos, BlockState> schematicStateGetter(net.minecraft.world.level.Level fallbackWorld) {
-        return pos -> getSchematicBlockState(pos, fallbackWorld);
     }
 }
