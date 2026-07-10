@@ -1,6 +1,7 @@
 package com.mimicenzymes.litematicafiller.materials;
 
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
+import com.mimicenzymes.litematicafiller.core.LitematicaPlacementContainerData;
 import com.mimicenzymes.litematicafiller.core.MaterialReplacer;
 import com.mimicenzymes.litematicafiller.core.MaterialReplacementScope;
 import com.mimicenzymes.litematicafiller.core.MaterialReplacementUi;
@@ -330,13 +331,15 @@ public class FillMaterialCalculator {
                             for (int y = minY; y <= maxY; y++) {
                                 for (int z = minZ; z <= maxZ; z++) {
                                     BlockPos worldPos = new BlockPos(x, y, z);
-                                    BlockState state = schematicWorld.getBlockState(worldPos);
+                                    BlockState state = LitematicaContainerReader.getSchematicBlockState(worldPos, schematicWorld);
 
                                     if (state != null && state.hasBlockEntity()) {
-                                        BlockEntity be = schematicWorld.getBlockEntity(worldPos);
-                                        if (be != null) {
-                                            CompoundTag nbt = LitematicaContainerReader.createRawNbt(be, client.level.registryAccess());
-                                            if (nbt != null && nbt.contains("Items")) {
+                                        CompoundTag nbt = LitematicaPlacementContainerData.getNbt(worldPos).orElse(null);
+                                        BlockEntity be = nbt == null ? schematicWorld.getBlockEntity(worldPos) : null;
+                                        if (nbt == null && be != null) {
+                                            nbt = LitematicaContainerReader.createRawNbt(be, client.level.registryAccess());
+                                        }
+                                        if (nbt != null && nbt.contains("Items")) {
                                                 ReplacementResult parsedReq = replaceInventoryMapWithOrigins(
                                                         RealContainerCache.parseNbtInventory(nbt, client.level.registryAccess()),
                                                         schematicKey);
@@ -345,7 +348,6 @@ public class FillMaterialCalculator {
                                                 if (existing == null || getItemsCount(nbt) > getItemsCount(existing.parsedRequired)) {
                                                     bestMap.put(worldPos, new NbtContext(worldPos, placement, parsedReq.items, parsedReq.origins, parsedReq.scopes));
                                                 }
-                                            }
                                         }
                                     }
                                 }
@@ -395,7 +397,7 @@ public class FillMaterialCalculator {
 
             BlockPos mainPos = pos;
             BlockState realState = client.level.getBlockState(pos);
-            BlockState schState = schematicWorld != null ? schematicWorld.getBlockState(pos) : null;
+            BlockState schState = LitematicaContainerReader.getSchematicBlockState(pos, schematicWorld);
 
             boolean useSch = !realState.hasBlockEntity() && schState != null && schState.hasBlockEntity();
             BlockState stateForHalves = useSch ? schState : realState;
@@ -403,7 +405,9 @@ public class FillMaterialCalculator {
 
             BlockPos[] halves = null;
             if (stateForHalves.hasBlockEntity()) {
-                halves = LitematicaContainerReader.getDoubleContainerHalves(worldForHalves, pos, stateForHalves);
+                halves = useSch
+                        ? LitematicaContainerReader.getDoubleContainerHalvesForSchematic(pos, stateForHalves, schematicWorld)
+                        : LitematicaContainerReader.getDoubleContainerHalves(worldForHalves, pos, stateForHalves);
                 if (halves != null) {
                     mainPos = halves[0];
                     globalVisited.add(halves[0]);

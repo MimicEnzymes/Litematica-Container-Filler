@@ -199,7 +199,7 @@
   "litematica_container_filler.config.comment.autoStashItems": "开启后，当背包已满时，模组会自动把背包内无关的杂物暂存到潜影盒里，以腾出格子",
   "litematica_container_filler.config.comment.storeOrderly": "投影填充需要背包空间时，使用速度优先的有序存放策略。\n从潜影盒取出的物品会优先放回原来源潜影盒或已有同类物品的潜影盒；如果没有这类物品，则把当前任务不需要的无关物品暂存到第一个合适的潜影盒。",
   "litematica_container_filler.config.comment.dropExtractedItems": "开启后，机器在清理容器内的错误物品或多余杂物时，会直接将其扔在地上，而不是放回背包",
-  "litematica_container_filler.config.comment.enableOpNbtQuery": "开启后，如果你拥有服务器的 OP 权限，高亮扫描和主动填充操作都可能向服务端索要未打开的容器数据。\n默认关闭，因为插件服/代理服可能会因这个调试查询包踢出客户端。",
+  "litematica_container_filler.config.comment.enableOpNbtQuery": "开启后，如果你拥有服务器的 OP 权限，高亮扫描和主动填充操作都可能向服务端索要未打开的容器数据。\n默认关闭，因为插件服/代理服可能会因这个调试查询包踢出客户端；本地单人世界会自动允许用于刷新高亮。",
   "litematica_container_filler.config.comment.realContainerCacheSize": "本地最多保留的真实容器快照数量。数值越大，大型原理图里越不容易反复同步和高亮闪烁，但会占用更多内存。",
   "litematica_container_filler.config.comment.enableSafetyDelay": "关闭此项将使机器无视安全间隔延迟填充（可能引发Bug或被服务器踢出）。\n请谨慎使用。",
   "litematica_container_filler.config.comment.enableFillStateProtection": "开启后，离开世界、切换世界或维度、切换玩家会话、死亡/重生等状态变化会自动关闭填充工作。",

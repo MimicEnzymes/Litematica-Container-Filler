@@ -190,8 +190,8 @@ public class Callbacks implements IHotkeyCallback {
 
     private BlockPos normalizeManualOverridePos(Minecraft mc, net.minecraft.world.level.Level schematicWorld, BlockPos pos, boolean schematicContainer) {
         if (schematicContainer && schematicWorld != null) {
-            var state = schematicWorld.getBlockState(pos);
-            BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
+            var state = LitematicaContainerReader.getSchematicBlockState(pos, schematicWorld);
+            BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalvesForSchematic(pos, state, schematicWorld);
             if (halves != null) return halves[0];
         }
 

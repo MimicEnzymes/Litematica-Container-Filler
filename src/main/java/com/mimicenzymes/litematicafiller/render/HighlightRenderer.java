@@ -24,7 +24,7 @@ public class HighlightRenderer {
     private static final long EMPTY_SIGNATURE = Long.MIN_VALUE;
     private static final int RENDER_CACHE_REGION_SHIFT = 6;
     private static final int MAX_CHUNK_REBUILDS_PER_FRAME = 1;
-    private static final int RENDER_CONTEXT_BUFFER_SIZE = 1536;
+    private static final int POSITION_COLOR_FORMAT_BINDING = 0;
     private static final float TOP_PLATE_MIN_INSET = 0.02f;
     private static final float TOP_PLATE_BOTTOM_OFFSET = 0.035f;
     private static final float TOP_PLATE_TOP_OFFSET = 0.095f;
@@ -102,6 +102,8 @@ public class HighlightRenderer {
             }
 
             if (cachedHighlightVersion != highlightVersion) {
+                LOGGER.info("[LCF diagnostics] renderer saw highlight version {} -> {} highlights={} sample={}",
+                        cachedHighlightVersion, highlightVersion, highlights.size(), samplePositions(highlights.keySet()));
                 updateDesiredChunks(highlights);
                 cachedHighlightVersion = highlightVersion;
             }
@@ -177,6 +179,8 @@ public class HighlightRenderer {
             }
 
             ChunkRenderCache oldCache = chunkCaches.put(key, cache);
+            LOGGER.info("[LCF diagnostics] renderer rebuilt chunk {} entries={} sample={}",
+                    key, highlights.size(), samplePositions(highlights.keySet()));
             if (oldCache != null) {
                 closeContext(oldCache.fillContext);
                 closeContext(oldCache.lineContext);
@@ -196,7 +200,7 @@ public class HighlightRenderer {
                 fillCtx = new RenderContext(
                         () -> "litematica_filler_glass",
                         xray ? MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL : MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_LEQUAL_DEPTH_OFFSET_2,
-                        RENDER_CONTEXT_BUFFER_SIZE
+                        POSITION_COLOR_FORMAT_BINDING
                 );
 
                 var fillBuffer = fillCtx.getBuilder();
@@ -258,6 +262,22 @@ public class HighlightRenderer {
         }
     }
 
+    private String samplePositions(Collection<BlockPos> positions) {
+        if (positions == null || positions.isEmpty()) return "[]";
+
+        List<BlockPos> sample = new ArrayList<>(positions);
+        sample.sort(Comparator.comparingLong(BlockPos::asLong));
+        int limit = Math.min(sample.size(), 5);
+        StringBuilder builder = new StringBuilder("[");
+        for (int i = 0; i < limit; i++) {
+            if (i > 0) builder.append(", ");
+            builder.append(sample.get(i));
+        }
+        if (sample.size() > limit) builder.append(", ...");
+        builder.append(']');
+        return builder.toString();
+    }
+
     private void drawChunkCache(ChunkRenderCache cache) {
         var modelViewStack = RenderSystem.getModelViewStack();
         modelViewStack.pushMatrix();
@@ -305,7 +325,7 @@ public class HighlightRenderer {
             ctx = new RenderContext(
                     () -> "litematica_filler_task_overlays",
                     xray ? MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL : MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_LEQUAL_DEPTH_OFFSET_2,
-                    RENDER_CONTEXT_BUFFER_SIZE
+                    POSITION_COLOR_FORMAT_BINDING
             );
 
             var buffer = ctx.getBuilder();
@@ -384,7 +404,7 @@ public class HighlightRenderer {
             ctx = new RenderContext(
                     () -> "litematica_filler_material_focus",
                     MaLiLibPipelines.POSITION_COLOR_TRANSLUCENT_NO_DEPTH_NO_CULL,
-                    RENDER_CONTEXT_BUFFER_SIZE
+                    POSITION_COLOR_FORMAT_BINDING
             );
 
             var buffer = ctx.getBuilder();
@@ -781,8 +801,8 @@ public class HighlightRenderer {
             return HighlightBox.single(pos == null ? BlockPos.ZERO : pos);
         }
 
-        BlockState state = schematicWorld.getBlockState(pos);
-        BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalves(schematicWorld, pos, state);
+        BlockState state = LitematicaContainerReader.getSchematicBlockState(pos, schematicWorld);
+        BlockPos[] halves = LitematicaContainerReader.getRenderContainerHalvesForSchematic(pos, state, schematicWorld);
         if (halves == null) {
             return HighlightBox.single(pos);
         }
