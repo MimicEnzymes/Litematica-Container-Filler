@@ -55,6 +55,7 @@ public class Configs implements IConfigHandler {
     //数据同步设置
     public static final ConfigBooleanHotkeyed ENABLE_DATA_SYNC      = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.enableDataSync", true, "", "litematica_container_filler.config.comment.enableDataSync");
     public static final ConfigBoolean ENABLE_OP_NBT_QUERY           = new ConfigBoolean("litematica_container_filler.config.name.enableOpNbtQuery", false, "litematica_container_filler.config.comment.enableOpNbtQuery");
+    public static final ConfigInteger REAL_CONTAINER_CACHE_SIZE      = new ConfigInteger("litematica_container_filler.config.name.realContainerCacheSize", 8192, 1024, 65536, "litematica_container_filler.config.comment.realContainerCacheSize");
 
     //自动物流设置
     public static final ConfigBoolean ENABLE_CREATIVE_FILL          = new ConfigBoolean("litematica_container_filler.config.name.creativeFill", true, "litematica_container_filler.config.comment.creativeFill");
@@ -113,6 +114,7 @@ public class Configs implements IConfigHandler {
     public static final ConfigBooleanHotkeyed RENDER_FILLING_ARROW  = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderFillingArrow", true, "", "litematica_container_filler.config.comment.renderFillingArrow");
     public static final ConfigBooleanHotkeyed RENDER_QUEUED_SPINNER = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderQueuedSpinner", true, "", "litematica_container_filler.config.comment.renderQueuedSpinner");
     public static final ConfigBooleanHotkeyed RENDER_MISSING_MATERIAL_MARKER = new ConfigBooleanHotkeyed("litematica_container_filler.config.name.renderMissingMaterialMarker", true, "", "litematica_container_filler.config.comment.renderMissingMaterialMarker");
+    public static final ConfigInteger HIGHLIGHT_SCAN_BUDGET         = new ConfigInteger("litematica_container_filler.config.name.highlightScanBudget", 256, 1, 2048, "litematica_container_filler.config.comment.highlightScanBudget");
     public static final ConfigInteger MAX_QUEUED_RENDER_OVERLAYS    = new ConfigInteger("litematica_container_filler.config.name.maxQueuedRenderOverlays", 20, 0, 256, "litematica_container_filler.config.comment.maxQueuedRenderOverlays");
     public static final ConfigInteger TASK_OVERLAY_LINGER_TICKS     = new ConfigInteger("litematica_container_filler.config.name.taskOverlayLingerTicks", 40, 0, 200, "litematica_container_filler.config.comment.taskOverlayLingerTicks");
     public static final ConfigDouble HIGHLIGHT_GLASS_ALPHA_MULTIPLIER = new ConfigDouble("litematica_container_filler.config.name.highlightGlassAlphaMultiplier", 0.24D, 0.0D, 1.0D, "litematica_container_filler.config.comment.highlightGlassAlphaMultiplier");
@@ -157,6 +159,7 @@ public class Configs implements IConfigHandler {
         DATA_OPTIONS = ImmutableList.of(
                 ENABLE_DATA_SYNC,
                 ENABLE_OP_NBT_QUERY,
+                REAL_CONTAINER_CACHE_SIZE,
                 RATE_LIMIT_CLICK_PACKETS,
                 CLICK_PACKET_RATE_LIMIT
         );
@@ -221,6 +224,7 @@ public class Configs implements IConfigHandler {
                 RENDER_FILLING_ARROW,
                 RENDER_QUEUED_SPINNER,
                 RENDER_MISSING_MATERIAL_MARKER,
+                HIGHLIGHT_SCAN_BUDGET,
                 MAX_QUEUED_RENDER_OVERLAYS,
                 TASK_OVERLAY_LINGER_TICKS,
                 HIGHLIGHT_GLASS_ALPHA_MULTIPLIER,
