@@ -63,7 +63,7 @@ public class AreaScanner {
         int maxTasks = passThroughScan ? 4 : (isSilentPrinter ? 15 : 40);
 
         double reach = mc.player.blockInteractionRange();
-        double reachSq = (reach + 0.5) * (reach + 0.5);
+        double reachSq = InteractionTargeting.squaredInteractionRange(reach);
         Vec3 eyePos = mc.player.getEyePosition();
         int interactionCandidateRadius = (int) Math.ceil(reach + 2.0);
         int effectiveCandidateRadius = r > 0 ? Math.min(r, interactionCandidateRadius) : interactionCandidateRadius;
@@ -175,7 +175,7 @@ public class AreaScanner {
         if (ManualContainerOverrideManager.isCompleted(taskPos)) return;
         HighlightState highlightState = HighlightScanner.getHighlights().get(taskPos);
         if (highlightState == HighlightState.SATISFIED || highlightState == HighlightState.MANUAL_COMPLETED) return;
-        if (eyePos.distanceToSqr(Vec3.atCenterOf(taskPos)) > reachSq) return;
+        if (InteractionTargeting.squaredDistanceToBlock(eyePos, taskPos) > reachSq) return;
         if (isLoadedRealContainerMissing(mc, taskPos, halves)) return;
 
         Long lastAttempt = ATTEMPT_COOLDOWNS.get(taskPos);
