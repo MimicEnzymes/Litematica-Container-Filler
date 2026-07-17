@@ -27,9 +27,10 @@
                    "litematica_container_filler.mixins.json"
                ],
     "depends":  {
-                    "fabricloader":  "\u003e=0.15.11",
+                    "fabricloader":  ">=0.18.4",
                     "minecraft":  "~1.21",
                     "java":  "\u003e=21",
+                    "fabric-api":  "*",
                     "malilib":  "*",
                     "litematica":  "*"
                 },
