@@ -1,6 +1,7 @@
 package com.mimicenzymes.litematicafiller.materials;
 
 import com.mimicenzymes.litematicafiller.core.LitematicaContainerReader;
+import com.mimicenzymes.litematicafiller.core.LitematicaPlacementContainerData;
 import com.mimicenzymes.litematicafiller.core.MaterialReplacer;
 import com.mimicenzymes.litematicafiller.core.MaterialReplacementScope;
 import com.mimicenzymes.litematicafiller.core.MaterialReplacementUi;
@@ -16,9 +17,7 @@ import fi.dy.masa.litematica.materials.IMaterialList;
 import fi.dy.masa.litematica.schematic.LitematicaSchematic;
 import fi.dy.masa.litematica.schematic.placement.SchematicPlacement;
 import fi.dy.masa.litematica.schematic.placement.SchematicPlacementManager;
-import fi.dy.masa.litematica.schematic.placement.SubRegionPlacement.RequiredEnabled;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
-import fi.dy.masa.litematica.selection.Box;
 import fi.dy.masa.litematica.util.BlockInfoListType;
 import fi.dy.masa.malilib.util.LayerRange;
 import fi.dy.masa.malilib.util.data.tag.CompoundData;
@@ -318,39 +317,23 @@ public class FillMaterialCalculator {
                 Map<BlockPos, NbtContext> bestMap = new HashMap<>();
 
                 if (schematicWorld != null) {
-                    for (Box box : placement.getSubRegionBoxes(RequiredEnabled.PLACEMENT_ENABLED).values()) {
-                        BlockPos p1 = box.getPos1();
-                        BlockPos p2 = box.getPos2();
-                        int minX = Math.min(p1.getX(), p2.getX());
-                        int maxX = Math.max(p1.getX(), p2.getX());
-                        int minY = Math.min(p1.getY(), p2.getY());
-                        int maxY = Math.max(p1.getY(), p2.getY());
-                        int minZ = Math.min(p1.getZ(), p2.getZ());
-                        int maxZ = Math.max(p1.getZ(), p2.getZ());
+                    // Visit only the placement's stored container block entities instead of every block in its boxes.
+                    for (BlockPos worldPos : LitematicaPlacementContainerData.getContainerPositions(placement)) {
+                        BlockState state = schematicWorld.getBlockState(worldPos);
+                        if (state == null || !state.hasBlockEntity()) continue;
 
-                        for (int x = minX; x <= maxX; x++) {
-                            for (int y = minY; y <= maxY; y++) {
-                                for (int z = minZ; z <= maxZ; z++) {
-                                    BlockPos worldPos = new BlockPos(x, y, z);
-                                    BlockState state = schematicWorld.getBlockState(worldPos);
+                        BlockEntity be = schematicWorld.getBlockEntity(worldPos);
+                        if (be == null) continue;
 
-                                    if (state != null && state.hasBlockEntity()) {
-                                        BlockEntity be = schematicWorld.getBlockEntity(worldPos);
-                                        if (be != null) {
-                                            NbtCompound nbt = LitematicaContainerReader.createRawNbt(be, client.world.getRegistryManager());
-                                            if (nbt != null && nbt.contains("Items")) {
-                                                ReplacementResult parsedReq = replaceInventoryMapWithOrigins(
-                                                        RealContainerCache.parseNbtInventory(nbt, client.world.getRegistryManager()),
-                                                        schematicKey);
+                        NbtCompound nbt = LitematicaContainerReader.createRawNbt(be, client.world.getRegistryManager());
+                        if (nbt != null && nbt.contains("Items")) {
+                            ReplacementResult parsedReq = replaceInventoryMapWithOrigins(
+                                    RealContainerCache.parseNbtInventory(nbt, client.world.getRegistryManager()),
+                                    schematicKey);
 
-                                                NbtContext existing = bestMap.get(worldPos);
-                                                if (existing == null || getItemsCount(nbt) > getItemsCount(existing.parsedRequired)) {
-                                                    bestMap.put(worldPos, new NbtContext(worldPos, placement, parsedReq.items, parsedReq.origins, parsedReq.scopes));
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                            NbtContext existing = bestMap.get(worldPos);
+                            if (existing == null || getItemsCount(nbt) > getItemsCount(existing.parsedRequired)) {
+                                bestMap.put(worldPos, new NbtContext(worldPos, placement, parsedReq.items, parsedReq.origins, parsedReq.scopes));
                             }
                         }
                     }
@@ -884,7 +867,7 @@ public class FillMaterialCalculator {
             ItemStack stack = stats.representative;
             if (stack.isEmpty()) stack = new ItemStack(entry.getKey().item);
 
-            MaterialListEntry matEntry = new MaterialListEntry(stack, total, missing, available, 0);
+            MaterialListEntry matEntry = new MaterialListEntry(stack, total, missing, mismatch, available);
             list.add(matEntry);
         }
 
@@ -908,12 +891,13 @@ public class FillMaterialCalculator {
             MaterialListEntry v = mergedMap.get(key);
 
             if (v != null) {
+                // Litematica's constructor order is (stack, total, missing, mismatched, available).
                 MaterialListEntry combined = new MaterialListEntry(
                         c.getStack(),
                         v.getCountTotal() + c.getCountTotal(),
                         v.getCountMissing() + c.getCountMissing(),
-                        v.getCountAvailable(),
-                        v.getCountMismatched() + c.getCountMismatched()
+                        v.getCountMismatched() + c.getCountMismatched(),
+                        v.getCountAvailable()
                 );
                 mergedMap.put(key, combined);
             } else {
