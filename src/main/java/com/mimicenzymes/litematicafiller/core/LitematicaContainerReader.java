@@ -104,7 +104,7 @@ public class LitematicaContainerReader {
         BlockState state = schematicWorld.getBlockState(worldPos);
         BlockPos[] halves = getDoubleContainerHalves(schematicWorld, worldPos, state);
 
-        String schematicKey = findSchematicKeyForPosition(worldPos);
+        String schematicKey = resolveSchematicKey(worldPos);
 
         if (halves != null) {
             Map<Integer, ItemStack> rightHalf = getSingleContainerItems(schematicWorld, halves[0], registries);
@@ -142,7 +142,7 @@ public class LitematicaContainerReader {
 
         BlockState state = schematicWorld.getBlockState(worldPos);
         BlockPos[] halves = getDoubleContainerHalves(schematicWorld, worldPos, state);
-        String schematicKey = findSchematicKeyForPosition(worldPos);
+        String schematicKey = resolveSchematicKey(worldPos);
 
         if (halves != null) {
             Map<Integer, ItemStack> combined = RealContainerCache.combineDoubleContainerItems(
@@ -264,6 +264,12 @@ public class LitematicaContainerReader {
         } finally {
             MaterialReplacer.popNbtReplacementSuppression();
         }
+    }
+
+    // The placement index lookup is O(1); scanning every placement box is only the fallback.
+    private static String resolveSchematicKey(BlockPos worldPos) {
+        String schematicKey = LitematicaPlacementContainerData.getSchematicKey(worldPos);
+        return schematicKey != null ? schematicKey : findSchematicKeyForPosition(worldPos);
     }
 
     public static String findSchematicKeyForPosition(BlockPos worldPos) {

@@ -42,7 +42,8 @@ public class MaterialReplacer {
             if (stack == null || stack.isEmpty()) return false;
 
             if (!this.exactStack.isEmpty()) {
-                return ItemStack.isSameItemSameComponents(normalizeStack(stack), this.exactStack);
+                // Ignores the count, so no normalized copy is needed for each check.
+                return ItemStack.isSameItemSameComponents(stack, this.exactStack);
             }
 
             if (stack.getItem() != this.item) return false;
@@ -85,6 +86,7 @@ public class MaterialReplacer {
     private static final Map<String, List<String>> SCHEMATIC_RULE_STRINGS = new HashMap<>();
     private static final Map<String, List<Replacement>> SCHEMATIC_REPLACEMENTS = new HashMap<>();
     private static int lastHash = -1;
+    private static Object lastRegistries = null;
     private static int globalReplacementVersion = 0;
     private static int schematicReplacementVersion = 0;
     private static final ThreadLocal<Integer> NBT_REPLACEMENT_SUPPRESSION_DEPTH = ThreadLocal.withInitial(() -> 0);
@@ -92,11 +94,16 @@ public class MaterialReplacer {
     public static void checkReload() {
         List<String> strings = Configs.MATERIAL_REPLACEMENTS.getStrings();
         int currentHash = strings.hashCode();
+        // Exact-stack rules can only be decoded with a world's registries, and their components are bound to them,
+        // so re-parse once a world is available and after switching worlds.
+        Minecraft client = Minecraft.getInstance();
+        Object registries = client != null && client.level != null ? client.level.registryAccess() : null;
 
-        if (currentHash != lastHash) {
+        if (currentHash != lastHash || registries != lastRegistries) {
             REPLACEMENTS.clear();
             REPLACEMENTS.addAll(parseReplacements(strings));
             lastHash = currentHash;
+            lastRegistries = registries;
             globalReplacementVersion++;
         }
     }

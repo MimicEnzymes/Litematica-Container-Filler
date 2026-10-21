@@ -57,7 +57,6 @@ public class LitematicafillerClient implements ClientModInitializer {
             if (client.level != null) {
                 AutoFillerStateMachine filler = AutoFillerStateMachine.getInstance();
                 ContainerToolStateMachine tool = ContainerToolStateMachine.getInstance();
-                boolean highlightEnabled = Configs.HIGHLIGHT_CONTAINERS.getBooleanValue();
                 boolean workEnabled = Configs.WORKING_STATE.getBooleanValue();
                 boolean fillerActive = filler.isWorking() || workEnabled;
                 boolean toolActive = tool.isWorking() || Configs.TOOL_ENABLED.getBooleanValue();
@@ -86,9 +85,7 @@ public class LitematicafillerClient implements ClientModInitializer {
                     LitematicaChangeListener.tick(client);
                     RealContainerCache.tick(client);
                 }
-                if (highlightEnabled) {
-                    ContainerHighlighter.tick(client);
-                }
+                ContainerHighlighter.tick(client);
 
                 boolean passThroughScan = isPlayerMovingFast(client);
                 if (workEnabled && (filler.canQueueMoreTasks() || passThroughScan)) {

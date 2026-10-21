@@ -8,9 +8,10 @@ import net.minecraft.client.Minecraft;
 public class ContainerHighlighter {
 
     public static void tick(Minecraft client) {
-        if (!Configs.ENABLE_MOD.getBooleanValue() || !Configs.HIGHLIGHT_CONTAINERS.getBooleanValue()) {
+        if (!Configs.ENABLE_MOD.getBooleanValue()) {
             return;
         }
+        // Also runs while highlighting is off so the scanner drops stale states that area filling would otherwise trust.
         HighlightScanner.tick(client);
     }
 

@@ -22,9 +22,9 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.ArrayList;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.WeakHashMap;
 
 @Mixin(value = GuiMaterialList.class, remap = false)
 public abstract class GuiMaterialListMixin extends GuiBase implements MaterialListReplacementRefresh {
@@ -33,7 +33,8 @@ public abstract class GuiMaterialListMixin extends GuiBase implements MaterialLi
 
     @Unique private static java.lang.reflect.Field mimic_materialListAllField = null;
     @Unique private static boolean mimic_reflectionInit = false;
-    @Unique private static final Map<MaterialListBase, List<MaterialListEntry>> mimic_originalVanillaLists = new IdentityHashMap<>();
+    // Weak keys let closed material lists be collected; MaterialListBase keeps identity equality.
+    @Unique private static final Map<MaterialListBase, List<MaterialListEntry>> mimic_originalVanillaLists = new WeakHashMap<>();
 
     @Unique private boolean mimic_isMonitorRunning = false;
     @Unique private boolean mimic_needsCalculation = true;

@@ -694,9 +694,14 @@ public class ContainerToolStateMachine {
                 int amount = Math.min(target.getCount() - currentCount, handler.getCarried().getCount());
                 for (int i = 0; i < amount; i++) {
                     client.gameMode.handleContainerInput(handler.containerId, uiSlot(handler, slot), 1, ContainerInput.PICKUP, client.player);
-                    currentCount++;
                 }
                 client.gameMode.handleContainerInput(handler.containerId, src, 0, ContainerInput.PICKUP, client.player);
+
+                // Count what actually landed: a slot can refuse items, and no progress would otherwise loop forever.
+                ItemStack placed = slot.getItem();
+                int newCount = ItemMatcher.isSameItem(placed, target) ? placed.getCount() : 0;
+                if (newCount <= currentCount) break;
+                currentCount = newCount;
                 changed = true;
             }
         }

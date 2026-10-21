@@ -52,7 +52,6 @@ public class HighlightScanner {
     private static final Set<BlockPos> QUEUED_DIRTY_HIGHLIGHTS = new HashSet<>();
     private static final int MAX_DIRTY_HIGHLIGHT_UPDATES_PER_TICK = 64;
     private static volatile int highlightVersion = 0;
-    private static HighlightFingerprint highlightFingerprint = HighlightFingerprint.empty();
     private static final ExecutorService INDEX_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "LitematicaFiller-HighlightScanner");
         thread.setDaemon(true);
@@ -159,7 +158,6 @@ public class HighlightScanner {
             DATA_REQUEST_QUEUE.remove(key);
             QUEUED_DATA_REQUESTS.remove(key);
             if (HIGHLIGHT_MAP.remove(key) != null) {
-                highlightFingerprint = computeHighlightFingerprint(HIGHLIGHT_MAP);
                 highlightVersion++;
             }
             triggerBoost(BOOST_DURATION_TICKS);
@@ -180,7 +178,6 @@ public class HighlightScanner {
             }
         }
         if (changed) {
-            highlightFingerprint = computeHighlightFingerprint(HIGHLIGHT_MAP);
             highlightVersion++;
         }
         triggerBoost(BOOST_DURATION_TICKS);
@@ -720,7 +717,6 @@ public class HighlightScanner {
     }
 
     private static void publishHighlightMapChange() {
-        highlightFingerprint = computeHighlightFingerprint(HIGHLIGHT_MAP);
         highlightVersion++;
     }
 
@@ -938,20 +934,11 @@ public class HighlightScanner {
         if (HIGHLIGHT_MAP.isEmpty()) return;
 
         HIGHLIGHT_MAP.clear();
-        highlightFingerprint = HighlightFingerprint.empty();
         highlightVersion++;
     }
 
     private static void invalidateActiveScanPass() {
         activeScanPass = null;
-    }
-
-    private static HighlightFingerprint computeHighlightFingerprint(Map<BlockPos, HighlightState> highlights) {
-        HighlightBuild build = new HighlightBuild();
-        for (Map.Entry<BlockPos, HighlightState> entry : highlights.entrySet()) {
-            build.put(entry.getKey(), entry.getValue());
-        }
-        return build.fingerprint();
     }
 
     private static long requestIntervalFor(HighlightState type, BlockState state) {
@@ -1194,47 +1181,6 @@ public class HighlightScanner {
         return HighlightState.SATISFIED;
     }
 
-    private static long highlightEntryHash(BlockPos pos, HighlightState state) {
-        long value = pos.asLong();
-        value ^= ((long) state.ordinal() + 0x9e3779b97f4a7c15L) * 0xbf58476d1ce4e5b9L;
-        return mix64(value);
-    }
-
-    private static final class HighlightBuild {
-        private final Map<BlockPos, HighlightState> states = new HashMap<>();
-        private int count = 0;
-        private long sum = 0L;
-        private long xor = 0L;
-
-        private void put(BlockPos pos, HighlightState state) {
-            if (pos == null || state == null) return;
-            BlockPos key = pos.immutable();
-            HighlightState previous = states.put(key, state);
-            if (previous != null) {
-                remove(key, previous);
-            }
-            add(key, state);
-        }
-
-        private void add(BlockPos pos, HighlightState state) {
-            long hash = highlightEntryHash(pos, state);
-            count++;
-            sum += hash;
-            xor ^= Long.rotateLeft(hash, (int) (hash & 63L));
-        }
-
-        private void remove(BlockPos pos, HighlightState state) {
-            long hash = highlightEntryHash(pos, state);
-            count--;
-            sum -= hash;
-            xor ^= Long.rotateLeft(hash, (int) (hash & 63L));
-        }
-
-        private HighlightFingerprint fingerprint() {
-            return new HighlightFingerprint(count, sum, xor);
-        }
-    }
-
     private static final class HighlightScanPass {
         private final BlockPos center;
         private final int radius;
@@ -1309,12 +1255,6 @@ public class HighlightScanner {
             }
 
             return null;
-        }
-    }
-
-    private record HighlightFingerprint(int count, long sum, long xor) {
-        static HighlightFingerprint empty() {
-            return new HighlightFingerprint(0, 0L, 0L);
         }
     }
 
