@@ -993,6 +993,9 @@ public class AutoFillerStateMachine {
     }
 
     private void doInspectionPhase(MinecraftClient client) {
+        // The cache skips screens while the filler works, so record the opened container here; otherwise the
+        // check below sees no data, treats the container as empty and aborts on "material shortage".
+        RealContainerCache.updateFromHandler(client, client.player.currentScreenHandler);
         actionQueue.add(() -> closeHandledScreen(client));
         actionQueue.add(() -> actionWaitTicks = getDelay(1));
         actionQueue.add(() -> {
@@ -1220,7 +1223,11 @@ public class AutoFillerStateMachine {
 
     private void doStashPhase(MinecraftClient client) {
         ScreenHandler h = client.player.currentScreenHandler;
-        int uiSlot = stashItemSlot < 9 ? stashItemSlot + 54 : stashItemSlot + 18;
+        int uiSlot = getPlayerInventoryMenuSlot(h, client, stashItemSlot);
+        if (uiSlot < 0 || uiSlot >= h.slots.size()) {
+            abortTask(client, "litematica_container_filler.message.inventory_full_cannot_extract", true, false);
+            return;
+        }
 
         ItemStack stackToStash = h.slots.get(uiSlot).getStack();
         if (!stackToStash.isEmpty()) {
@@ -1905,7 +1912,9 @@ public class AutoFillerStateMachine {
             if (!reqStack.isEmpty() && !curStack.isEmpty() && !ItemMatcher.isSameItem(reqStack, curStack)) {
                 stillNeedsAction = true;
                 int playerSlot = findItemInPlayerInv(client, reqStack);
-                if (playerSlot != -1) {
+                // Only swap when the player's stack doesn't overfill the slot; otherwise the extraction and fill passes
+                // place the exact amount instead of leaving excess behind (or, in drop mode, throwing the player's items).
+                if (playerSlot != -1 && client.player.getInventory().getStack(playerSlot).getCount() <= allowed) {
                     int uiPlayerSlot = currentMapper.getUiSlotForPlayer(playerSlot);
                     if (uiPlayerSlot < 0 || uiPlayerSlot >= handler.slots.size()) continue;
 
@@ -1915,7 +1924,9 @@ public class AutoFillerStateMachine {
                     if (dropExtracted) client.interactionManager.clickSlot(syncId, -999, 0, SlotActionType.PICKUP, client.player);
                     else client.interactionManager.clickSlot(syncId, uiPlayerSlot, 0, SlotActionType.PICKUP, client.player);
 
-                    currentTask.fillLedger.put(containerSlot, 0);
+                    // The swap places the whole player stack, which may be smaller or larger than required.
+                    int placed = countMatching(handler.slots.get(uiSlot).getStack(), reqStack);
+                    currentTask.fillLedger.put(containerSlot, Math.max(0, allowed - placed));
                     movedAny = true; swappedAnyInThisPass = true;
                     if (delay > 0) break;
                 }
@@ -1943,6 +1954,8 @@ public class AutoFillerStateMachine {
                     if (ItemMatcher.isSameItem(reqStack, curDst) && curDst.getCount() >= reqStack.getCount()) {
                         dstNeedsMore = false; break;
                     }
+                    int dstAllowed = currentTask.fillLedger.getOrDefault(dst, 0);
+                    if (dstAllowed <= 0) break;
 
                     int bestSrc = -1;
                     for (int src = 0; src < containerSize; src++) {
@@ -1968,11 +1981,19 @@ public class AutoFillerStateMachine {
                         int uiSrc = currentMapper.getUiSlotForContainer(bestSrc);
                         if (uiSrc < 0 || uiSrc >= handler.slots.size()) { dstNeedsMore = false; continue; }
 
-                        client.interactionManager.clickSlot(syncId, uiSrc, 0, SlotActionType.PICKUP, client.player);
-                        client.interactionManager.clickSlot(syncId, uiDst, 0, SlotActionType.PICKUP, client.player);
-                        client.interactionManager.clickSlot(syncId, uiSrc, 0, SlotActionType.PICKUP, client.player);
+                        int dstBefore = countMatching(curDst, reqStack);
+                        int moved = moveSurplusWithinContainer(client, handler, bestSrc, uiSrc, uiDst, reqStack, dstAllowed);
+                        if (moved == 0) { dstNeedsMore = false; continue; }
+                        if (moved < 0) {
+                            // The destination holds a wrong item, so swap it out; the extraction pass removes it from the source slot.
+                            client.interactionManager.clickSlot(syncId, uiSrc, 0, SlotActionType.PICKUP, client.player);
+                            client.interactionManager.clickSlot(syncId, uiDst, 0, SlotActionType.PICKUP, client.player);
+                            client.interactionManager.clickSlot(syncId, uiSrc, 0, SlotActionType.PICKUP, client.player);
+                        }
 
-                        currentTask.fillLedger.put(dst, 0);
+                        int added = Math.max(0, countMatching(handler.slots.get(uiDst).getStack(), reqStack) - dstBefore);
+                        currentTask.fillLedger.put(dst, Math.max(0, dstAllowed - added));
+                        regrantLedgerIfBelowRequirement(handler, bestSrc, uiSrc);
                         movedAny = true; swappedAnyInThisPass = true;
                         if (delay > 0) break;
                     } else {
@@ -2001,6 +2022,11 @@ public class AutoFillerStateMachine {
 
                 if (reqStack.isEmpty() || isWrong || isExcess) {
                     stillNeedsAction = true;
+                    if (isExcess && removeExcess(client, handler, uiSlot, curStack, reqStack.getCount(), dropExtracted)) {
+                        movedAny = true; extractedAnyInThisPass = true;
+                        if (delay > 0) break;
+                        continue;
+                    }
                     if (dropExtracted || (dropEmptySchematicExtras && reqStack.isEmpty())) client.interactionManager.clickSlot(syncId, uiSlot, 1, SlotActionType.THROW, client.player);
                     else {
                         if (!canAbsorb(client, curStack)) {
@@ -2008,6 +2034,8 @@ public class AutoFillerStateMachine {
                         }
                         client.interactionManager.clickSlot(syncId, uiSlot, 0, SlotActionType.QUICK_MOVE, client.player);
                     }
+                    // A required slot emptied here must be refillable, otherwise it is left empty but reported as filled.
+                    regrantLedgerIfBelowRequirement(handler, containerSlot, uiSlot);
                     movedAny = true; extractedAnyInThisPass = true;
                     if (delay > 0) break;
                 }
@@ -2284,7 +2312,29 @@ public class AutoFillerStateMachine {
             yieldTick = true;
         } else {
             uiWaitTimer = 0;
+            if (client.player != null) restoreShulkerPredictedOntoCursor(client);
         }
+    }
+
+    // A simulated right-click predicts the shulker was picked up onto the inventory cursor. When a server plugin
+    // (e.g. AxShulkers) opens the box instead, that prediction is never corrected, so the box vanishes from the
+    // client inventory and cannot be opened again. Put it back locally to match the server.
+    private void restoreShulkerPredictedOntoCursor(MinecraftClient client) {
+        if (activeShulkerSlot < 0 || getQuickShulkerOpenMode() != QuickShulkerOpenMode.SIMULATE_CLICK) return;
+
+        ScreenHandler inventoryHandler = client.player.playerScreenHandler;
+        ItemStack cursor = inventoryHandler.getCursorStack();
+        if (!isShulkerBox(cursor)) return;
+
+        ItemStack slotStack = client.player.getInventory().getStack(activeShulkerSlot);
+        if (slotStack.isEmpty()) {
+            client.player.getInventory().setStack(activeShulkerSlot, cursor.copy());
+        } else if (ItemStack.areItemsAndComponentsEqual(slotStack, cursor)) {
+            slotStack.increment(cursor.getCount());
+        } else {
+            return;
+        }
+        inventoryHandler.setCursorStack(ItemStack.EMPTY);
     }
 
     private void reset() {
@@ -2646,6 +2696,76 @@ public class AutoFillerStateMachine {
             client.interactionManager.clickSlot(syncId, uiPlayerSlot, 0, SlotActionType.PICKUP, client.player);
         }
         return amountToMove;
+    }
+
+    private static int countMatching(ItemStack stack, ItemStack required) {
+        return !stack.isEmpty() && ItemMatcher.isSameItem(stack, required) ? stack.getCount() : 0;
+    }
+
+    private void regrantLedgerIfBelowRequirement(ScreenHandler handler, int containerSlot, int uiSlot) {
+        ItemStack required = currentTask.requiredItems.getOrDefault(containerSlot, ItemStack.EMPTY);
+        if (required.isEmpty()) return;
+
+        int missing = required.getCount() - countMatching(handler.slots.get(uiSlot).getStack(), required);
+        if (missing > 0) {
+            currentTask.fillLedger.merge(containerSlot, missing, Math::max);
+        }
+    }
+
+    /**
+     * Moves only the source slot's surplus into the destination with exact clicks, so the source keeps what it needs.
+     * Returns the moved amount, 0 when nothing should move, or -1 when an exact move is not possible.
+     */
+    private int moveSurplusWithinContainer(MinecraftClient client, ScreenHandler handler, int srcContainerSlot, int uiSrc, int uiDst, ItemStack reqStack, int allowed) {
+        if (!handler.getCursorStack().isEmpty()) return 0;
+
+        ItemStack srcStack = handler.slots.get(uiSrc).getStack();
+        ItemStack dstStack = handler.slots.get(uiDst).getStack();
+        if (!dstStack.isEmpty() && !ItemMatcher.isSameItem(dstStack, reqStack)) return -1;
+
+        ItemStack srcRequired = currentTask.requiredItems.getOrDefault(srcContainerSlot, ItemStack.EMPTY);
+        int srcCount = srcStack.getCount();
+        int surplus = ItemMatcher.isSameItem(srcStack, srcRequired) ? srcCount - srcRequired.getCount() : srcCount;
+        int dstCount = dstStack.isEmpty() ? 0 : dstStack.getCount();
+        int amount = Math.min(Math.min(surplus, reqStack.getCount() - dstCount), allowed);
+        if (amount <= 0) return 0;
+
+        int maxCount = Math.min(srcStack.getMaxCount(), handler.slots.get(uiDst).getMaxItemCount(srcStack));
+        List<ExactMoveClick> plan = findExactMovePlan(srcCount, dstCount, amount, maxCount);
+        if (plan == null || plan.isEmpty()) return -1;
+
+        executeExactMovePlan(client, handler, uiSrc, uiDst, plan);
+        return amount;
+    }
+
+    /**
+     * Trims a slot that holds the required item down to the required count instead of emptying it.
+     */
+    private boolean removeExcess(MinecraftClient client, ScreenHandler handler, int uiSlot, ItemStack curStack, int keepCount, boolean drop) {
+        int excess = curStack.getCount() - keepCount;
+        if (excess <= 0 || keepCount <= 0 || !handler.getCursorStack().isEmpty()) return false;
+
+        int syncId = handler.syncId;
+        if (drop) {
+            if (excess <= keepCount + 2) {
+                for (int i = 0; i < excess; i++) {
+                    client.interactionManager.clickSlot(syncId, uiSlot, 0, SlotActionType.THROW, client.player);
+                }
+            } else {
+                client.interactionManager.clickSlot(syncId, uiSlot, 0, SlotActionType.PICKUP, client.player);
+                for (int i = 0; i < keepCount; i++) {
+                    client.interactionManager.clickSlot(syncId, uiSlot, 1, SlotActionType.PICKUP, client.player);
+                }
+                client.interactionManager.clickSlot(syncId, -999, 0, SlotActionType.PICKUP, client.player);
+            }
+            return true;
+        }
+
+        ExactMoveTarget target = findExactMoveTarget(client, handler, curStack, curStack.getCount(), excess, new HashSet<>());
+        if (target == null) return false;
+
+        executeExactMovePlan(client, handler, uiSlot, target.uiSlot(), target.plan());
+        return true;
     }
 
     public BlockPos getCurrentTaskPos() { return currentTask != null ? currentTask.targetPos : null; }

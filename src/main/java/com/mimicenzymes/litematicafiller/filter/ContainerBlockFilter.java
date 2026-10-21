@@ -112,14 +112,23 @@ public class ContainerBlockFilter {
         return false;
     }
 
+    // Glob match where each '*' matches any run of characters, including several wildcards in one pattern.
     private static boolean matches(String value, String pattern) {
         if ("*".equals(pattern)) return true;
-        int wildcard = pattern.indexOf('*');
-        if (wildcard < 0) return value.equals(pattern);
+        if (pattern.indexOf('*') < 0) return value.equals(pattern);
 
-        String prefix = pattern.substring(0, wildcard);
-        String suffix = pattern.substring(wildcard + 1);
-        return value.startsWith(prefix) && value.endsWith(suffix);
+        String[] parts = pattern.split("\\*", -1);
+        if (!value.startsWith(parts[0])) return false;
+
+        int position = parts[0].length();
+        for (int i = 1; i < parts.length - 1; i++) {
+            int found = value.indexOf(parts[i], position);
+            if (found < 0) return false;
+            position = found + parts[i].length();
+        }
+
+        String suffix = parts[parts.length - 1];
+        return value.length() - suffix.length() >= position && value.endsWith(suffix);
     }
 
     private static boolean looksLikeContainerId(String blockId) {
