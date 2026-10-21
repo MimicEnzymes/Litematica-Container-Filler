@@ -21,6 +21,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiConsumer;
 
 public class LitematicaPlacementContainerData {
     private static volatile Snapshot snapshot = Snapshot.empty();
@@ -57,6 +58,21 @@ public class LitematicaPlacementContainerData {
         return snapshot.schematicKeyByWorldPos().get(worldPos);
     }
 
+    /**
+     * World positions of the container block entities stored in one placement, read from the schematic's
+     * block entity map instead of scanning the placement's whole volume.
+     */
+    public static Set<BlockPos> getContainerPositions(SchematicPlacement placement) {
+        Set<BlockPos> positions = new HashSet<>();
+        if (placement == null) return positions;
+
+        try {
+            forEachContainer(placement, MinecraftClient.getInstance(), (worldPos, nbt) -> positions.add(worldPos));
+        } catch (Exception ignored) {
+        }
+        return positions;
+    }
+
     private static Snapshot buildSnapshot() {
         Map<BlockPos, NbtCompound> nbtByWorldPos = new HashMap<>();
         Map<BlockPos, String> schematicKeyByWorldPos = new HashMap<>();
@@ -67,37 +83,12 @@ public class LitematicaPlacementContainerData {
             for (SchematicPlacement placement : DataManager.getSchematicPlacementManager().getAllSchematicsPlacements()) {
                 if (placement == null || !placement.isEnabled()) continue;
 
-                LitematicaSchematic schematic = placement.getSchematic();
-                if (schematic == null) continue;
-
-                for (String regionName : placement.getSubRegionBoxes(RequiredEnabled.PLACEMENT_ENABLED).keySet()) {
-                    SubRegionPlacement regionPlacement = placement.getRelativeSubRegionPlacement(regionName);
-                    LitematicaBlockStateContainer container = schematic.getSubRegionContainer(regionName);
-                    Map<BlockPos, NbtCompound> regionBlockEntities = schematic.getBlockEntityMapForRegion(regionName);
-                    if (regionPlacement == null || container == null || regionBlockEntities == null || regionBlockEntities.isEmpty()) {
-                        continue;
-                    }
-
-                    for (Map.Entry<BlockPos, NbtCompound> entry : regionBlockEntities.entrySet()) {
-                        BlockPos localPos = entry.getKey();
-                        NbtCompound nbt = entry.getValue();
-                        if (localPos == null || nbt == null) continue;
-
-                        BlockPos worldPos = toWorldPos(localPos, schematic, regionName, placement, regionPlacement);
-                        if (worldPos == null) continue;
-
-                        if (!mapsBackToLocalPos(worldPos, localPos, schematic, regionName, placement, regionPlacement, container)) {
-                            continue;
-                        }
-
-                        if (!isContainerBlockEntity(container, localPos, client, nbt)) continue;
-
-                        BlockPos immutableWorldPos = worldPos.toImmutable();
-                        positions.add(immutableWorldPos);
-                        nbtByWorldPos.put(immutableWorldPos, nbt.copy());
-                        schematicKeyByWorldPos.put(immutableWorldPos, SchematicMaterialReplacementContext.keyForPlacement(placement));
-                    }
-                }
+                String schematicKey = SchematicMaterialReplacementContext.keyForPlacement(placement);
+                forEachContainer(placement, client, (worldPos, nbt) -> {
+                    positions.add(worldPos);
+                    nbtByWorldPos.put(worldPos, nbt.copy());
+                    schematicKeyByWorldPos.put(worldPos, schematicKey);
+                });
             }
         } catch (Exception ignored) {
         }
@@ -108,6 +99,37 @@ public class LitematicaPlacementContainerData {
                 Collections.unmodifiableMap(schematicKeyByWorldPos),
                 true
         );
+    }
+
+    private static void forEachContainer(SchematicPlacement placement, MinecraftClient client, BiConsumer<BlockPos, NbtCompound> consumer) {
+        LitematicaSchematic schematic = placement.getSchematic();
+        if (schematic == null) return;
+
+        for (String regionName : placement.getSubRegionBoxes(RequiredEnabled.PLACEMENT_ENABLED).keySet()) {
+            SubRegionPlacement regionPlacement = placement.getRelativeSubRegionPlacement(regionName);
+            LitematicaBlockStateContainer container = schematic.getSubRegionContainer(regionName);
+            Map<BlockPos, NbtCompound> regionBlockEntities = schematic.getBlockEntityMapForRegion(regionName);
+            if (regionPlacement == null || container == null || regionBlockEntities == null || regionBlockEntities.isEmpty()) {
+                continue;
+            }
+
+            for (Map.Entry<BlockPos, NbtCompound> entry : regionBlockEntities.entrySet()) {
+                BlockPos localPos = entry.getKey();
+                NbtCompound nbt = entry.getValue();
+                if (localPos == null || nbt == null) continue;
+
+                BlockPos worldPos = toWorldPos(localPos, schematic, regionName, placement, regionPlacement);
+                if (worldPos == null) continue;
+
+                if (!mapsBackToLocalPos(worldPos, localPos, schematic, regionName, placement, regionPlacement, container)) {
+                    continue;
+                }
+
+                if (!isContainerBlockEntity(container, localPos, client, nbt)) continue;
+
+                consumer.accept(worldPos.toImmutable(), nbt);
+            }
+        }
     }
 
     private static void ensureInitialized() {
