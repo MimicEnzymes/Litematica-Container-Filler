@@ -706,9 +706,14 @@ public class ContainerToolStateMachine {
                 int amount = Math.min(target.getCount() - currentCount, handler.getCursorStack().getCount());
                 for (int i = 0; i < amount; i++) {
                     client.interactionManager.clickSlot(handler.syncId, slot.id, 1, SlotActionType.PICKUP, client.player);
-                    currentCount++;
                 }
                 client.interactionManager.clickSlot(handler.syncId, src, 0, SlotActionType.PICKUP, client.player);
+
+                // Count what actually landed: a slot can refuse items, and no progress would otherwise loop forever.
+                ItemStack placed = slot.getStack();
+                int newCount = ItemMatcher.isSameItem(placed, target) ? placed.getCount() : 0;
+                if (newCount <= currentCount) break;
+                currentCount = newCount;
                 changed = true;
             }
         }
